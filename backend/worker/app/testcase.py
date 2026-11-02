@@ -31,7 +31,7 @@ from shared.casegen import (
     clip_source,
     dedupe_cases,
     generation_token_budget,
-    parse_cases,
+    parse_cases_with_stats,
     rebalance_with_stats,
     selfcheck,
     validate_strategy_weights,
@@ -59,6 +59,8 @@ logger = logging.getLogger("worker.testcase")
 # ─── 超时与确认窗口口径（PRD 5.4.1） ───
 LLM_TIMEOUT_S = 280.0  # 单次 LLM 调用超时；总预算 5 分钟留 20s 落库余量
 CONFIRM_WINDOW_H = 72  # 确认窗口：72h 未确认由扫描器取消
+# 输出被 max_tokens 截断时的重试上限，与 api 侧 llm_client 同口径。
+TRUNCATION_RETRY_CEILING = 32768
 
 
 def _fail(db: Session, task: Task, code: str, message: str) -> None:
@@ -227,8 +229,9 @@ def run_testcase(task_id: str) -> None:
             return
 
         system, user = build_prompts(source_text, max_count, weights=weights)
-        try:
-            result = call_protocol(
+
+        def invoke(budget: int):
+            return call_protocol(
                 protocol=profile.protocol,
                 base_url=base_url,
                 full_url=read_profile_env(profile.id).full_url,
@@ -237,12 +240,32 @@ def run_testcase(task_id: str) -> None:
                 messages=[{"role": "user", "content": user}],
                 system=system,
                 temperature=0.3,
-                max_tokens=generation_token_budget(max_count),
+                max_tokens=budget,
                 anthropic_version=profile.anthropic_version,
                 timeout_s=LLM_TIMEOUT_S,
             )
+
+        budget = generation_token_budget(max_count)
+        try:
+            result = invoke(budget)
+            # 被 max_tokens 截断只会产出半截 JSON。与 api 侧同口径：先抬预算重试
+            # 一次，仍截断才报可操作的预算错误，而不是笼统的「无法解析」。
+            if getattr(result, "finish_reason", None) == "length" and budget < TRUNCATION_RETRY_CEILING:
+                budget = min(TRUNCATION_RETRY_CEILING, budget * 2)
+                db.add(TaskEvent(
+                    task_id=task.id, event="progress",
+                    message=f"模型输出被长度上限截断，已提升输出预算至 {budget} 后重试",
+                ))
+                db.commit()
+                result = invoke(budget)
         except ProtocolCallError as exc:
             _fail(db, task, exc.code, f"用例生成失败：{exc.message}")
+            return
+        if getattr(result, "finish_reason", None) == "length":
+            _fail(
+                db, task, "BUDGET_EXCEEDED",
+                f"模型输出被长度上限截断（max_tokens={budget}），请减少生成条数或拆分需求后重试",
+            )
             return
         if not (result.text or "").strip():
             _fail(db, task, "UPSTREAM", "模型返回空内容，用例生成失败")
@@ -250,7 +273,7 @@ def run_testcase(task_id: str) -> None:
 
         # ─── 解析与规模闸门 ───
         try:
-            cases = parse_cases(result.text)
+            cases, parse_stats = parse_cases_with_stats(result.text)
         except (ValueError, json.JSONDecodeError) as exc:
             _fail(db, task, "UPSTREAM", f"模型输出无法解析为用例：{exc}")
             return
@@ -267,11 +290,14 @@ def run_testcase(task_id: str) -> None:
         if not cases:
             _fail(db, task, "UPSTREAM", "模型输出经配比校正后无有效用例")
             return
-        if dropped_duplicate or dropped["dropped_unknown_strategy"] or dropped["dropped_over_quota"]:
+        if (dropped_duplicate or dropped["dropped_unknown_strategy"]
+                or dropped["dropped_over_quota"] or parse_stats["dropped_missing_name"]):
             # 去重与裁剪都是静默行为，必须让用户知道实际保留数与丢弃原因。
             parts = []
             if dropped_duplicate:
-                parts.append(f"同名用例去重 {dropped_duplicate} 条")
+                parts.append(f"同名/同内容用例去重 {dropped_duplicate} 条")
+            if parse_stats["dropped_missing_name"]:
+                parts.append(f"缺少用例名称丢弃 {parse_stats['dropped_missing_name']} 条")
             if dropped["dropped_unknown_strategy"]:
                 parts.append(f"策略不匹配丢弃 {dropped['dropped_unknown_strategy']} 条")
             if dropped["dropped_over_quota"]:

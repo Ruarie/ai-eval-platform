@@ -306,6 +306,7 @@ test('取消或失败的覆盖上传仍保留 A 草稿', async ({ page }) => {
   await editQuestion(page, 'A 未保存草稿')
   await openCurrentDatasetUpload(page)
   await page.getByRole('button', { name: '取消' }).click()
+  await expect(page.getByText('当前数据集有未保存的修改')).toBeHidden()
   await expect(page.locator('.data-row')).toContainText('A 未保存草稿')
   await openCurrentDatasetUpload(page)
   await page.getByRole('button', { name: '继续覆盖上传' }).click()

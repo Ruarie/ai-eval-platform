@@ -49,3 +49,6 @@ data/
 
 # 设计 QA 截图（本地留存，不入库）
 artifacts/
+
+# Agent 全量测试产物（本地留存，不入库）
+tools/agent-eval/reports/

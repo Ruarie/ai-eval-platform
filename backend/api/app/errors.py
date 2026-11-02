@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 class ErrorCode(StrEnum):
@@ -74,6 +75,17 @@ def register_error_handlers(app: FastAPI) -> None:
         if exc.fields:
             body["fields"] = exc.fields
         return JSONResponse(status_code=exc.status_code, content=body)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_error_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        """把框架层 404/405 归一为 ``{code,message}``，避免前端拿到 detail 分支。
+
+        业务错误由 AppError 承载，这里只处理「路由不存在/方法不允许」这类
+        Starlette 自行抛出的响应，保持错误体与其余接口同形。
+        """
+        code = ErrorCode.NOT_FOUND if exc.status_code == 404 else ErrorCode.VALIDATION
+        message = "接口不存在" if exc.status_code == 404 else str(exc.detail or "请求不被支持")
+        return JSONResponse(status_code=exc.status_code, content={"code": code.value, "message": message})
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error_handler(

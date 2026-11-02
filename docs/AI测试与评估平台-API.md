@@ -1211,23 +1211,29 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 - 来源正文超过 20000 字符时**只使用前 20000 字符**，并返回 `source_truncated=true`；调用方必须提示用户拆分需求，不得当作完整覆盖。
 - 模型输出的 `strategy` / `priority` 别名（如 `positive`、`P0`）由服务端归一为六策略中文名与 `HX/FHX/BJ/YC/ZD/BL`；仍无法识别的策略按「不符合所选配比」裁剪，并计入 `dropped.dropped_unknown_strategy`。
 - 模型调用超时与 Worker 用例生成预算对齐为 280 秒（此前为 120 秒，80 条长输出更容易超时）。
+- 输出预算随条数增长：`min(16384, max(8192, 2048 + 420 × max_count))`。推理模型会把 `max_tokens` 用在思维链上，旧口径 40 条给 8192 会稳定截断成半截 JSON。
+- 上游终止原因 `length`（OpenAI）/ `max_tokens`（Anthropic）被识别为**截断**：先抬预算重试一次，仍截断返回 `BUDGET_EXCEEDED`（409），提示「减少条数或拆分需求」，不再伪装成「模型输出无法解析」。
 
 ```json
 {
   "items": [
-    { "strategy": "正向", "priority": "HX", "module": "收银台", "name": "余额支付成功", "expected": "订单核销成功", "precondition": "账户余额充足", "test_type": "核心业务" }
+    { "strategy": "正向", "priority": "HX", "module": "收银台", "name": "余额支付成功", "expected": "订单核销成功", "precondition": "账户余额充足", "test_type": "核心业务", "pending_complete": false }
   ],
   "checks": [
     { "level": "error", "code": "missing_constraint_negative", "message": "自检未通过：缺少反向（约束/异常）策略用例" }
   ],
   "source_truncated": false,
-  "dropped": { "dropped_unknown_strategy": 0, "dropped_over_quota": 3, "dropped_duplicate": 2 }
+  "dropped": {
+    "dropped_unknown_strategy": 0, "dropped_over_quota": 3, "dropped_duplicate": 2,
+    "dropped_missing_name": 0, "dropped_non_object": 0
+  }
 }
 ```
 
 - `checks`：按**本次请求的策略配比**计算的自检结果，只检查权重 > 0 的策略（只选正向时不会报「缺少反向」）。
 - `source_truncated`：来源是否被截断到 20000 字符。
-- `dropped`：整理统计，用于向用户解释「模型给了 N 条、实际保留 M 条」。`dropped_duplicate` 为同名同策略去重条数，去重在配额裁剪之前执行。
+- `pending_complete`：候选缺 `expected` 或 `steps` 时为 `true`，供审核页与脚本一致识别待补全项。
+- `dropped`：整理统计，用于向用户解释「模型给了 N 条、实际保留 M 条」。`dropped_duplicate` 为同名同策略或「步骤+预期完全一致」的近似重复条数（去重在配额裁剪之前执行）；`dropped_missing_name` / `dropped_non_object` 为缺用例名称、非对象条目被丢弃的条数。
 
 前端审核候选后，可调用下述单次事务接口保存到新草稿；也可将候选追加到当前可编辑草稿并按原有修订号保存。保存失败保留待审核候选，不得显示“创建成功”。
 

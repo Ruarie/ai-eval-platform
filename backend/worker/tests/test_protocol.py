@@ -105,3 +105,18 @@ def test_worker_protocol_disables_thinking_on_aliyun_maas(monkeypatch):
         messages=[{"role": "user", "content": "ping"}],
     )
     assert seen["body"]["thinking"] == {"type": "disabled"}
+
+
+def test_call_protocol_normalizes_finish_reason(monkeypatch):
+    """截断要能从结果上判断，否则只能报「输出无法解析」。"""
+    payloads = {
+        "openai_chat": {"choices": [{"message": {"content": "半截"}, "finish_reason": "length"}]},
+        "anthropic_messages": {"content": [{"type": "text", "text": "半截"}], "stop_reason": "max_tokens"},
+    }
+    for protocol_name, payload in payloads.items():
+        monkeypatch.setattr(protocol, "_post_json", lambda *a, _payload=payload, **k: _payload)
+        result = protocol.call_protocol(
+            protocol=protocol_name, base_url="https://unit.invalid", model="m",
+            api_key="k", messages=[{"role": "user", "content": "q"}],
+        )
+        assert result.finish_reason == "length"

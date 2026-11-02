@@ -50,6 +50,30 @@ class AdapterResult:
     usage: dict
     raw: dict
     latency_ms: int
+    # 归一后的终止原因：stop / length / tool_calls / None。生成类任务据此区分
+    # 「模型乱写」与「输出被 max_tokens 截断」——后者必须报可重试的预算错误。
+    finish_reason: str | None = None
+
+
+def _finish_reason(protocol: str, data: dict) -> str | None:
+    """归一终止原因（与 api 侧 adapters._finish_reason 同一口径）。"""
+    try:
+        if protocol == "openai_responses":
+            if data.get("status") == "incomplete":
+                reason = (data.get("incomplete_details") or {}).get("reason")
+                return "length" if reason == "max_output_tokens" else str(reason or "incomplete")
+            return "stop"
+        if protocol == "openai_chat":
+            choices = data.get("choices") or []
+            first = choices[0] if choices and isinstance(choices[0], dict) else {}
+            raw = first.get("finish_reason")
+            return None if raw is None else str(raw)
+        raw = data.get("stop_reason")
+        if raw is None:
+            return None
+        return {"end_turn": "stop", "max_tokens": "length", "tool_use": "tool_calls"}.get(str(raw), str(raw))
+    except (AttributeError, TypeError, IndexError):
+        return None
 
 
 def _post_json(url: str, body: dict, headers: dict, timeout_s: float) -> dict:
@@ -173,4 +197,5 @@ def call_protocol(
         usage=usage,
         raw=data,
         latency_ms=latency_ms,
+        finish_reason=_finish_reason(protocol, data),
     )

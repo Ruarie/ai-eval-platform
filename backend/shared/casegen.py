@@ -16,9 +16,21 @@ MAX_COUNT = 80  # 硬上限：复杂 PRD；超出即 failed 提示拆分，禁�
 SOURCE_MAX_CHARS = 20_000  # 来源文档注入 prompt 的最大字符数（与 api 侧一致）
 
 
+# 单条用例的实测输出成本（十六字段中文 JSON 约 300–450 token），外加固定的
+# prompt 余量。旧口径只有 8192/16384 两档，40 条时正文必然被 max_tokens 截断，
+# 表现为「模型输出无法解析为用例」的 502。
+TOKENS_PER_CASE = 420
+OUTPUT_TOKEN_FLOOR = 8192
+OUTPUT_TOKEN_CEILING = 16384
+
+
 def generation_token_budget(target_count: int) -> int:
-    """用例条数超过中等规模时增加输出预算，供 API 与 Worker 共用。"""
-    return 8192 if target_count <= TARGET_COUNT else 16384
+    """按条数估算输出预算，供 API 与 Worker 共用。
+
+    预算随条数线性增长并封顶：低于 8192 会让小批量请求也容易被推理模型的
+    thinking 挤占正文；高于 16384 会撞上多数供应商的单次输出上限。
+    """
+    return min(OUTPUT_TOKEN_CEILING, max(OUTPUT_TOKEN_FLOOR, 2048 + target_count * TOKENS_PER_CASE))
 
 # 六大策略默认配比（正向40/反向25/边界15/等价类10/状态迁移5/场景5，与 api 侧一致）
 STRATEGY_WEIGHTS = {
@@ -179,33 +191,82 @@ def extract_json_array(text: str) -> list:
     return data
 
 
-def parse_cases(text: str) -> list[dict]:
-    """从容错模型输出提取用例 JSON 数组（允许代码围栏与首尾解释文字）。"""
+def parse_cases_with_stats(text: str) -> tuple[list[dict], dict[str, int]]:
+    """解析用例并返回被丢弃条目的原因统计，供调用方向用户解释。
+
+    模型常输出「有内容但缺 name」的条目。旧实现直接过滤掉，用户看到
+    「模型给了 5 条、页面只有 2 条」却没有任何提示，因此这里必须留痕。
+    """
     data = extract_json_array(text)
-    items = [
-        normalize_case({key: value for key, value in item.items() if key not in MODEL_RESERVED_KEYS})
-        for item in data if isinstance(item, dict) and item.get("name")
-    ]
+    items: list[dict] = []
+    stats = {"dropped_missing_name": 0, "dropped_non_object": 0}
+    for item in data:
+        if not isinstance(item, dict):
+            stats["dropped_non_object"] += 1
+            continue
+        if not str(item.get("name") or "").strip():
+            stats["dropped_missing_name"] += 1
+            continue
+        items.append(
+            normalize_case({key: value for key, value in item.items() if key not in MODEL_RESERVED_KEYS})
+        )
     if not items:
         raise ValueError("模型输出中没有含用例名称的有效条目")
-    return items
+    return items, stats
+
+
+def parse_cases(text: str) -> list[dict]:
+    """从容错模型输出提取用例 JSON 数组（允许代码围栏与首尾解释文字）。"""
+    return parse_cases_with_stats(text)[0]
+
+
+PENDING_FIELDS = ("expected", "steps")
+
+
+def mark_pending_complete(case: dict) -> dict:
+    """给缺关键字段的候选打上 ``pending_complete``，供审核页与脚本一致识别。
+
+    前端此前靠自己重算「待补全」数量，其它消费方（导出、脚本、导入）拿不到
+    任何信号，因此接口层必须显式回传。
+    """
+    missing = [field for field in PENDING_FIELDS if not str(case.get(field) or "").strip()]
+    return {**case, "pending_complete": bool(missing)}
+
+
+def _content_signature(item: dict) -> tuple[str, str, str, str] | None:
+    """构造「同一条用例换了名字」的指纹；字段过短时返回 None 避免误合并。"""
+    steps = "".join(str(item.get("steps") or "").split()).lower()
+    expected = "".join(str(item.get("expected") or "").split()).lower()
+    if len(steps) < 8 or len(expected) < 4:
+        return None
+    module = str(item.get("module") or "").strip().lower()
+    feature = str(item.get("feature_point") or "").strip().lower()
+    return (module, feature, steps, expected)
 
 
 def dedupe_cases(items: list[dict]) -> tuple[list[dict], int]:
-    """按「策略 + 去空白小写名称」去重，返回 ``(保留项, 丢弃条数)``。
+    """按「策略 + 名称」与「操作步骤 + 预期结果」两条线去重，返回 ``(保留项, 丢弃条数)``。
 
-    模型容易为凑数量重复输出同名用例；配额裁剪按条数算，重复项会挤掉真正
-    不同的用例，所以先去重再裁剪。缺名称的条目不参与去重（由上层判缺项）。
+    模型凑数时有两种重复：同名改写、以及换名字但步骤/预期一字不差的近似重复。
+    只按名称去重会漏掉后者（实测 5 条近似用例全部入库）；因此再补一条内容指纹，
+    指纹要求步骤 ≥ 8 字且预期 ≥ 4 字，避免把「留空待澄清」的用例误合并。
+    缺名称的条目不参与去重（由上层判缺项）。
     """
-    seen: set[tuple[str, str]] = set()
+    seen_name: set[tuple[str, str]] = set()
+    seen_content: set[tuple[str, str, str, str]] = set()
     result: list[dict] = []
     for item in items:
+        strategy = str(item.get("strategy") or "")
         name = "".join(str(item.get("name") or "").split()).lower()
-        key = (str(item.get("strategy") or ""), name)
-        if name and key in seen:
+        signature = _content_signature(item)
+        if name and (strategy, name) in seen_name:
+            continue
+        if signature is not None and signature in seen_content:
             continue
         if name:
-            seen.add(key)
+            seen_name.add((strategy, name))
+        if signature is not None:
+            seen_content.add(signature)
         result.append(item)
     return result, len(items) - len(result)
 
