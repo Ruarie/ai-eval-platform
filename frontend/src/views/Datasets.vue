@@ -726,6 +726,18 @@
       @success="handleUploadSuccess"
     />
 
+    <!-- 同一实例反复开关。useDialog 离场回调在列表已空时会 splice(-1)，拆掉紧接着打开的下一次确认。 -->
+    <n-modal
+      v-model:show="showOverwriteDraftConfirm"
+      preset="dialog"
+      type="warning"
+      title="当前数据集有未保存的修改"
+      content="覆盖上传成功后，当前草稿将被舍弃并显示新版本；取消或上传失败时草稿仍会保留。"
+      positive-text="继续覆盖上传"
+      negative-text="取消"
+      @positive-click="confirmOverwriteUpload"
+    />
+
     <n-dropdown
       trigger="manual"
       placement="bottom-start"
@@ -880,6 +892,9 @@ const editingCell = ref<{ row: EditableDatasetRow; field: string; original: stri
 const focusedCell = ref<{ rowIdx: number; field: string } | null>(null)
 const showUploadModal = ref(false)
 const datasetForUpload = ref<Dataset | null>(null)
+/** 覆盖上传前的草稿确认。取消后立刻再打开时复用这一层，不走 useDialog 队列。 */
+const showOverwriteDraftConfirm = ref(false)
+const overwriteDraftTarget = ref<Dataset | null>(null)
 const filterPendingMode = ref<'all' | 'clean' | 'pending'>('all')
 const tableContainerRef = ref<HTMLElement | null>(null)
 
@@ -1459,21 +1474,19 @@ function openUploadModal(dataset: Dataset | null) {
     message.warning('当前修改正在保存，请稍后再覆盖上传')
     return
   }
-  const open = () => {
-    datasetForUpload.value = dataset
-    showUploadModal.value = true
-  }
   if (overwritesActive && hasUnsavedChanges.value) {
-    dialog.warning({
-      title: '当前数据集有未保存的修改',
-      content: '覆盖上传成功后，当前草稿将被舍弃并显示新版本；取消或上传失败时草稿仍会保留。',
-      positiveText: '继续覆盖上传',
-      negativeText: '取消',
-      onPositiveClick: open,
-    })
+    overwriteDraftTarget.value = dataset
+    showOverwriteDraftConfirm.value = true
     return
   }
-  open()
+  datasetForUpload.value = dataset
+  showUploadModal.value = true
+}
+
+/** 确认放弃当前草稿后再打开覆盖上传。取消只关确认框，不改草稿。 */
+function confirmOverwriteUpload() {
+  datasetForUpload.value = overwriteDraftTarget.value
+  showUploadModal.value = true
 }
 
 async function handleUploadSuccess() {
