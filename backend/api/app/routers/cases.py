@@ -27,8 +27,6 @@ from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from fastapi import Request as FastApiRequest
 from openpyxl import Workbook
 from pydantic import ValidationError
-from sqlalchemy.orm import Session
-
 from shared.case_compare import compare_case_runs
 from shared.casegen import (
     STRATEGY_WEIGHTS,
@@ -43,6 +41,7 @@ from shared.casegen import (
     rebalance_with_stats,
     selfcheck,
 )
+from sqlalchemy.orm import Session
 
 from ..case_excel import (
     EXPORT_FIXED_COLUMNS,

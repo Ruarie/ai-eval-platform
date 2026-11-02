@@ -16,8 +16,6 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi import Request as FastApiRequest
-from sqlalchemy.orm import Session
-
 from shared.kb import (
     chunk_text,
     compute_metrics,
@@ -26,6 +24,7 @@ from shared.kb import (
     index_document,
     retrieve,
 )
+from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import get_db

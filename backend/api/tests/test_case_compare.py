@@ -2,9 +2,9 @@
 
 import pytest
 from pydantic import ValidationError
+from shared.case_compare import compare_case_runs, score_cases
 
 from app.schemas import CaseAiCompareIn
-from shared.case_compare import compare_case_runs, score_cases
 
 
 def _case(**overrides):
