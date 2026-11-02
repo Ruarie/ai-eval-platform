@@ -37,6 +37,7 @@ from .routers import (
     tasks,
     user_workspaces,
     users,
+    workspace_guards,
     ws,
     ws_v2,
 )
@@ -232,6 +233,8 @@ app.include_router(cases.router)
 app.include_router(collaborations.router)
 app.include_router(cases.folders_router)
 app.include_router(admin.router)
+# P0-1：结果未知的工作区执行隔离需要可审计的人工解除入口（API.md §3.13）。
+app.include_router(workspace_guards.router)
 app.include_router(user_workspaces.router)
 app.include_router(dispatch.router)
 app.include_router(kb.router)

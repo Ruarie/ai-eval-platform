@@ -3077,8 +3077,9 @@ onUnmounted(() => {
 }
 
 :deep(.highlight-match) {
-  background: #FEF08A;
-  color: #854D0E;
+  /* 半透明高亮在深浅两套主题下都成立，避免深色页出现荧光黄块 */
+  background: rgba(250, 204, 21, 0.45);
+  color: var(--text-primary);
   padding: 0 2px;
   border-radius: 2px;
 }
@@ -3172,18 +3173,18 @@ onUnmounted(() => {
   place-items: center;
 }
 .icon-link:hover {
-  background: #EFEFEA;
-  color: #18181B;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 .icon-link.danger:hover {
-  background: #FEF2F2;
-  color: #DC2626;
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--accent-error);
 }
 
 .empty-cell {
   padding: 56px 20px;
   text-align: center;
-  color: #A1A1AA;
+  color: var(--text-tertiary);
 }
 .empty-message {
   font-size: 14px;
@@ -3207,20 +3208,20 @@ onUnmounted(() => {
   width: 68px;
   height: 68px;
   border-radius: 14px;
-  background: #F4F4F0;
-  border: 1px solid #E7E7E2;
-  color: #71717A;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
   display: grid;
   place-items: center;
 }
 .empty-box h3 {
   font-size: 17px;
   font-weight: 600;
-  color: #18181B;
+  color: var(--text-primary);
 }
 .empty-box p {
   font-size: 14px;
-  color: #71717A;
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 .empty-buttons {
@@ -3238,44 +3239,44 @@ onUnmounted(() => {
   gap: 12px;
   margin-bottom: 22px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #E7E7E2;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .step-badge {
   display: flex;
   align-items: center;
   gap: 7px;
   font-size: 13.5px;
-  color: #A1A1AA;
+  color: var(--text-tertiary);
 }
 .step-badge.active {
-  color: #1E293B;
+  color: var(--text-primary);
   font-weight: 600;
 }
 .step-badge.done {
-  color: #15803D;
+  color: var(--accent-success);
 }
 .step-idx {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #F4F4F0;
+  background: var(--bg-elevated);
   display: grid;
   place-items: center;
   font-size: 11px;
   font-family: var(--font-mono);
 }
 .step-badge.active .step-idx {
-  background: #1E293B;
-  color: #FFFFFF;
+  background: var(--accent-ai);
+  color: #ffffff;
 }
 .step-badge.done .step-idx {
-  background: #15803D;
-  color: #FFFFFF;
+  background: var(--accent-success);
+  color: #ffffff;
 }
 .step-divider-line {
   flex: 1;
   height: 1px;
-  background: #E7E7E2;
+  background: var(--border-subtle);
 }
 
 .drawer-body {

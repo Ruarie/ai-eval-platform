@@ -3083,8 +3083,9 @@ onUnmounted(() => {
 }
 
 :deep(.highlight-match) {
-  background: #FEF08A;
-  color: #854D0E;
+  /* 半透明高亮在深浅两套主题下都成立，避免深色页出现荧光黄块 */
+  background: rgba(250, 204, 21, 0.45);
+  color: var(--text-primary);
   padding: 0 2px;
   border-radius: 2px;
 }

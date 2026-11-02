@@ -160,7 +160,15 @@ def _task_plan_snapshot(slot: _ScheduledCall) -> dict[str, Any] | None:
 
 def _permission_result(exc: AppError) -> ToolExecutionResult:
     """平台拒绝可回填；未知基础设施异常不在此降级。"""
-    denied = exc.code in {ErrorCode.UNAUTHORIZED, ErrorCode.WHITELIST, ErrorCode.NEED_APPROVAL, ErrorCode.CONCURRENCY}
+    # DENIED = 三档权限下灾难级命令拒绝（loop_bridge.check_permission），
+    # 与审批/白名单同属「平台拒绝」，不能记成执行失败——否则模型会重复提交同一条被拒命令。
+    denied = exc.code in {
+        ErrorCode.UNAUTHORIZED,
+        ErrorCode.WHITELIST,
+        ErrorCode.NEED_APPROVAL,
+        ErrorCode.CONCURRENCY,
+        ErrorCode.DENIED,
+    }
     code = str((exc.fields or {}).get("error_code") or exc.code.value)
     return ToolExecutionResult(
         content=f"工具请求未获执行：{exc.code.value}",
@@ -437,6 +445,11 @@ class ToolScheduler:
                 return await asyncio.shield(task)
             except asyncio.CancelledError:
                 if task.done():
+                    # 清理任务自身被取消（进程关闭/上层再次 cancel）时不能调用
+                    # task.result()——它会再抛 CancelledError 并吞掉后续终态结算，
+                    # 使已写的 tool/call 缺少 tool/result。
+                    if task.cancelled():
+                        return None
                     return task.result()
                 current = asyncio.current_task()
                 if current is not None:

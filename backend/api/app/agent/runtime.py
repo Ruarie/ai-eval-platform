@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from app.agent.collaboration_scope import TurnChildren
 
 RuntimeSubscriber = Callable[[dict[str, Any]], None]
+# 取消结算任务持引用集合（asyncio 只保存弱引用，必须显式持有到 done）。
+_CANCEL_SETTLEMENTS: set[asyncio.Task] = set()
 
 
 class TurnAlreadyRunningError(RuntimeError):
@@ -338,10 +340,13 @@ class AgentRuntime:
         """结算在驱动协程首次执行前就被取消的任务。"""
 
         if task.cancelled():
-            asyncio.create_task(
+            settlement = asyncio.create_task(
                 self._settle_cancelled_task(task),
                 name=f"agent-cancel-settlement-{self.session_id}",
             )
+            # 取消结算必须被执行完：持引用直到 done，避免被 GC 提前回收。
+            _CANCEL_SETTLEMENTS.add(settlement)
+            settlement.add_done_callback(_CANCEL_SETTLEMENTS.discard)
 
     async def _settle_cancelled_task(self, task: asyncio.Task[None]) -> None:
         """持锁补齐首次调度前取消的任务边界。"""

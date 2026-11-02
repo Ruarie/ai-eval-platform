@@ -397,6 +397,15 @@ async def build_agent(
         attempt_id = f"a-{uuid.uuid4().hex[:12]}"
         from .loop_presentation import request_summary
 
+        # 历史高水位只取一次：原来两次全量 read() 仅为读最后一条 seq，
+        # 长会话（单条工具结果可达数百 KB）会退化成 O(全会话) 的反序列化。
+        next_seq = getattr(context.log, "next_seq", None)
+        if isinstance(next_seq, int):
+            history_upto_seq = next_seq - 1
+        else:
+            history = context.log.read()
+            history_upto_seq = history[-1]["seq"] if history else -1
+
         start = context.log.append(
             "assistant/attempt_start",
             {
@@ -404,11 +413,11 @@ async def build_agent(
                 "step": state["step"],
                 "attempt_id": attempt_id,
                 "header_seq": header_seq,
-                "history_upto_seq": context.log.read()[-1]["seq"],
+                "history_upto_seq": history_upto_seq,
                 "history_selection": selection,
                 "request_summary": request_summary(
                     request, context_window=current.context_window,
-                    history_upto_seq=context.log.read()[-1]["seq"],
+                    history_upto_seq=history_upto_seq,
                     input_fingerprint=selection["input_fingerprint"],
                     tool_transports=current.tool_transports,
                 ),

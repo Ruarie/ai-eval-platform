@@ -29,6 +29,9 @@ from .title import generate_title_text
 
 logger = logging.getLogger(__name__)
 _TITLE_GENERATING: set[str] = set()
+# 必须持有后台任务引用：asyncio 只保留弱引用，任务可能在执行中被 GC 回收，
+# 导致 finally 的 discard 不执行（该会话永久不再生成标题）且集合无界增长。
+_TITLE_TASKS: set[asyncio.Task] = set()
 
 
 @dataclass
@@ -254,6 +257,10 @@ class LoopService:
         if self._closed:
             raise AppError(ErrorCode.VALIDATION, "服务正在关闭")
         await self.authorize(actor_id, command.session_id)
+        if command.type == "turn.submit":
+            # 锁外等待上一轮资源收尾：cleanup 可能含不可取消的同步工具，
+            # 在锁内 await 会把同一会话的 turn.cancel 一起堵死（用户无法自救）。
+            await self._drain_previous_cleanup(command.session_id)
         lock = self._locks.setdefault(command.session_id, asyncio.Lock())
         async with lock:
             if self._closed:
@@ -268,8 +275,12 @@ class LoopService:
             if entry.controller != (actor_id, connection_id):
                 raise AppError(ErrorCode.UNAUTHORIZED, "当前连接不是该回合控制者")
             if command.type == "turn.cancel":
+                # 缺字段是协议错误（VALIDATION），不能让它冒成 KeyError → 500。
+                requested_turn = command.data.get("turn_id")
+                if not isinstance(requested_turn, str) or not requested_turn:
+                    raise AppError(ErrorCode.VALIDATION, "取消命令缺少 turn_id")
                 expected = f"{command.session_id}:{entry.runtime.active_turn}"
-                if command.data["turn_id"] != expected:
+                if requested_turn != expected:
                     raise AppError(ErrorCode.CONCURRENCY, "回合已结束或不是当前回合")
 
                 def cancel_fact(db, session, state):
@@ -282,14 +293,27 @@ class LoopService:
                 return self._receipt(receipt, command.fingerprint)
             return self._respond(entry, actor_id, command)
 
+    async def _drain_previous_cleanup(self, session_id: str) -> None:
+        """锁外等待上一轮资源收尾；收尾失败只记录，不阻塞新回合受理。"""
+        entry = self.entries.get(session_id)
+        cleanup = entry.cleanup if entry is not None else None
+        if cleanup is None or cleanup.done() or entry.runtime.running:
+            return
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("上一轮资源收尾失败 session=%s", session_id, exc_info=True)
+
     async def _submit(self, entry: _Entry, actor_id: str, connection_id: str, command) -> CommandReceipt:
         """回合边界重新取得写者并读取事实，空闲连接不占用 PG 连接池。"""
         claimed = False
         previous_cleanup = entry.cleanup
         try:
             if not entry.runtime.running:
-                if previous_cleanup is not None:
-                    # 新提交取消不能连带取消上一轮的资源清理。
+                if previous_cleanup is not None and not previous_cleanup.done():
+                    # 新提交取消不能连带取消上一轮的资源清理（正常已在锁外等待完成）。
                     await asyncio.shield(previous_cleanup)
                 if self._closed:
                     raise AppError(ErrorCode.VALIDATION, "服务正在关闭")
@@ -405,7 +429,9 @@ class LoopService:
             finally:
                 _TITLE_GENERATING.discard(session_id)
 
-        asyncio.create_task(_apply(), name=f"agent-v2-title-{session_id}")
+        task = asyncio.create_task(_apply(), name=f"agent-v2-title-{session_id}")
+        _TITLE_TASKS.add(task)
+        task.add_done_callback(_TITLE_TASKS.discard)
 
     def _input_content(self, actor_id: str, session_id: str, data: dict):
         """附件按上传者验证并冻结到事实；文本附件落会话工作区，供 read/bash 读取。"""

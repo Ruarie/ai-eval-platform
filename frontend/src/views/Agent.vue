@@ -63,7 +63,13 @@
           :key="s.id"
           class="session-item"
           :class="{ active: currentSessionId === s.id }"
+          role="button"
+          tabindex="0"
+          :aria-current="currentSessionId === s.id ? 'true' : undefined"
+          :aria-label="`打开会话：${displaySessionTitle(s)}`"
           @click="selectSession(s.id)"
+          @keydown.enter.prevent="selectSession(s.id)"
+          @keydown.space.prevent="selectSession(s.id)"
         >
           <div class="session-title">
             <input
@@ -294,7 +300,8 @@ async function loadSessions() {
     // 历史 legacy 会话保留在服务端审计数据中，但不再进入唯一的 AgentLoop 工作台。
     sessions.value = (list || []).filter((session) => session.engine_version === 'agent_loop_v2')
   } catch {
-    sessions.value = []
+    // 加载失败不能表现成「没有任何会话」：保留原有列表并提示，避免用户误以为数据丢失。
+    message.error('会话列表加载失败，请稍后重试')
   }
 }
 

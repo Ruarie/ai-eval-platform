@@ -8,7 +8,15 @@
         </div>
         <button class="btn btn-secondary btn-sm" :disabled="loading" @click="loadReport">刷新</button>
       </div>
-      <div v-if="loading" class="empty" style="min-height: 320px">报告列表加载中…</div>
+      <!-- 骨架屏替代纯文字加载态：与列表同构，避免布局跳动 -->
+      <div v-if="loading" class="panel report-list" aria-busy="true" aria-label="报告列表加载中">
+        <div v-for="n in 6" :key="n" class="report-list-item">
+          <n-skeleton height="22px" width="56px" />
+          <n-skeleton height="14px" style="flex: 1 1 220px" />
+          <n-skeleton height="12px" width="132px" />
+          <n-skeleton height="12px" width="104px" />
+        </div>
+      </div>
       <EmptyState v-else-if="loadError || !reportItems.length"
         :title="loadError ? '报告列表未加载' : '暂无历史报告'"
         :description="loadError ? '请稍后重试。' : '完成的历史评测报告会显示在这里。'">
@@ -433,7 +441,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { NSkeleton, useMessage } from 'naive-ui'
 import { api } from '../api/http'
 import type { Report, ReportListItem, RagScores, StressSeriesPoint } from '../api/types'
 import KindTag from '../components/common/KindTag.vue'

@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.38 |
-| 本轮审查日期 | 2026-10-29（安全加固：RAG 探活密钥外发与重置密码二次确认） |
+| 文档版本 | V2.39 |
+| 本轮审查日期 | 2026-11-02（工作区执行隔离人工解除通道：§3.12.3） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.55（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -1653,6 +1653,71 @@ Prometheus 内置可观测性指标端点（内网 HTTP GET），输出前缀为
   "updated_at": "2026-09-13T13:40:00"
 }
 ```
+
+---
+
+### 3.12.3 工作区执行隔离（V2.39，2026-11-02）
+
+Agent Loop v2 在执行会改动工作区的工具（`write`/`edit`/`bash` 等）前，会向
+`workspace_execution_guards` 写入一条 `active` 隔离记录，正常结束后置 `released`；
+若 Runner 崩溃、断连，或旧执行器无法给出可信停止证据，记录改为 `quarantined`。
+`quarantined` 期间，同一工作区（含其子目录）的读写与 `bash` 一律以 409 `CONCURRENCY`
+拒绝（`工作区存在运行中或结果未知的冲突执行`），从而避免两条执行同时写同一目录。
+
+正常路径下 `quarantined` 只能由 Runner 的可信停止收据自动解除
+（`SessionLog.reconcile_execution`，要求 `process_tree_terminated=true` 等证据）。
+当 Runner 实例已确定退出、收据永久不可得时，可用下列接口人工解除；**该操作意味着
+操作者确认边界外已无进程在写**，解除后同一 scope 的新执行立即放行。
+
+#### `GET /api/admin/workspace-guards?status=&session_id=&limit=`
+
+查询执行隔离记录，默认按 `updated_at` 倒序返回最近 100 条（`limit` 取值 1–500）。
+
+- 查询参数（均可选）：
+  - `status`：`active` / `quarantined` / `released`；
+  - `session_id`：只看某个会话；
+  - `limit`：返回条数上限。
+- 成功响应：`200`，数组元素字段如下。
+```json
+[
+  {
+    "execution_id": "5f0c…",
+    "session_id": "s-1",
+    "scope_path": "/data/workspaces/w1/demo",
+    "access": "write",
+    "status": "quarantined",
+    "attempt_id": "a-3f2a…",
+    "call_id": "call_7",
+    "owner_id": "u-1",
+    "evidence": {"turn": 1, "step": 2, "call_seq": 41, "runner_instance_id": "runner-1"},
+    "created_at": "2026-11-02T09:12:31Z",
+    "updated_at": "2026-11-02T09:13:02Z"
+  }
+]
+```
+
+#### `POST /api/admin/workspace-guards/{execution_id}/release`
+
+人工解除一条 `quarantined` 记录。
+
+- 请求体：
+```json
+{ "reason": "Runner 实例已重启，确认无残留进程" }
+```
+  - `reason`：必填，4–500 字符；去除首尾空白后仍需 ≥4 字符。
+- 行为：
+  - 在同一事务内先取 `pg_advisory_xact_lock(721904)`（与派发/结果提交共用同一把锁），
+    再对目标行 `FOR UPDATE`，避免与并发的派发竞争；
+  - 仅 `quarantined` 可解除：`active` 返回 409 `CONCURRENCY`（执行可能仍在写），
+    已 `released` 返回 409 `CONCURRENCY`（幂等冲突）；
+  - `guard.status` 置 `released`，`guard.evidence.manual_release` 追加
+    `{actor_id, reason, released_at}`，原派发证据完整保留；
+  - 写审计日志，`action="workspace_guard_release"`，`target_type="workspace_execution_guard"`，
+    `detail` 含 `session_id`/`scope_path`/`access`/`reason`（不含文件内容）；
+  - **不写** `execution/reconciled` 事实：该事件是「可信对账」语义，只由 Runner 收据产生，
+    人工解除不篡改历史 `tool/result` 结论。
+- 成功响应：`200`，返回更新后的单条记录（字段同上）。
+- 错误：`404 NOT_FOUND`（记录不存在）、`409 CONCURRENCY`、`400 VALIDATION`（原因过短）。
 
 ---
 
@@ -3907,3 +3972,21 @@ Excel 导入在本批缓存已写入但尚未 flush 的用例，重复编号按�
 - `backend/api/app/routers/users.py`、`backend/api/app/schemas.py`：重置他人密码的本人密码二次确认与审计标记。
 - `frontend/src/api/http.ts`、`frontend/src/components/modals/ResetPasswordModal.vue`：透传 `current_password`，重置他人时要求输入。
 - `backend/api/tests/test_security_hardening.py`：覆盖密钥不外发、同源复用、内网拒绝、失败脱敏、非 http(s) 拒绝及重置密码四种分支。
+
+## V2.39 工作区执行隔离人工解除通道（2026-11-02）
+
+- 新增 `GET /api/admin/workspace-guards`：按 `status` / `session_id` 查询执行隔离记录，默认返回最近更新的 100 条（`limit` 1–500）。
+- 新增 `POST /api/admin/workspace-guards/{execution_id}/release`：人工解除 `quarantined` 记录。`reason` 必填 4–500 字符；`active` 与已 `released` 均返回 409 `CONCURRENCY`，不存在返回 404 `NOT_FOUND`。解除在 `pg_advisory_xact_lock(721904)` 下对目标行 `FOR UPDATE` 完成，`guard.evidence.manual_release` 记录操作人、原因与时间，并写 `AuditLog(action="workspace_guard_release")`。
+- 该接口**不写** `execution/reconciled` 事实：可信对账仍只接受 Runner 停止收据，人工解除不篡改历史 `tool/result` 结论。解除后同一 scope 的新执行立即放行，因此仅在确认边界外无进程在写时使用。
+- 背景：`quarantined` 此前只有 `reconcile_execution` 一条解除路径，且 Runner 崩溃场景拿不到收据，会话工作区被永久拒绝读写。本次补齐可审计的人工出口，不改变自动对账语义。
+
+### 修改代码文件与作用清单
+
+- `backend/api/app/routers/workspace_guards.py`（新增）、`backend/api/app/main.py`：查询与人工解除路由注册。
+- `backend/api/tests/test_admin_workspace_guards.py`（新增）：未登录拒绝、`active` 拒绝、解除保留证据、重复解除冲突、未知执行 404。
+- `backend/api/app/harness/execution/{workspace_guard,scheduler,quota}.py`、`harness/memory/agent_events.py`、`harness/context/compact.py`、`agent/{loop_service,runtime,loop}.py`、`routers/ws.py`：关闭期 fail-closed、取消 drain 终态、`DENIED` 记拒绝、后台任务持引用、`turn.cancel` 参数校验、配额缓存淘汰、`/compact` 切片、历史高水位读取与锁外等待 cleanup。
+- `frontend/src/naive-ui-components.ts`（新增）、`frontend/src/main.ts`：Naive UI 改为按需注册（vendor-naive 1436 KB → 702 KB，gzip 393 KB → 202 KB）。
+- `frontend/src/api/http.ts`：生产构建默认禁用 Mock 数据源，需显式 `VITE_ENABLE_MOCK=1`。
+- `frontend/src/styles/tokens.css`、`styles/base.css`、`naive-theme.ts`、`App.vue`、`stores/theme.ts`：令牌单一来源、深色主题接入 Naive UI、首访跟随系统配色。
+- `frontend/src/router/index.ts`、`views/NotFound.vue`（新增）、`layouts/MainLayout.vue`：404 兜底、`document.title` 同步、标题单源、角色文案。
+- `frontend/src/views/{Login,Agent,Report,AdminProfiles,Cases,Datasets,UserWorkspaces}.vue`、`components/agent/loop/{AgentWorkspace,InteractionDrawer}.vue`：登录错误分类、会话键盘可达、报告骨架屏、硬编码色值改令牌与深色补漏。

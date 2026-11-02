@@ -103,16 +103,20 @@ def summarize(
     经 ``parse_compact`` 严格校验后写库。
     """
     kept = messages[-keep_recent:] if keep_recent > 0 else []
+    # 保留段在原始列表中的起始下标：回退 ID 用全局下标，跨窗口压缩不会重号。
+    offset = len(messages) - len(kept)
     kept_ids = [
-        str(message.get("source_id") or f"idx:{index}")
+        str(message.get("source_id") or f"idx:{offset + index}")
         for index, message in enumerate(kept)
     ]
     if not messages:
         return "", kept_ids
     # 确定性摘要：合并历史消息正文，超长截断带标记
+    # 显式切片：keep_recent=0 时全部进入摘要（原写法依赖 ``-0 or None`` 的语义巧合）。
+    history = messages[:offset]
     body = "\n".join(
         f"{message.get('role', 'user')}: {message.get('content', '')}"
-        for message in messages[: -keep_recent or None]
+        for message in history
     ) or "（无历史消息可压缩）"
     if len(body) > max_summary_chars:
         body = body[:max_summary_chars] + "…[截断]"

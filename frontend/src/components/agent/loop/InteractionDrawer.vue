@@ -396,17 +396,17 @@ function respond(data: Data) {
 .interaction-drawer {
   max-height: min(58vh, 520px);
   overflow-y: auto;
-  border: 1px solid #cbded4;
+  border: 1px solid var(--border-subtle);
   border-radius: 14px;
-  background: linear-gradient(135deg, #fbfefc, #f4faf6);
+  background: var(--bg-elevated);
   box-shadow: 0 -12px 32px rgba(18, 65, 48, 0.12);
   padding: 16px 20px;
-  color: #243b31;
+  color: var(--text-primary);
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .interaction-drawer.is-question {
-  border-color: #cbd9ed;
-  background: linear-gradient(145deg, #ffffff 0%, #f6f9fc 100%);
+  border-color: var(--border-subtle);
+  background: var(--bg-main);
   box-shadow: 0 -12px 32px rgba(37, 99, 235, 0.08);
 }
 .interaction-drawer.is-collapsed {
@@ -422,7 +422,7 @@ function respond(data: Data) {
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .is-collapsed .interaction-drawer-head {
   padding-bottom: 0;
@@ -442,7 +442,7 @@ function respond(data: Data) {
 }
 .interaction-kicker {
   display: inline-block;
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -450,7 +450,7 @@ function respond(data: Data) {
 }
 .head-heading {
   margin: 0;
-  color: #0f172a;
+  color: var(--text-primary);
   font-size: 17px;
   font-weight: 700;
   line-height: 1.35;
@@ -463,9 +463,9 @@ function respond(data: Data) {
   align-items: center;
   gap: 5px;
   border-radius: 999px;
-  background: #eff6ff;
+  background: rgba(59, 130, 246, 0.14);
   padding: 3px 9px;
-  color: #2563eb;
+  color: var(--accent-info);
   font-size: 11px;
   font-weight: 600;
 }
@@ -497,19 +497,19 @@ function respond(data: Data) {
   gap: 5px;
   height: 28px;
   padding: 0 10px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--border-subtle);
   border-radius: 7px;
-  background: #ffffff;
-  color: #475569;
+  background: var(--bg-main);
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.18s ease;
 }
 .drawer-toggle-btn:hover {
-  background: #f8fafc;
-  border-color: #94a3b8;
-  color: #0f172a;
+  background: var(--bg-elevated);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
 }
 .toggle-icon {
   transition: transform 0.22s ease;
@@ -526,15 +526,15 @@ function respond(data: Data) {
   gap: 14px;
   margin-top: 10px;
   padding: 9px 14px;
-  border: 1px solid #bfdbfe;
+  border: 1px solid rgba(59, 130, 246, 0.35);
   border-radius: 9px;
-  background: #eff6ff;
+  background: rgba(59, 130, 246, 0.12);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 .drawer-collapsed-bar:hover {
-  background: #e0f2fe;
-  border-color: #93c5fd;
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(96, 165, 250, 0.5);
   transform: translateY(-1px);
 }
 .collapsed-summary {
@@ -591,9 +591,9 @@ function respond(data: Data) {
 .question-progress-wrap {
   margin-top: 12px;
   margin-bottom: 4px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  background: #f8fafc;
+  background: var(--bg-elevated);
   padding: 10px 14px;
 }
 .stepper-track {
@@ -605,7 +605,7 @@ function respond(data: Data) {
   flex: 1 1 0;
   height: 4px;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: var(--border-subtle);
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .stepper-segment.is-completed {
@@ -627,7 +627,7 @@ function respond(data: Data) {
   gap: 8px;
 }
 .progress-title {
-  color: #1e293b;
+  color: var(--text-primary);
   font-size: 12px;
   font-weight: 700;
 }
@@ -638,11 +638,11 @@ function respond(data: Data) {
   font-weight: 600;
 }
 .type-pill.is-checkbox {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.16);
+  color: var(--accent-info);
 }
 .progress-tip {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 11px;
 }
 
@@ -680,10 +680,10 @@ function respond(data: Data) {
   width: 100%;
   padding: 4px 0 14px;
   margin-bottom: 12px;
-  border-bottom: 1px solid #eef2f6;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .question-title-text {
-  color: #0f172a;
+  color: var(--text-primary);
   font-size: 15px;
   font-weight: 700;
   line-height: 1.6;
@@ -699,12 +699,12 @@ function respond(data: Data) {
   flex: 0 0 auto;
 }
 .question-type-badge.is-required {
-  background: #fef3c7;
-  color: #b45309;
+  background: var(--t-profiles);
+  color: var(--c-profiles);
 }
 .question-type-badge.is-optional {
-  background: #f1f5f9;
-  color: #64748b;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
 }
 
 /* 选项列表 */
@@ -720,22 +720,22 @@ function respond(data: Data) {
   display: flex;
   flex-direction: column;
   padding: 13px 16px;
-  border: 1.5px solid #e2e8f0;
+  border: 1.5px solid var(--border-subtle);
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--bg-main);
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 .choice-card:hover {
-  border-color: #93c5fd;
-  background: #f8fafc;
+  border-color: rgba(96, 165, 250, 0.6);
+  background: var(--bg-elevated);
   transform: translateY(-1px);
   box-shadow: 0 4px 10px rgba(37, 99, 235, 0.06);
 }
 .choice-card.is-selected {
   border-color: #3b82f6;
-  background: #eff6ff;
+  background: rgba(59, 130, 246, 0.14);
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
 }
 
@@ -752,8 +752,8 @@ function respond(data: Data) {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: #f1f5f9;
-  color: #475569;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -819,11 +819,11 @@ function respond(data: Data) {
   width: 100%;
   box-sizing: border-box;
   height: 36px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--bg-main);
   padding: 6px 12px;
-  color: #1e293b;
+  color: var(--text-primary);
   font: 13px var(--font-body, inherit);
   outline: none;
   transition: all 0.2s ease;
@@ -833,21 +833,21 @@ function respond(data: Data) {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
 .custom-answer-input:disabled {
-  background: #f8fafc;
-  color: #94a3b8;
+  background: var(--bg-elevated);
+  color: var(--text-tertiary);
   cursor: not-allowed;
-  border-color: #e2e8f0;
+  border-color: var(--border-subtle);
 }
 .choice-card.is-selected .custom-answer-input:not(:disabled) {
-  border-color: #93c5fd;
+  border-color: rgba(96, 165, 250, 0.6);
 }
 
 /* 简答题卡片 */
 .text-question-card {
   margin-top: 6px;
-  border: 1.5px solid #e2e8f0;
+  border: 1.5px solid var(--border-subtle);
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--bg-main);
   padding: 10px 12px 8px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
   transition: all 0.2s ease;
@@ -864,7 +864,7 @@ function respond(data: Data) {
   border: none;
   background: transparent;
   padding: 4px 2px;
-  color: #0f172a;
+  color: var(--text-primary);
   font: 14px/1.6 var(--font-body, inherit);
   outline: none;
 }
@@ -873,8 +873,8 @@ function respond(data: Data) {
   align-items: center;
   justify-content: space-between;
   padding: 8px 2px 2px;
-  border-top: 1px solid #f1f5f9;
-  color: #94a3b8;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
   font-size: 11.5px;
 }
 

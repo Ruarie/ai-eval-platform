@@ -11,18 +11,30 @@ from app.harness.memory.agent_events import canonical_scope, scopes_overlap
 from app.models import Session, WorkspaceExecutionGuard
 
 _session_factory = None
+# 显式退场标记：应用关闭时 configure(None)，此时仍在跑的线程池工具必须
+# fail-closed，不能因为拿不到工厂就绕过工作区互斥（关闭期间的静默直通）。
+_shutdown = False
 
 
 def configure(session_factory) -> None:
-    """应用启动注入共享数据库；纯执行器单测可显式注入隔离数据库。"""
-    global _session_factory
+    """应用启动注入共享数据库；纯执行器单测可显式注入隔离数据库。
+
+    ``configure(None)`` 表示隔离端口已退场（关闭流程），此后旧执行器调用一律
+    拒绝；从未注入过工厂的独立脚本/单测仍保持直通，避免破坏离线执行器。
+    """
+    global _session_factory, _shutdown
     _session_factory = session_factory
+    _shutdown = session_factory is None
 
 
 def guarded_call(definition, context, execute):
     """线程真实结束后才结算 guard；协程超时取消不会提前解除隔离。"""
     factory = _session_factory
-    if factory is None or definition.permission_policy.workspace == "none":
+    if definition.permission_policy.workspace == "none":
+        return execute()
+    if factory is None:
+        if _shutdown:
+            raise AppError(ErrorCode.INTERNAL, "执行隔离端口已关闭，拒绝未受控的旧执行器调用")
         return execute()
     if not context.session_id or not context.user_id or not context.sandbox_dir:
         raise AppError(ErrorCode.UNAUTHORIZED, "工作区执行缺少已认证上下文")

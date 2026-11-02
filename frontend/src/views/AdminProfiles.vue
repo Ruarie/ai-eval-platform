@@ -2451,8 +2451,8 @@ onMounted(() => {
   box-shadow: 0 6px 20px -2px rgba(217, 119, 6, 0.12);
 }
 .model-chip-card.is-agent-core {
-  background: #FEF3C7;
-  border: 1.5px solid #d97706;
+  background: var(--t-profiles);
+  border: 1.5px solid var(--c-profiles);
   border-radius: 12px;
   box-shadow: 0 4px 14px rgba(217, 119, 6, 0.15);
   animation: pulse-border 3.2s ease-in-out infinite;
@@ -2506,9 +2506,9 @@ onMounted(() => {
   white-space: nowrap;
 }
 .agent-core-tag {
-  background: #ffffff;
-  color: #b45309;
-  border: 1px solid #b45309;
+  background: var(--bg-main);
+  color: var(--c-profiles);
+  border: 1px solid var(--c-profiles);
   border-radius: 999px;
   padding: 1.5px 8px;
   font-size: 11px;
@@ -2535,15 +2535,15 @@ onMounted(() => {
   max-width: 220px;
 }
 .model-chip-card.is-agent-core .model-id-tag {
-  background: #ffffff;
-  border-color: rgba(0, 0, 0, 0.08);
-  color: #1e293b;
+  background: var(--bg-main);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
 }
 .protocol-tag {
   color: var(--text-tertiary, #9ca3af);
 }
 .model-chip-card.is-agent-core .protocol-tag {
-  color: #6b7280;
+  color: var(--text-tertiary);
 }
 .url-mode-tag {
   border-radius: 4px;
@@ -2561,9 +2561,9 @@ onMounted(() => {
   font-size: 11px;
 }
 .model-chip-card.is-agent-core .window-tag {
-  background: #ffffff;
-  color: #4b5563;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
 }
 .model-chip-bottom {
   display: flex;

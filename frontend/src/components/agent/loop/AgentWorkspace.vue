@@ -34,7 +34,7 @@
           </div>
 
           <!-- 对话消息滚动区：有消息时正常滚动展示；空状态隐藏以保持居中 -->
-          <div ref="scroller" class="loop-conversation" :class="{ 'is-empty': !rows.length }" @scroll="trackScroll">
+          <div ref="scroller" class="loop-conversation" :class="{ 'is-empty': !rows.length }" role="log" aria-label="对话消息" @scroll="trackScroll">
           <button v-if="shown < rows.length" class="history-more" @click="shown+=80">显示更早的 {{ Math.min(80, rows.length-shown) }} 条记录</button>
           <template v-for="row in visibleRows" :key="row.key">
             <article v-if="row.role==='user'" class="loop-message user"><header>你</header><div class="history-files"><AttachmentPreview v-for="file in attachments[row.key] || []" :key="file.file_id" :attachment="file"/></div><p>{{ row.content }}</p></article>
@@ -1724,5 +1724,44 @@ async function hydrateAttachments() {
 }
 [data-theme='dark'] .loop-bottom-metrics svg {
   color: #64748b;
+}
+
+/* ── 深色补漏 ─────────────────────────────────────────────────
+   早期对话壳（.loop-* 基础样式）写死了浅色值，未随 data-theme 切换；
+   这里只补这些遗留类，新增样式应直接引用 tokens.css 变量。 */
+[data-theme='dark'] .loop-tabs {
+  --line: var(--border-subtle);
+  --text: var(--text-primary);
+  --subtle: var(--text-secondary);
+  --accent: #a5b4fc;
+  border-bottom-color: var(--border-subtle);
+}
+[data-theme='dark'] .loop-message.user {
+  background: rgba(22, 151, 122, 0.16);
+  color: var(--text-primary);
+}
+[data-theme='dark'] .loop-runtime {
+  background: var(--bg-elevated);
+  border-left-color: var(--border-subtle);
+  color: var(--text-secondary);
+}
+[data-theme='dark'] .loop-runtime dt,
+[data-theme='dark'] .loop-message header small,
+[data-theme='dark'] .assistant-identity time,
+[data-theme='dark'] .muted,
+[data-theme='dark'] .loop-tabs .workspace-tab-hint {
+  color: var(--text-tertiary);
+}
+[data-theme='dark'] .loop-notice {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
+}
+[data-theme='dark'] .loop-notice.error {
+  color: #f87171;
+}
+[data-theme='dark'] .jump-bottom {
+  background: var(--bg-elevated);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
 }
 </style>

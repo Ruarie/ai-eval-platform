@@ -55,12 +55,21 @@ def _directory_usage_bytes(root: str) -> int:
 
 
 def directory_usage_cached(root: str) -> int:
-    """TTL 缓存的目录用量（秒级记账，防每写全量 walk 拖慢工具链）。"""
+    """TTL 缓存的目录用量（秒级记账，防每写全量 walk 拖慢工具链）。
+
+    缓存键是工作区绝对路径，没有外部淘汰信号（会话/工作区删除不会通知本层），
+    因此每次未命中时顺手清理过期条目，避免已注销目录长期驻留进程内存。
+    """
     now = time.monotonic()
     with _USAGE_LOCK:
         cached = _USAGE_CACHE.get(root)
         if cached and now - cached[0] < _QUOTA_CACHE_TTL_S:
             return cached[1]
+        if cached is not None:
+            _USAGE_CACHE.pop(root, None)
+        for key, (stamp, _value) in list(_USAGE_CACHE.items()):
+            if now - stamp >= _QUOTA_CACHE_TTL_S:
+                _USAGE_CACHE.pop(key, None)
     total = _directory_usage_bytes(root)
     with _USAGE_LOCK:
         _USAGE_CACHE[root] = (time.monotonic(), total)

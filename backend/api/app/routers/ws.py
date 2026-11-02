@@ -85,6 +85,7 @@ _TICKET_LOCK = threading.Lock()
 _SESSION_ABORTS: dict[str, asyncio.Event] = {}
 # 标题生成中去重：同一会话一次只跑一个 AI 标题任务，避免并发消息重复调模型
 _TITLE_GENERATING: set[str] = set()
+_TITLE_TASKS: set[asyncio.Task] = set()
 
 
 class _ConnectionState:
@@ -2183,7 +2184,10 @@ def _maybe_schedule_title(
             _TITLE_GENERATING.discard(session.id)
             db.close()
 
-    asyncio.create_task(_apply(), name=f"agent-title-{session.id}")
+    # 后台任务必须持引用，否则可能在执行中被 GC 回收（finally 的 discard 不执行）。
+    task = asyncio.create_task(_apply(), name=f"agent-title-{session.id}")
+    _TITLE_TASKS.add(task)
+    task.add_done_callback(_TITLE_TASKS.discard)
 
 
 async def _handle_user_message(

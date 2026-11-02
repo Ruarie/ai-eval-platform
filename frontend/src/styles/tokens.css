@@ -1,14 +1,21 @@
 /* ============================================================
-   AI 测试与评估平台 — 共享设计令牌 (tokens.css)
+   AI 测试与评估平台 — 唯一设计令牌来源 (tokens.css)
    来源：设计规范 V1.2 §8；布局：规范 §8.3 + 原型方案 §1
+
+   约定：本文件是全站 CSS 变量的**唯一**定义处（此前 base.css 重复定义并
+   覆盖本文件，导致两套值互相打架）。新增/调整颜色、字体、间距、圆角一律
+   改这里，页面样式只允许引用 var(--token)，禁止写死色值。
    ============================================================ */
 
 :root {
-  /* 基础令牌（浅色） */
+  /* 原生控件（select / 日期 / 滚动条）跟随主题，避免深色页出现白色下拉面板 */
+  color-scheme: light;
+
+  /* ── 基础色（浅色） ───────────────────────────────────── */
   --bg-main: #ffffff;
   --bg-elevated: #f4f8f8;
   --text-primary: #111827;
-  --text-secondary: #4b5563;
+  --text-secondary: #6b7280;
   --text-tertiary: #9ca3af;
   --border-subtle: #e5e7eb;
   --accent-ai: #1f5947;
@@ -19,26 +26,42 @@
   --row-hover: rgba(17, 24, 39, 0.035);
   --sidebar-bg: rgba(255, 255, 255, 0.55);
 
-  /* 模块专属强调色（--t-* 柔和淡底 / --c-* 鲜明深字） */
-  --t-agent: #e6f1ec;    --c-agent: #1f5947;    /* 智能体：松石林绿 / 薄荷绿 */
-  --t-dispatch: #e0f2fe; --c-dispatch: #0284c7; /* 调度中心：科技青天蓝 */
-  --t-tasks: #e0e7ff;    --c-tasks: #4f46e5;    /* 任务中心：经典靛蓝 */
-  --t-reports: #fae8ff;  --c-reports: #a21caf;  /* 评测报告：品红紫罗兰 */
-  --t-datasets: #dbeafe; --c-datasets: #1d4ed8; /* 数据集：极客深蓝 */
-  --t-cases: #d1fae5;    --c-cases: #059669;    /* 用例：薄荷翠绿 */
-  --t-kb: #ccfbf1;       --c-kb: #0f766e;       /* 知识库：松石海青 */
-  --t-profiles: #fef3c7; --c-profiles: #d97706; /* 协议档：琥珀暖金 */
-  --t-stress: #ffe4e6;   --c-stress: #e11d48;   /* 压测治理：能量玫红 */
-  --t-users: #e0f2fe;    --c-users: #0369a1;    /* 账号：极光蔚蓝 */
-  --t-workspaces: #e6f1ec; --c-workspaces: #1f5947; /* 工作区：松石林绿 */
+  /* ── 模块强调色（--t-* 柔和淡底 / --c-* 鲜明深字） ─────── */
+  --t-agent: #e6f1ec;      --c-agent: #1f5947;
+  --t-dispatch: #e0f2fe;   --c-dispatch: #0284c7;
+  --t-tasks: #e0e7ff;      --c-tasks: #4f46e5;
+  --t-reports: #ede9fe;    --c-reports: #6d28d9;
+  --t-datasets: #dbeafe;   --c-datasets: #1d4ed8;
+  --t-cases: #d1fae5;      --c-cases: #047857;
+  --t-kb: #ccfbf1;         --c-kb: #0e7490;
+  --t-profiles: #fef3c7;   --c-profiles: #b45309;
+  --t-stress: #fce7f3;     --c-stress: #be185d;
+  --t-users: #f3f4f6;      --c-users: #4b5563;
+  --t-workspaces: #e6f1ec; --c-workspaces: #1f5947;
 
-  /* 字体 */
-  --font-display: 'Noto Serif SC', 'Space Grotesk', Georgia, serif;
-  --font-body: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+  /* ── 字体：优先系统清晰可用字体，避免网络字体闪烁 ─────── */
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI Variable Text', 'Segoe UI',
+    'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC',
+    system-ui, sans-serif;
+  --font-body: 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI',
+    'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', 'JetBrains Mono', 'Sarasa Mono SC', 'Microsoft YaHei UI',
+    ui-monospace, monospace;
   --font-chat: var(--font-body);
 
-  /* 尺寸 */
+  /* ── 间距 / 圆角（新增页面优先使用，逐步替换硬编码 px） ─ */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  /* ── 骨架（规范 §8.3） ────────────────────────────────── */
   --sidebar-w: 260px;
   --sidebar-w-fold: 72px;
   --topbar-h: 64px;
@@ -47,12 +70,14 @@
 }
 
 [data-theme='dark'] {
-  --bg-main: #0b0f19;
-  --bg-elevated: #111827;
+  color-scheme: dark;
+
+  --bg-main: #111827;
+  --bg-elevated: #1f2937;
   --text-primary: #f9fafb;
   --text-secondary: #9ca3af;
   --text-tertiary: #6b7280;
-  --border-subtle: #1f2937;
+  --border-subtle: #374151;
   --accent-ai: #16977a;
   --accent-success: #34d399;
   --accent-warning: #fbbf24;
@@ -62,15 +87,15 @@
   --sidebar-bg: rgba(11, 15, 25, 0.65);
   --focus-ring: 0 0 0 3px rgba(22, 151, 122, 0.25);
 
-  --t-agent: rgba(22, 151, 122, 0.2); --c-agent: #34d399;
-  --t-dispatch: #082f49; --c-dispatch: #38bdf8;
-  --t-tasks: #1e1b4b;    --c-tasks: #a5b4fc;
-  --t-reports: #4a044e;  --c-reports: #f0abfc;
-  --t-datasets: #172554; --c-datasets: #93c5fd;
-  --t-cases: #064e3b;    --c-cases: #6ee7b7;
-  --t-kb: #042f2e;       --c-kb: #5eead4;
-  --t-profiles: #451a03; --c-profiles: #fbbf24;
-  --t-stress: #4c0519;   --c-stress: #fb7185;
-  --t-users: #0c4a6e;    --c-users: #7dd3fc;
+  --t-agent: rgba(22, 151, 122, 0.2);     --c-agent: #34d399;
+  --t-dispatch: #082f49;                  --c-dispatch: #38bdf8;
+  --t-tasks: rgba(79, 70, 229, 0.25);     --c-tasks: #818cf8;
+  --t-reports: rgba(109, 40, 217, 0.25);  --c-reports: #c4b5fd;
+  --t-datasets: rgba(29, 78, 216, 0.25);  --c-datasets: #60a5fa;
+  --t-cases: rgba(4, 120, 87, 0.25);      --c-cases: #34d399;
+  --t-kb: rgba(14, 116, 144, 0.25);       --c-kb: #38bdf8;
+  --t-profiles: rgba(180, 83, 9, 0.25);   --c-profiles: #fbbf24;
+  --t-stress: rgba(190, 24, 93, 0.25);    --c-stress: #f472b6;
+  --t-users: rgba(75, 85, 99, 0.25);      --c-users: #9ca3af;
   --t-workspaces: rgba(22, 151, 122, 0.25); --c-workspaces: #34d399;
 }

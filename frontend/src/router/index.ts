@@ -12,6 +12,8 @@ declare module 'vue-router' {
   }
 }
 
+const APP_NAME = 'AI 测试与评估平台'
+
 // 路由表 = PRD 5.8
 const routes: RouteRecordRaw[] = [
   {
@@ -28,17 +30,25 @@ const routes: RouteRecordRaw[] = [
       { path: 'dispatch', component: () => import('../views/Dispatch.vue'), meta: { title: '调度中心' } },
       { path: 'model-compare', component: () => import('../views/ModelCompare.vue'), meta: { title: '模型对比' } },
       { path: 'tasks', component: () => import('../views/Tasks.vue'), meta: { title: '任务中心' } },
-      { path: 'reports', component: () => import('../views/Report.vue'), meta: { title: '评测报告' } },
-      { path: 'reports/:id', component: () => import('../views/Report.vue'), meta: { title: '评测报告' } },
-      { path: 'datasets', component: () => import('../views/Datasets.vue'), meta: { title: '数据集' } },
+      // benchmark / RAG 已停止新建，页面文案统一为「历史」；标题只在本表维护。
+      { path: 'reports', component: () => import('../views/Report.vue'), meta: { title: '历史报告' } },
+      { path: 'reports/:id', component: () => import('../views/Report.vue'), meta: { title: '历史报告' } },
+      { path: 'datasets', component: () => import('../views/Datasets.vue'), meta: { title: '历史数据集' } },
       { path: 'cases', component: () => import('../views/Cases.vue'), meta: { title: '用例' } },
-      { path: 'kb', component: () => import('../views/Kb.vue'), meta: { title: '知识库' } },
+      { path: 'kb', component: () => import('../views/Kb.vue'), meta: { title: '历史知识库' } },
       // F1（工作区与沙箱设计方案 G1）：用户工作区——PRD 5.8 增补随 F1 契约修订登记
       { path: 'workspaces', component: () => import('../views/UserWorkspaces.vue'), meta: { title: '我的工作区' } },
       { path: 'memories', component: () => import('../views/UserMemories.vue'), meta: { title: '我的记忆' } },
       { path: 'admin/profiles', component: () => import('../views/AdminProfiles.vue'), meta: { title: '协议档' } },
       { path: 'admin/stress', component: () => import('../views/AdminStress.vue'), meta: { title: '压测治理' } },
       { path: 'admin/users', component: () => import('../views/AdminUsers.vue'), meta: { title: '账号' } },
+      // 兜底放在布局内：未知地址不再白屏，且保留侧边导航便于回到正常页面。
+      {
+        path: ':pathMatch(.*)*',
+        name: 'not-found',
+        component: () => import('../views/NotFound.vue'),
+        meta: { title: '页面不存在' },
+      },
     ],
   },
 ]
@@ -94,8 +104,10 @@ router.beforeEach(async (to) => {
 })
 
 // 路由已成功渲染，移除本次重试标记，后续真实的版本切换仍可自动恢复。
-router.afterEach(() => {
+router.afterEach((to) => {
   sessionStorage.removeItem(DYNAMIC_IMPORT_RETRY_KEY)
+  const title = (to.meta.title as string) || ''
+  document.title = title ? `${title} · ${APP_NAME}` : APP_NAME
 })
 
 export default router

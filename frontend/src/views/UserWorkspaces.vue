@@ -1344,8 +1344,8 @@ onBeforeUnmount(() => {
 }
 
 .pill-deleted {
-  background: #fef3c7;
-  color: #b45309;
+  background: var(--t-profiles);
+  color: var(--c-profiles);
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 

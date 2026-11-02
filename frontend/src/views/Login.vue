@@ -521,6 +521,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage, NModal, NButton } from 'naive-ui'
 import { useAuthStore } from '../stores/auth'
+import { ApiError } from '../api/http'
 
 /** 路由与状态管理 */
 const router = useRouter()
@@ -697,14 +698,14 @@ async function submitLogin() {
 
   try {
     const loginPromise = auth.login(trimmedUser, password.value)
-    await wait(320)
+    await wait(120)
 
     aiStepText.value = '正在连接 Agent 服务...'
     const user = await loginPromise
-    await wait(300)
+    await wait(120)
 
     aiStepText.value = '正在加载工作空间...'
-    await wait(280)
+    await wait(120)
 
     loading.value = false
     isLoginSuccess.value = true
@@ -715,12 +716,24 @@ async function submitLogin() {
     isSuccessExit.value = true
     await wait(300)
     router.push('/agent')
-  } catch {
+  } catch (error) {
     loading.value = false
     isLoginSuccess.value = false
-    globalErrorMsg.value = '用户名或密码错误，请重新输入'
+    globalErrorMsg.value = loginErrorMessage(error)
     triggerShake()
   }
+}
+
+/** 登录失败文案：区分凭据错误、账号禁用与服务不可达，避免网络故障被误报成「密码错误」。 */
+function loginErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return '用户名或密码错误，请重新输入'
+    if (error.status === 403) return '账号已被禁用或无权登录，请联系管理员'
+    if (error.status === 429) return '尝试过于频繁，请稍后再试'
+    if (error.status && error.status >= 500) return '服务暂时不可用，请稍后重试'
+    return error.message || '登录失败，请稍后重试'
+  }
+  return '网络异常，无法连接服务端，请检查网络后重试'
 }
 
 /** 模拟 SSO 快捷登录交互 */

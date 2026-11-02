@@ -59,7 +59,7 @@
           <div class="avatar">{{ userInitial }}</div>
           <div class="user-meta">
             <div class="user-name">{{ auth.user?.username || 'admin' }}</div>
-            <div class="user-role">平台成员</div>
+            <div class="user-role">{{ roleLabel }}</div>
           </div>
           <button class="logout-btn" @click="handleLogout" title="退出登录">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -263,18 +263,24 @@ function isRouteActive(itemPath: string): boolean {
   return route.path === itemPath || route.path.startsWith(itemPath + '/')
 }
 
-const currentTitle = computed(() => {
-  if (route.path === '/datasets') return '历史数据集'
-  if (route.path === '/kb') return '历史知识库'
-  if (route.path === '/dispatch') return '调度中心'
-  if (route.path.startsWith('/reports')) return '历史报告'
-  return (route.meta.title as string) || 'AI 测试与评估平台'
-})
+// 标题唯一来源是路由 meta（router/index.ts），此处不再做路径特判。
+const currentTitle = computed(() => (route.meta.title as string) || 'AI 测试与评估平台')
 const isFlushView = computed(() => route.path.startsWith('/agent'))
 
 const userInitial = computed(() => {
   const name = auth.user?.username || 'A'
   return name.charAt(0).toUpperCase()
+})
+
+/** 侧栏身份展示：按后端角色映射，避免管理员也显示成「平台成员」。 */
+const roleLabel = computed(() => {
+  const labels: Record<string, string> = {
+    admin: '管理员',
+    engineer: '工程师',
+    readonly: '只读成员',
+    member: '平台成员',
+  }
+  return labels[auth.user?.role || 'member'] || '平台成员'
 })
 
 // 移动端侧栏改为覆盖式导航，避免占用工作区横向空间。

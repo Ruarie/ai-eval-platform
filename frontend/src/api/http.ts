@@ -82,9 +82,13 @@ import {
   buildMockReportMarkdown,
 } from './mockData'
 
+// Mock 数据只允许在开发构建或显式开启的演示构建中使用：
+// 生产构建若保留运行时开关，任意成员加一个 ?data=mock 就会看到伪造的用例与报告。
+const MOCK_ALLOWED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_MOCK === '1'
+
 // 数据模式判定：默认 live，可通过 URL ?data=mock 或 localStorage ae_data_mode 切换
 function getDataMode(): 'live' | 'mock' {
-  if (typeof window === 'undefined') return 'live'
+  if (!MOCK_ALLOWED || typeof window === 'undefined') return 'live'
   const params = new URLSearchParams(window.location.search)
   const qMode = params.get('data')
   if (qMode === 'mock' || qMode === 'live') return qMode

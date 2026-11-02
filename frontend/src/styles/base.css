@@ -3,68 +3,7 @@
    令牌来源：设计规范 V1.2 §8；布局：规范 §8.3 + 原型方案 §1
    ============================================================ */
 
-:root {
-  /* 基础令牌（规范 §8.1 浅色） */
-  --bg-main: #FFFFFF;
-  --bg-elevated: #F4F8F8;
-  --text-primary: #111827;
-  --text-secondary: #6B7280;
-  --text-tertiary: #9CA3AF;
-  --border-subtle: #E5E7EB;
-  --accent-ai: #1f5947;
-  --accent-success: #10B981;
-  --accent-warning: #F59E0B;
-  --accent-error: #EF4444;
-  --accent-info: #3B82F6;
-  --row-hover: rgba(17, 24, 39, .035);
-
-  /* 模块色（规范 §8.2：--t-* 淡底 / --c-* 深字） */
-  --t-agent: #e6f1ec;    --c-agent: #1f5947;
-  --t-tasks: #E0E7FF;    --c-tasks: #4F46E5;
-  --t-reports: #EDE9FE;  --c-reports: #6D28D9;
-  --t-datasets: #DBEAFE; --c-datasets: #1D4ED8;
-  --t-cases: #D1FAE5;    --c-cases: #047857;
-  --t-kb: #CFFAFE;       --c-kb: #0E7490;
-  --t-profiles: #FEF3C7; --c-profiles: #B45309;
-  --t-stress: #FCE7F3;   --c-stress: #BE185D;
-  --t-users: #F3F4F6;    --c-users: #4B5563;
-  --t-workspaces: #e6f1ec; --c-workspaces: #1f5947;
-
-  /* 字体：优先系统清晰可用字体，避免依赖网络字体加载而产生闪烁或回退不一致。 */
-  --font-display: 'Segoe UI Variable Display', 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
-  --font-body: 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
-  --font-mono: 'Cascadia Mono', 'JetBrains Mono', 'Sarasa Mono SC', 'Microsoft YaHei UI', ui-monospace, monospace;
-  --font-chat: var(--font-body);
-
-  /* 骨架（规范 §8.3） */
-  --sidebar-w: 260px;
-  --sidebar-w-fold: 72px;
-  --topbar-h: 64px;
-  --ease-shell: .28s cubic-bezier(.4, 0, .2, 1);
-  --focus-ring: 0 0 0 3px rgba(31, 89, 71, .16);
-}
-
-[data-theme='dark'] {
-  --bg-main: #111827;
-  --bg-elevated: #1F2937;
-  --text-primary: #F9FAFB;
-  --text-secondary: #9CA3AF;
-  --text-tertiary: #6B7280;
-  --border-subtle: #374151;
-  --row-hover: rgba(255, 255, 255, .04);
-  --accent-ai: #16977a;
-  --focus-ring: 0 0 0 3px rgba(22, 151, 122, .25);
-  --t-agent: rgba(22, 151, 122, 0.2);  --c-agent: #34D399;
-  --t-tasks: rgba(79, 70, 229, 0.25);   --c-tasks: #818CF8;
-  --t-reports: rgba(109, 40, 217, 0.25); --c-reports: #C4B5FD;
-  --t-datasets: rgba(29, 78, 216, 0.25); --c-datasets: #60A5FA;
-  --t-cases: rgba(4, 120, 87, 0.25);     --c-cases: #34D399;
-  --t-kb: rgba(14, 116, 144, 0.25);      --c-kb: #38BDF8;
-  --t-profiles: rgba(180, 83, 9, 0.25);  --c-profiles: #FBBF24;
-  --t-stress: rgba(190, 24, 93, 0.25);   --c-stress: #F472B6;
-  --t-users: rgba(75, 85, 99, 0.25);     --c-users: #9CA3AF;
-  --t-workspaces: rgba(22, 151, 122, 0.25); --c-workspaces: #34d399;
-}
+/* 设计令牌已统一收敛到 styles/tokens.css（唯一来源），此处只写外壳与组件样式。 */
 
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -116,6 +55,10 @@ p { margin: 0; text-wrap: pretty; }
 .num, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
 :focus-visible { outline: none; border-color: var(--accent-ai) !important; box-shadow: var(--focus-ring); }
+/* 高对比/强制配色下 box-shadow 不参与渲染，补一条真实轮廓，保证键盘可达。 */
+@media (forced-colors: active) {
+  :focus-visible { outline: 2px solid CanvasText; outline-offset: 2px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   body { animation: none; }
