@@ -188,16 +188,18 @@ async def lifespan(app: FastAPI):
     from .agent.loop_service import LoopService
 
     app.state.loop_service = LoopService()
-    from .harness.execution.workspace_guard import configure as configure_workspace_guard
+    from .harness.execution import workspace_guard
 
-    configure_workspace_guard(SessionLocal)
+    workspace_guard.configure(SessionLocal)
     try:
         yield
     finally:
         try:
             await app.state.loop_service.close()
         finally:
-            configure_workspace_guard(None)
+            # 关闭退场必须 fail-closed，不能沿用 configure(None) 的直通语义：
+            # 此刻线程池里可能仍有旧执行器在跑，拿不到工厂也不能绕过工作区互斥。
+            workspace_guard.shutdown()
             for task in (cleanup_task, approval_expiry):
                 task.cancel()
             for task in (cleanup_task, approval_expiry):

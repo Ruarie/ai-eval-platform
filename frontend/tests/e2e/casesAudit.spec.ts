@@ -459,7 +459,7 @@ test('真实六策略候选可筛选且保存规范名称，旧策略别名兼�
   expect(ctx.saves[2].cases[0].strategy).toBe('等价类')
 })
 
-test('用例生成与 AI 补全允许等待服务端模型的 120 秒预算', async ({ page }) => {
+test('用例生成允许等待服务端 280 秒预算、AI 补全保留 120 秒预算', async ({ page }) => {
   await setup(page)
   const timeouts = await page.evaluate(async () => {
     const modulePath = '/src/api/http.ts'
@@ -475,7 +475,8 @@ test('用例生成与 AI 补全允许等待服务端模型的 120 秒预算', as
       return requests
     } finally { http.interceptors.request.eject(interceptor) }
   })
-  expect(timeouts).toEqual([130000, 130000])
+  // 生成与 Worker 的 280 秒预算对齐（客户端 +10 秒），补全仍是单次短调用。
+  expect(timeouts).toEqual([290000, 130000])
 })
 
 test('候选完整审核后原子保存为新草稿，步骤与功能点可在详细编辑中修改', async ({ page }) => {

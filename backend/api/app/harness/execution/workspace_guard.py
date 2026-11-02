@@ -11,20 +11,28 @@ from app.harness.memory.agent_events import canonical_scope, scopes_overlap
 from app.models import Session, WorkspaceExecutionGuard
 
 _session_factory = None
-# 显式退场标记：应用关闭时 configure(None)，此时仍在跑的线程池工具必须
+# 显式退场标记：只在 ``shutdown()`` 时置位。此时仍在跑的线程池工具必须
 # fail-closed，不能因为拿不到工厂就绕过工作区互斥（关闭期间的静默直通）。
 _shutdown = False
 
 
 def configure(session_factory) -> None:
-    """应用启动注入共享数据库；纯执行器单测可显式注入隔离数据库。
+    """注入/撤销共享数据库；撤销后回到「未注入」状态（直通）。
 
-    ``configure(None)`` 表示隔离端口已退场（关闭流程），此后旧执行器调用一律
-    拒绝；从未注入过工厂的独立脚本/单测仍保持直通，避免破坏离线执行器。
+    ``configure(None)`` 必须保持既有语义（离线执行器与单测直接执行），
+    不能顺手当成「关闭」：应用寿命期结束要调用 ``shutdown()``。
+    两者混用会让「撤销注入」变成永久 fail-closed，污染同进程内后续调用。
     """
     global _session_factory, _shutdown
     _session_factory = session_factory
-    _shutdown = session_factory is None
+    _shutdown = False
+
+
+def shutdown() -> None:
+    """应用关闭：此后旧执行器调用 fail-closed，不再接受未受控的工作区写入。"""
+    global _session_factory, _shutdown
+    _session_factory = None
+    _shutdown = True
 
 
 def guarded_call(definition, context, execute):
