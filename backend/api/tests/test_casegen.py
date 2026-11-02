@@ -229,3 +229,54 @@ def test_parse_coverage_caps_items_and_tolerates_strings():
     assert len(result["uncovered"]) == casegen.COVERAGE_MAX_ITEMS
     assert all(len(item["reason"]) <= casegen.COVERAGE_MAX_FIELD_CHARS for item in result["uncovered"])
     assert len(result["notes"]) == casegen.COVERAGE_MAX_FIELD_CHARS
+
+
+def test_generation_budget_scales_with_case_count():
+    """输出预算随条数线性增长并封顶：40 条给 8192 会截断正文（实测 100% 失败）。"""
+    assert casegen.generation_token_budget(10) == 8192
+    assert casegen.generation_token_budget(20) > 8192
+    assert casegen.generation_token_budget(40) == 16384
+    assert casegen.generation_token_budget(80) == 16384
+    assert casegen.generation_token_budget(80) <= casegen.OUTPUT_TOKEN_CEILING
+
+
+def test_parse_cases_reports_entries_dropped_for_missing_name():
+    """缺名称的条目必须计数：旧实现静默丢弃，用户看到条数变少却无任何提示。"""
+    raw = (
+        '[{"name":"有效","strategy":"正向"},'
+        '{"strategy":"正向","steps":"1. 步骤","expected":"结果"},'
+        '"不是对象"]'
+    )
+    items, stats = casegen.parse_cases_with_stats(raw)
+    assert [item["name"] for item in items] == ["有效"]
+    assert stats == {"dropped_missing_name": 1, "dropped_non_object": 1}
+    assert casegen.parse_cases(raw) == items
+
+
+def test_dedupe_cases_merges_same_steps_and_expected():
+    """换名字但步骤与预期一字不差的近似重复必须合并。"""
+    base = {"strategy": "正向", "module": "登录", "feature_point": "验证码有效期",
+            "steps": "1. 输入手机号\n2. 输入验证码\n3. 点击登录", "expected": "登录成功并跳转首页"}
+    items = [
+        {**base, "name": "验证码有效期校验"},
+        {**base, "name": "验证码有效期校验 第2种写法"},
+        {**base, "name": "验证码过期提示", "expected": "提示验证码已过期"},
+    ]
+    kept, dropped = casegen.dedupe_cases(items)
+    assert dropped == 1
+    assert [item["name"] for item in kept] == ["验证码有效期校验", "验证码过期提示"]
+
+
+def test_dedupe_cases_keeps_pending_cases_without_content_signature():
+    """预期结果留空的待澄清用例不能被内容指纹误合并。"""
+    items = [
+        {"strategy": "正向", "name": "待澄清A", "steps": "1. 点击搜索", "expected": ""},
+        {"strategy": "正向", "name": "待澄清B", "steps": "1. 点击搜索", "expected": ""},
+    ]
+    assert casegen.dedupe_cases(items)[1] == 0
+
+
+def test_mark_pending_complete_flags_missing_expected_or_steps():
+    assert casegen.mark_pending_complete({"name": "a", "steps": "1. x", "expected": "ok"})["pending_complete"] is False
+    assert casegen.mark_pending_complete({"name": "a", "steps": "1. x", "expected": "  "})["pending_complete"] is True
+    assert casegen.mark_pending_complete({"name": "a", "expected": "ok"})["pending_complete"] is True

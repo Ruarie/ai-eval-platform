@@ -320,6 +320,17 @@ def _apply_compatible_thinking(
                 }
             }
         }
+        return
+
+    # 阿里云 MaaS 网关上的推理模型（deepseek-v4 / glm 等）默认开启思考，会把
+    # max_tokens 全部用于 reasoning_content，正文为空或截断——这正是 40 条用例
+    # 批量生成 100% 失败、12 条生成偶发 502 的根因。生成类调用（enabled=False）
+    # 显式关闭思考，与 Worker 侧 protocol.py 保持同一口径（该字段已在评测链路验证）。
+    # 其它推理供应商不在这里猜测专有字段：截断由 llm_client 的重试与
+    # BUDGET_EXCEEDED 兜底，避免向不支持的端点发送未知参数。
+    if "maas.aliyuncs.com" in target:
+        body["thinking"] = {"type": "enabled" if enabled else "disabled"}
+        return
 
 
 def _anthropic_thinking_budget(max_tokens: int, effort: str) -> int:
@@ -373,6 +384,10 @@ class AdapterResult:
     raw: dict
     latency_ms: int
     tool_calls: tuple[AdapterToolCall, ...] = field(default_factory=tuple)
+    # 归一后的终止原因：stop / length / tool_calls / content_filter / None。
+    # 生成类端点据此区分「模型乱写」与「输出被 max_tokens 截断」，前者换提示词，
+    # 后者必须抬预算重试。
+    finish_reason: str | None = None
 
 
 def _close_quietly(response: object) -> None:
@@ -468,6 +483,31 @@ def _anthropic_messages_create(
         **request,
         extra_headers={"anthropic-version": anthropic_version or "2023-06-01"},
     )
+
+
+def _finish_reason(protocol: str, data: dict) -> str | None:
+    """归一终止原因，供生成类端点判断是否被输出上限截断。
+
+    两类协议用不同词表表达同一件事：OpenAI 的 ``finish_reason=length`` 与
+    Anthropic 的 ``stop_reason=max_tokens`` 都意味着正文不完整。
+    """
+    try:
+        if protocol == "openai_responses":
+            if data.get("status") == "incomplete":
+                reason = (data.get("incomplete_details") or {}).get("reason")
+                return "length" if reason == "max_output_tokens" else str(reason or "incomplete")
+            return "stop"
+        if protocol == "openai_chat":
+            choices = data.get("choices") or []
+            first = choices[0] if choices and isinstance(choices[0], Mapping) else {}
+            raw = first.get("finish_reason")
+            return None if raw is None else str(raw)
+        raw = data.get("stop_reason")
+        if raw is None:
+            return None
+        return {"end_turn": "stop", "max_tokens": "length", "tool_use": "tool_calls"}.get(str(raw), str(raw))
+    except (AttributeError, TypeError, IndexError):
+        return None
 
 
 def _norm_usage(data: dict, *, anthropic: bool) -> dict:
@@ -765,6 +805,7 @@ def call_protocol(
         raw=data,
         latency_ms=latency_ms,
         tool_calls=tool_calls,
+        finish_reason=_finish_reason(protocol, data),
     )
 
 

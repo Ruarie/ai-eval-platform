@@ -84,6 +84,13 @@ def _legacy_api_key(profile: ProtocolProfile) -> str | None:
         raise AppError(ErrorCode.INTERNAL, "协议档凭据读取失败") from exc
 
 
+def _same_endpoint(left: str | None, right: str | None) -> bool:
+    """判断两个上游地址是否指向同一端点（忽略大小写与结尾斜杠）。"""
+    if not left or not right:
+        return False
+    return left.strip().rstrip("/").lower() == right.strip().rstrip("/").lower()
+
+
 def _profile_connection(
     profile: ProtocolProfile,
     *,
@@ -99,17 +106,23 @@ def _profile_connection(
             if profile.protocol == "anthropic_messages"
             else global_values.openai_base_url
         )
-        return (
+        base_url = (
             env_values.base_url
             or (global_base_url if allow_global_alias and not profile_env_configured else None)
-            or profile.base_url,
+            or profile.base_url
+        )
+        model = (
             env_values.model
             or (global_values.model if allow_global_alias and not profile_env_configured else None)
-            or profile.model,
-            env_values.api_key
-            or (global_values.api_key if allow_global_alias and not profile_env_configured and global_base_url else None)
-            or _legacy_api_key(profile),
+            or profile.model
         )
+        api_key = env_values.api_key or _legacy_api_key(profile)
+        if not api_key and allow_global_alias and global_values.api_key:
+            # 全局密钥只允许配它自己的地址：部分配置（有 URL/模型但漏填 Key）时，
+            # 地址与全局地址一致才复用，否则等于把密钥发往无关域名。
+            if global_base_url and _same_endpoint(base_url, global_base_url):
+                api_key = global_values.api_key
+        return base_url, model, api_key
     except AppError:
         raise
     except Exception as exc:

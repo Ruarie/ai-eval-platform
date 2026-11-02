@@ -31,7 +31,8 @@ from shared.casegen import (
     clip_source,
     dedupe_cases,
     generation_token_budget,
-    parse_cases,
+    mark_pending_complete,
+    parse_cases_with_stats,
     parse_coverage,
     rebalance_with_stats,
     selfcheck,
@@ -460,7 +461,7 @@ def ai_generate_cases(
                               max_tokens=generation_token_budget(max_count),
                               timeout_s=GENERATION_TIMEOUT_S)
     try:
-        cases = parse_cases(result.text)
+        cases, parse_stats = parse_cases_with_stats(result.text)
     except (ValueError, json.JSONDecodeError) as exc:
         raise AppError(ErrorCode.UPSTREAM, "模型输出无法解析为用例") from exc
     # 先去重再裁剪：重复项会按配额挤掉真正不同的用例。
@@ -469,10 +470,10 @@ def ai_generate_cases(
     if not cases:
         raise AppError(ErrorCode.UPSTREAM, "模型未返回符合所选策略的有效用例")
     return {
-        "items": cases,
+        "items": [mark_pending_complete(case) for case in cases],
         "checks": selfcheck(cases, weights=weights),
         "source_truncated": source_truncated,
-        "dropped": {**dropped, "dropped_duplicate": dropped_duplicate},
+        "dropped": {**dropped, "dropped_duplicate": dropped_duplicate, **parse_stats},
     }
 
 

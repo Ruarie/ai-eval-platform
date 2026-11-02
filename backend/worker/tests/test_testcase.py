@@ -176,7 +176,7 @@ def test_generation_honors_snapshot_count_and_weights(worker_db_factory, monkeyp
         assert [row.name for row in db.query(CaseItem).order_by(CaseItem.sort_order)] == ["正向1", "正向2"]
 
 
-@pytest.mark.parametrize("max_count,budget", [(45, 8192), (80, 16384)])
+@pytest.mark.parametrize("max_count,budget", [(10, 8192), (45, 16384), (80, 16384)])
 def test_generation_keeps_short_model_output_with_target_quota(
     worker_db_factory, monkeypatch, max_count, budget,
 ):
@@ -251,3 +251,69 @@ def test_confirmation_expiry_only_cancels_eligible_locked_rows(worker_db_factory
         assert "case_sets" in locks[0] and "SKIP LOCKED" in locks[0]
         assert "tasks" in locks[1]
     assert pushes == []  # 无会话任务无需广播，更不能为 finished 误报取消。
+
+
+def _truncation_task(db):
+    """登记协议档与待运行的用例任务（截断重试用例共用）。"""
+    db.add(ProtocolProfile(
+        id="profile", name="local", protocol="openai_chat",
+        base_url="https://example.test", model="local",
+    ))
+    db.add(Setting(key="agent_profile_id", value="profile"))
+    db.add(Task(
+        id="task", kind="testcase", status="running", created_by="owner",
+        claimed_by_worker_id="worker", claim_expires_at=utcnow() + timedelta(minutes=1),
+        config={"case_source": {"text": "登录需求"}, "max_count": 2},
+    ))
+    db.commit()
+
+
+def test_generation_retries_once_with_larger_budget_when_truncated(worker_db_factory, monkeypatch):
+    """输出被 max_tokens 截断时抬预算重试一次，而不是直接判「无法解析」。"""
+    with worker_db_factory() as db:
+        _truncation_task(db)
+    monkeypatch.setattr(testcase, "profile_connection", lambda *_a, **_k: (
+        "https://example.test", "local", "local-test-placeholder",
+    ))
+    monkeypatch.setattr(testcase, "read_profile_env", lambda _id: SimpleNamespace(full_url=False))
+    calls = []
+
+    def model(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return SimpleNamespace(text='[{"name":"正向1"', finish_reason="length")
+        return SimpleNamespace(
+            text='[{"name":"正向1","strategy":"正向","priority":"HX","expected":"成功"}]',
+            finish_reason="stop",
+        )
+
+    monkeypatch.setattr(testcase, "call_protocol", model)
+    testcase.run_testcase("task")
+    assert [call["max_tokens"] for call in calls] == [8192, 16384]
+    with worker_db_factory() as db:
+        assert db.get(Task, "task").status == "awaiting_case_confirm"
+        assert [row.name for row in db.query(CaseItem)] == ["正向1"]
+
+
+def test_generation_fails_with_budget_error_when_still_truncated(worker_db_factory, monkeypatch):
+    """两次都被截断时必须报预算错误，让用户知道要减少条数而不是重试碰运气。"""
+    with worker_db_factory() as db:
+        _truncation_task(db)
+    monkeypatch.setattr(testcase, "profile_connection", lambda *_a, **_k: (
+        "https://example.test", "local", "local-test-placeholder",
+    ))
+    monkeypatch.setattr(testcase, "read_profile_env", lambda _id: SimpleNamespace(full_url=False))
+    calls = []
+
+    def model(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(text='[{"name":"正向1"', finish_reason="length")
+
+    monkeypatch.setattr(testcase, "call_protocol", model)
+    testcase.run_testcase("task")
+    assert len(calls) == 2
+    with worker_db_factory() as db:
+        task = db.get(Task, "task")
+        assert task.status == "failed"
+        assert task.result["error_code"] == "BUDGET_EXCEEDED"
+        assert db.query(CaseSet).count() == 0

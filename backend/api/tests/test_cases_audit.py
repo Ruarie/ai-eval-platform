@@ -158,9 +158,13 @@ def test_generate_applies_requested_weights_and_drops_model_identity(cases_db, m
     assert all("id" not in item and item["strategy"] == "正向" for item in result["items"])
 
 
-@pytest.mark.parametrize("max_count,budget", [(45, 8192), (80, 16384)])
+@pytest.mark.parametrize("max_count,budget", [(10, 8192), (45, 16384), (80, 16384)])
 def test_generate_uses_shared_output_budget(cases_db, monkeypatch, max_count, budget):
-    """页面候选生成按目标条数传递共享输出 token 预算。"""
+    """页面候选生成按目标条数传递共享输出 token 预算。
+
+    45 条原先给 8192，实测正文被截断（模型输出半截 JSON 导致 502），
+    预算已改为随条数线性增长并封顶 16384。
+    """
     calls = []
 
     def fake_model(*_args, **kwargs):
@@ -720,3 +724,19 @@ def test_coverage_check_requires_source_and_parseable_output(cases_db, monkeypat
             CaseCoverageIn(source_text="需求", cases=[{"name": "登录"}]), cases_db, _actor(),
         )
     assert broken.value.code == ErrorCode.UPSTREAM
+
+
+def test_generate_flags_pending_items_and_reports_missing_name(cases_db, monkeypatch):
+    """缺字段的候选要带 pending_complete，缺名称的条目要进丢弃统计。"""
+    output = [
+        {"name": "完整用例", "strategy": "正向", "priority": "HX", "steps": "1. 输入验证码", "expected": "登录成功"},
+        {"strategy": "正向", "priority": "HX", "steps": "1. 输入验证码", "expected": "登录成功"},
+        {"name": "缺预期", "strategy": "正向", "priority": "HX", "steps": "1. 点击登录"},
+    ]
+    monkeypatch.setattr(routes, "call_agent_model", lambda *a, **k: SimpleNamespace(text=json.dumps(output)))
+    result = routes.ai_generate_cases(
+        CaseAiGenerateIn(source_text="登录需求", strategy_weights={"positive": 100}),
+        cases_db, _actor(),
+    )
+    assert [item["pending_complete"] for item in result["items"]] == [False, True]
+    assert result["dropped"]["dropped_missing_name"] == 1

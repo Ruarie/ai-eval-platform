@@ -114,3 +114,19 @@ def test_profile_connection_does_not_bind_unscoped_global_key(monkeypatch):
         openai_base_url=None, anthropic_base_url=None, api_key="fake-global", model=None))
     profile = SimpleNamespace(id="old", protocol="openai_chat", base_url="https://unrelated.invalid", model="unit", encrypted_key=None)
     assert profiles._profile_connection(profile, allow_global_alias=True)[2] is None
+
+
+def test_profile_connection_reuses_global_key_only_on_matching_endpoint(monkeypatch):
+    """部分配置（有地址、漏填 Key）时，仅当地址与全局地址一致才复用全局密钥。"""
+    monkeypatch.setattr(profiles, "read_profile_env", lambda *a: SimpleNamespace(
+        base_url="https://shared.invalid/v1", model="unit", api_key=None, full_url=False))
+    monkeypatch.setattr(profiles, "read_global_llm_env", lambda: SimpleNamespace(
+        openai_base_url="https://shared.invalid/v1/", anthropic_base_url=None,
+        api_key="fake-global", model="unit"))
+    profile = SimpleNamespace(id="p", name="p", protocol="openai_chat",
+                              base_url="https://unrelated.invalid", model="unit", encrypted_key=None)
+    assert profiles._profile_connection(profile, allow_global_alias=True)[2] == "fake-global"
+
+    monkeypatch.setattr(profiles, "read_profile_env", lambda *a: SimpleNamespace(
+        base_url="https://unrelated.invalid/v1", model="unit", api_key=None, full_url=False))
+    assert profiles._profile_connection(profile, allow_global_alias=True)[2] is None

@@ -19,6 +19,8 @@ logger = logging.getLogger("ai-eval.llm_client")
 # AI 生成默认超时与 token 上限（生成内容较长，给予充足余量）
 DEFAULT_TIMEOUT_S = 120.0
 DEFAULT_MAX_TOKENS = 8192
+# 截断重试：抬到两倍预算，但不能无限加码（多数供应商单次输出上限 16k–32k）。
+TRUNCATION_RETRY_CEILING = 32768
 
 
 def resolve_agent_profile(db: Session) -> ProtocolProfile:
@@ -35,6 +37,11 @@ def resolve_agent_profile(db: Session) -> ProtocolProfile:
     return profile
 
 
+def _truncated(result: AdapterResult) -> bool:
+    """输出是否被 max_tokens 截断（两类协议的终止原因已在适配层归一）。"""
+    return getattr(result, "finish_reason", None) == "length"
+
+
 def call_agent_model(
     db: Session,
     system: str,
@@ -44,16 +51,27 @@ def call_agent_model(
     max_tokens: int = DEFAULT_MAX_TOKENS,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> AdapterResult:
-    """按 Agent 协议档调用模型并返回统一结果；配置或上游异常抛 AppError。"""
+    """按 Agent 协议档调用模型并返回统一结果；配置或上游异常抛 AppError。
+
+    被 ``max_tokens`` 截断时先抬预算重试一次：截断只会产出半截 JSON，直接
+    报「无法解析」既误导用户（看起来像模型乱写），也浪费一次完整调用的成本。
+    重试仍截断才以 BUDGET_EXCEEDED 明确告知「减少条数重试」。
+    """
     profile = resolve_agent_profile(db)
     base_url, model, api_key = _profile_connection(profile, allow_global_alias=True)
     if not base_url or not model or not api_key:
-        raise AppError(ErrorCode.VALIDATION, "Agent 协议档未配置完整（缺 URL / 模型 / API Key）")
-    try:
-        from .profile_env import read_profile_env
+        missing = "、".join(
+            name for name, value in (("URL", base_url), ("模型", model), ("API Key", api_key)) if not value
+        )
+        raise AppError(ErrorCode.VALIDATION, f"Agent 协议档「{profile.name}」未配置完整（缺 {missing}）")
 
+    from .profile_env import read_profile_env
+
+    full_url = read_profile_env(profile.id).full_url
+
+    def invoke(budget: int) -> AdapterResult:
         return call_protocol(
-            full_url=read_profile_env(profile.id).full_url,
+            full_url=full_url,
             protocol=profile.protocol,
             base_url=base_url,
             model=model,
@@ -61,10 +79,29 @@ def call_agent_model(
             messages=[{"role": "user", "content": user}],
             system=system,
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=budget,
             anthropic_version=profile.anthropic_version,
             timeout_s=timeout_s,
         )
+
+    try:
+        result = invoke(max_tokens)
+        if _truncated(result):
+            retry_budget = min(TRUNCATION_RETRY_CEILING, max_tokens * 2)
+            if retry_budget > max_tokens:
+                logger.warning(
+                    "AI 生成输出被截断（max_tokens=%s，已用 %s），抬预算重试",
+                    max_tokens,
+                    (result.usage or {}).get("completion_tokens"),
+                )
+                result = invoke(retry_budget)
+                max_tokens = retry_budget
+        if _truncated(result):
+            raise AppError(
+                ErrorCode.BUDGET_EXCEEDED,
+                f"模型输出被长度上限截断（max_tokens={max_tokens}），请减少生成条数或拆分需求后重试",
+            )
+        return result
     except AppError:
         # 上游 4xx/5xx / 超时 / 协议不支持已归一为 AppError，直接透传
         raise

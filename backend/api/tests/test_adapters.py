@@ -85,3 +85,16 @@ def test_unknown_protocol_is_rejected_before_network_call():
         )
 
     assert caught.value.code == ErrorCode.VALIDATION
+
+
+def test_finish_reason_normalized_for_truncation_detection():
+    """两类协议的终止原因要归一：length / max_tokens 都表示正文不完整。"""
+    assert adapters._finish_reason("openai_chat", {"choices": [{"finish_reason": "length"}]}) == "length"
+    assert adapters._finish_reason("openai_chat", {"choices": [{"finish_reason": "stop"}]}) == "stop"
+    assert adapters._finish_reason("anthropic_messages", {"stop_reason": "max_tokens"}) == "length"
+    assert adapters._finish_reason("anthropic_messages", {"stop_reason": "end_turn"}) == "stop"
+    assert adapters._finish_reason("openai_responses", {"status": "completed"}) == "stop"
+    assert adapters._finish_reason(
+        "openai_responses",
+        {"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}},
+    ) == "length"

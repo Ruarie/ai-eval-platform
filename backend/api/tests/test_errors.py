@@ -33,3 +33,10 @@ def test_error_code_default_status_mapping():
     assert _CODE_STATUS[ErrorCode.TIMEOUT] == 504
     assert _CODE_STATUS[ErrorCode.INTERNAL] == 500
     assert _CODE_STATUS[ErrorCode.DENIED] == 403  # F5/G6：只读拒写（授权语义）
+
+
+def test_unknown_route_returns_unified_error_body(client):
+    """路由不存在也必须返回 {code,message}，前端无需为 404 单独分支。"""
+    resp = client.get("/api/definitely-not-a-route")
+    assert resp.status_code == 404
+    assert resp.json() == {"code": "NOT_FOUND", "message": "接口不存在"}
