@@ -1,13 +1,13 @@
 # AI 测试与评估平台 — API 契约
 
-> ⚠️ **当前接口边界（2026-09-28）**：仅测试用例生成任务可新建和重跑；Benchmark、RAG 评测与压测写入口停用，历史任务和报告只读保留。本文旧评测字段与示例仅用于解释历史数据；冲突时以 §3.8、§3.10、§5 当前契约及 V2.34–V2.37 修订为准。
+> ⚠️ **当前接口边界（2026-09-28）**：仅测试用例生成任务可新建和重跑；Benchmark、RAG 评测与压测写入口停用，历史任务和报告只读保留。本文旧评测字段与示例仅用于解释历史数据；冲突时以 §3.8、§3.9、§3.10、§5 当前契约及 V2.34–V2.46 修订为准。
 >
 > **文档维护提示（2026-09-11）**：部分章节含已删除模块的历史引用（如 `agent/react.py`、`plan_solve.py`）；当前实现与接口以 `AGENTS.md` 状态地图及本文最新修订为准。
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.45 |
-| 本轮审查日期 | 2026-11-02（同一需求两个协议档并行生成并对比本轮结构差异） |
+| 文档版本 | V2.46 |
+| 本轮审查日期 | 2026-11-02（知识库接入真实 LightRAG：异步建索引状态收敛、删除顺序与降级口径；不新增路径与字段） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.55（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -18,6 +18,8 @@
 | 本轮修订 | 2026-09-26：V2.28 个人长期记忆的主动保存、查看、更正、撤回与私有主会话召回；复用既有 PostgreSQL 记忆表，暂不接向量或自动抽取。 |
 | 最近修订 | 2026-09-03：V1.67 混合引擎执行落地（H2 Workflow DAG / H3 Agent TAOR）：恢复持久事件 `tool_call` / `tool_result`（payload 见 §4.3，ToolCard 只渲染脱敏摘要，观察全文不进任何事件）；`response.completed` 的 `engine` 从「分流结论」升级为「真实执行引擎」——`workflow`（H2，W0–W7 硬编码 DAG）与 `agent`（H3，plan→discover→orchestrator⇄tools 单图内 TAOR）均已真实执行，`agent_id` 审计随 Worker 目录（§3.6.3）供归属核验；`thought` / `tool_progress` / `tool_output_delta` / `confirm` / `clarify` 仍不产生。历史 `ws_events` 中的旧工具事件仍不重放。 |2026-09-03：V1.66 混合引擎 H1 Router 审计契约：`response.completed` payload 新增可选 `engine` / `router_confidence` / `router_reason`（仅 `hybrid_engine_enabled=true` 时出现，旧客户端忽略未知字段即可）；新增 `GET /api/agents` Worker 只读目录（§3.6.3）。本版不新增 WS 事件名、不恢复 `thought` / `tool_*`；`workflow` / `agent` 引擎在 H1 阶段降级按 `chat` 执行，`engine` 如实记录分流结论并经 `router_reason` 标注降级。2026-09-02：V1.65 工具契约加固（T1–T3）：JSON Schema 子集新增 `minItems`/`maxItems` 并为 8 处数组参数补上限；`output_schema` 从装饰字段升级为强制契约（注册期拒绝未声明，运行期按声明比对展示投影）；`platform.tasks` 三工具补全 `output_schema`；移除 `/api/mcp/tools/{name}/code` 端点与 `code_snippet` 字段。2026-08-28：V1.53 `web_fetch` 直抓路径接入 trafilatura 正文提取：可读性算法识别文章主体，保留标题层级/链接/图片/表格，未安装或提取失败降级回内置 `_TextExtractor`；提取真实产出 Markdown 时才声明 `format=markdown`（§4.3.1）。V1.52 优化 `web_fetch` 长文完整性与卡片预览：模型正文预算 8,000→60,000 字符，卡片预览与 `read` 同源对齐 `TOOL_PREVIEW_MAX_CHARS` 并随 `web.preview_limit_chars` 下发，直接抓取字节窗口 256KB→1MB（§4.3.1）。2026-08-27：V1.51 新增持久事件 `session_title`（§4.3）与会话标题 AI 生成契约（§4.3.2）：默认标题会话首条消息后由 Agent 协议档弱结构化生成标题并落库广播，修复标题不持久化问题。V1.50 统一 Agent 文本附件 staging 与 `read` 的 20MB 边界；`read` 模型窗口为 2,000 行 / 600,000 字符。V1.49 协议档新增 `max_output_tokens`（256–131072，默认 8192），创建/更新/列表/详情均支持；Agent 模型调用从协议档读取输出上限，长文档总结/导出类任务可调大避免回答被截断。2026-08-26：V1.48 同轮多调用默认串行，灰度开启后仅 `read`/`web_search`/`web_fetch` 可并行，回填按原始 `call_id`。V1.47 新增 `GET /api/agent/metrics`，不含正文/参数，不新增 WS 事件。V1.46 明确 native 一次 ToolCall 结束当前上游响应，结果回填后再请求，不新增事件名。V1.45 思考链只下发可展示摘要，隐藏 CoT（`Here's a thinking process` / `Analyze User Input`）由服务端替换，不原样推给前端。V1.44 ToolCall 在执行前持久化，新增瞬态 `tool_progress` / `tool_output_delta`，并冻结原生工具的输出 Schema、权限边界和失败恢复字段。V1.43 思考增量允许合并下发；有思考链时 `think_final` 在 `response.completed` 之前。V1.42 Direct `/help`、未知斜杠与图内防御提示在业务事件后必须再发 `response.completed`（成功 `stop`，校验/防御 `error`），结束整轮生成态。V1.41 确认卡预填与 `confirm_ack` 入队前丢掉已删除的协议档/数据集/知识库 ID，避免 Worker 再报「协议档不存在或已删除」。V1.40 `/cancel` 与 `/stress` 按 §4.4 解禁（仍走 `user_message`）：`/cancel` 取消本会话非终态任务，`/stress` 发出质量任务确认卡且 `with_stress=true`，禁止 `kind=stress`。V1.39 原生工具卡片收起态副标题统一为 `ToolCall`，不在卡片摘要区回显文件路径、命令或写入内容；详细参数仍在展开区展示。V1.38 明确原生基础 ToolCall 卡片使用英文工具名，展开区统一显示 `ToolCall` 与 `输出`，文件、命令和代码/文档结果使用行号展示；MCP/平台短工具仍按下方中文名映射。2026-08-24：V1.24 修复 Agent 附件上下文链路：服务端校验文件归属并在模型窗口解析文本、PDF、DOCX、XLSX，图片按三协议图文内容块发送；历史消息附件补齐安全元数据，前端可在刷新后继续预览。同步调整输入框内附件按钮与用户消息附件位序。V1.23 扩展 Agent 附件契约，支持图片、Word 文档与多附件拖拽上传；保留 `POST /api/files` 后再以既有 `file_id` 引用的消息链路，补充图片缩略图、PDF/文本预览与 Office 文件打开/下载说明。V1.22 修复 V1.21 遗留：§4.4 标题「仅此三条」改「仅此四条」、§9 禁止清单「第四种」改「第五种」并补四类上行事件枚举、§4.3 `tool_result.source` 语义对齐 M7 `Observation.source`（溯源标识字符串，非 short\|long 枚举）、§4.3 共享流规则补 clarify/plan/confirm 持久化广播说明、§4.4 clarify 多副本限制注明、§9 Ask/Plan 补注非 Harness plan 事件；V1.20 及更早版本沿用历史修订记录。 |
 | 适用范围 | V1.0：浏览器 `web/` ↔ `api`；全域 REST + WS 接口规范 |
+
+> V2.46（2026-11-02）：知识库接入真实 LightRAG 引擎（§3.9）。**不新增平台 REST/WS 路径与字段**，仅明确既有语义：上传响应与文档列表的 `status` 由引擎异步建索引决定（`indexing | indexed | failed`），`indexing` 会在列表查询时向 LightRAG 回读并收敛；`DELETE` 文档/知识库改为「先删引擎索引、再删库内记录」，引擎已配置但删除失败返回 `UPSTREAM`；Playground 的 `similarity` 允许为 `null`（LightRAG 只给排序不给分数），前端显示占位符而不伪造 0；检索降级口径收紧为「仅不可达/服务端错误才回退本地关键词」，引擎可用但召回为空仍记 `lightrag`。删除与状态回读在服务端按批执行（删除 ≤50/批、状态 ≤200/批），对调用方仍是一次请求；`indexing`/`failed` 文档的删除不强制引擎成功，避免引擎不可用时无法清理。适配服务内部契约（`/documents/index`、`/documents/status`、`/documents/delete`、`/query`）属容器内网，不属于本契约范围，见《AI测试与评估平台-LightRAG接入技术方案.md》。
 
 > V1.86（2026-09-09）：协议档页面 `POST /api/profiles/{id}/check` 的真实 ping 探活上限与通用协议调用统一为 30 秒，避免上游模型冷启动被误判为不可用；响应字段与错误码不变。
 
@@ -1380,11 +1382,16 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 
 #### `POST /api/kb/{id}/documents`  multipart `file`
 
-上传文档建索引；后端生成 `doc_id` UUID 写入 LightRAG metadata，自动执行分块与向量化。响应 `{ "doc_id", "filename", "status": "indexed" }`。
+上传文档建索引；后端生成 `doc_id` UUID，并以 `{kb_id}__{doc_id}__{filename}` 作为 LightRAG 文档来源标识（LightRAG 只保留 basename，故用前缀承载 ID），由引擎异步执行分块、向量化与图谱抽取。响应 `{ "doc_id", "filename", "status": "indexing" | "failed" }`：
+
+- `indexing`：适配服务已受理，实际状态由 `GET /api/kb/{id}/documents` 回读 LightRAG 后收敛；
+- `failed`：正文无法提取（二进制/解码失败），或 LightRAG 未配置/拒绝受理。**不得**把未建索引的文档标为 `indexed`。
 
 #### `GET /api/kb/{id}/documents`
 
 返回当前知识库文档及索引状态：`{ "items": [{ "doc_id", "filename", "size", "status" }] }`。`status` 为 `indexing | indexed | failed`；列表不内嵌文本或切块。
+
+列表会向 LightRAG 回读仍处于 `indexing` 的文档并落库收敛：`pending/processing → indexing`、`processed → indexed`、`failed → failed`。引擎不可用或回读失败时保留库内原状态，不猜测结果；若引擎侧的 `pending/processing` 记录已无对应在建任务（进程重启或崩溃残留），该文档按 `failed` 返回，由用户重新上传，避免永久 `indexing`。回读结果有 3 秒进程内缓存，用于抵消轮询造成的重复查询。
 
 #### `GET /api/kb/{id}/documents/{doc_id}/chunks?chunk_size=512&overlap=64`
 
@@ -1398,11 +1405,11 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 
 #### `DELETE /api/kb/{id}/documents/{doc_id}`
 
-删除指定文档及其向量切块索引。
+删除指定文档及其向量切块与图谱索引。实现顺序为「先删引擎、再删库内记录」：LightRAG 已配置但删除失败时返回 `UPSTREAM`(502) 并保持记录存在，避免出现「库里已删、向量库仍召回」的脏数据；引擎未配置时无索引可删，直接完成。对 `indexing` / `failed` 的文档（引擎里可能从未落库）不强制引擎删除成功，否则引擎不可用时用户将无法清理未建成的文档；`DELETE /api/kb/{id}` 同理，按索引状态分组处理。
 
 #### `POST /api/kb/{id}/query`
 
-执行 LightRAG 原生 4 模式检索测试（Playground），返回 Top-K 切块、相似度得分与评测指标。V1.0 不返回实验性的投影或 rerank 比对结果。
+执行 LightRAG 原生 4 模式检索测试（Playground），返回 Top-K 切块与评测指标。平台只做召回、不生成答案（`only_need_context`），因此不产生额外答案生成费用；`similarity` 为 `null` 表示引擎只给排序、不给分数，前端显示占位符而不伪造 0。V1.0 不返回实验性的投影或 rerank 比对结果。
 
 ```json
 {
@@ -1417,11 +1424,13 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 ```json
 {
   "items": [
-    { "chunk_id": "d-01#c03", "doc_name": "product-manual.pdf", "similarity": 0.87, "text": "...", "hit": true }
+    { "chunk_id": "d-01#c03", "doc_name": "product-manual.pdf", "similarity": null, "text": "...", "hit": true }
   ],
   "metrics": { "hit_rate": 0.80, "mrr": 0.74, "recall": 0.85, "contain": 0.83 }
 }
 ```
+
+检索服务不可达时回退本地关键词检索，RAG 报告以 `degraded` / `engine_counts` 标注来源；引擎可用但召回为空属于真实未命中，仍记 `lightrag`，不得用本地兜底掩盖引擎状态。
 
 #### `GET /api/kb/{id}/gold-qa` / `POST /api/kb/{id}/gold-qa`
 

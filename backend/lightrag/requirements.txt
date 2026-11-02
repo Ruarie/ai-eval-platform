@@ -1,3 +1,7 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
+# 真实 RAG 引擎：按 PRD 6.5 锁 tag，禁止浮动版本（LightRAG 升级风险项要求锁版本）。
+lightrag-hku==1.5.7
+# LightRAG 的 OpenAI 兼容绑定（对话抽取 + 向量化）依赖官方 SDK。
+openai>=2.0.0,<4.0.0

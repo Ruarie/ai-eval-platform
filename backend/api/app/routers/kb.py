@@ -11,12 +11,21 @@ import csv
 import io
 import json
 import logging
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi import Request as FastApiRequest
-from shared.kb import chunk_text, compute_metrics, retrieve
 from sqlalchemy.orm import Session
+
+from shared.kb import (
+    chunk_text,
+    compute_metrics,
+    delete_documents,
+    document_statuses,
+    index_document,
+    retrieve,
+)
 
 from ..config import settings
 from ..db import get_db
@@ -221,10 +230,23 @@ def delete_kb(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """删除知识库及其文档（含磁盘文件）与黄金 QA。"""
+    """删除知识库及其文档（含磁盘文件、LightRAG 索引）与黄金 QA。"""
     kb = _get_kb_or_404(db, kb_id)
+    docs = db.query(KbDocument).filter(KbDocument.kb_id == kb.id).all()
 
-    for doc in db.query(KbDocument).filter(KbDocument.kb_id == kb.id).all():
+    # 先清引擎索引：已建索引的文档删除失败即中止，避免留下无法再定位的脏召回。
+    indexed = [doc.id for doc in docs if doc.status == "indexed"]
+    others = [doc.id for doc in docs if doc.status != "indexed"]
+    if not delete_documents(kb.id, indexed):
+        raise AppError(ErrorCode.UPSTREAM, "LightRAG 索引删除失败，请稍后重试")
+    # 建索引未完成/失败的文档在引擎里可能从未落库：删除失败不应阻断清理，
+    # 否则引擎不可用时用户连空知识库都删不掉。
+    if others and not delete_documents(kb.id, others):
+        logger.warning(
+            "知识库删除时未完成索引的文档未在引擎中清理 kb_id=%s 条数=%d", kb.id, len(others)
+        )
+
+    for doc in docs:
         if doc.storage_path:
             Path(doc.storage_path).unlink(missing_ok=True)
     db.query(KbDocument).filter(KbDocument.kb_id == kb.id).delete()
@@ -278,6 +300,9 @@ async def upload_doc(
     await asyncio.to_thread(storage_dir.mkdir, parents=True, exist_ok=True)
     await asyncio.to_thread(storage_path.write_bytes, content)
     text = await asyncio.to_thread(_decode_text, content)
+    # 先记 indexing：真实索引由 LightRAG 适配服务异步完成，状态回读后再收敛。
+    # 没有可用正文（二进制或解码失败）时直接 failed，不做乐观标记。
+    doc_status = "indexing" if text else "failed"
     doc = KbDocument(
         id=doc_id,
         kb_id=kb_id,
@@ -285,7 +310,7 @@ async def upload_doc(
         size=len(content),
         mime=file.content_type or "",
         text=text,
-        status="indexed" if text else "failed",
+        status=doc_status,
         storage_path=str(storage_path),
         created_by=user.id,
     )
@@ -301,18 +326,37 @@ async def upload_doc(
         )
     )
     try:
+        # flush 生成 created_at 等默认值；响应改用局部变量，避免 commit 后回表
+        # 把整段正文（最大 20MB）重新拉回内存。
+        db.flush()
+        created_at = doc.created_at
         db.commit()
     except Exception:
         db.rollback()
         storage_path.unlink(missing_ok=True)
         raise
-    db.refresh(doc)
+
+    if text:
+        # 建索引是长耗时操作（LightRAG 需多次 LLM 抽取），必须离开事件循环执行；
+        # 适配服务只受理入队，故此处等待时间与文档体积无关。
+        result = await asyncio.to_thread(index_document, kb_id, doc_id, filename, text)
+        doc_status = result["status"]
+        try:
+            # 只更新状态列：对象级赋值/refresh 会让该行整体重新加载。
+            # synchronize_session=False 避免 update 反向同步会话对象时回表。
+            db.query(KbDocument).filter(KbDocument.id == doc_id).update(
+                {"status": doc_status}, synchronize_session=False
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.warning("文档索引状态回写失败 doc_id=%s", doc_id)
     return KbDocOut(
-        doc_id=doc.id,
-        filename=doc.filename,
-        status=doc.status,
-        size=_format_size(doc.size),
-        created_at=doc.created_at,
+        doc_id=doc_id,
+        filename=filename,
+        status=doc_status,
+        size=_format_size(len(content)),
+        created_at=created_at,
     )
 
 
@@ -329,6 +373,49 @@ def _decode_text(content: bytes) -> str:
     return ""
 
 
+# 状态回读的短 TTL 缓存：前端在建索引期间每 5 秒轮询，多标签页/多用户同时
+# 打开同一库时会重复打引擎。缓存值 None 表示「引擎未收录」，同样避免重复查询。
+_STATUS_CACHE_TTL_S = 3.0
+_status_cache: dict[str, tuple[float, str | None]] = {}
+
+
+def _cached_statuses(doc_ids: list[str]) -> dict[str, str]:
+    """带短 TTL 的批量状态回读；过期项顺带清理，避免长期运行无限增长。"""
+    now = time.monotonic()
+    for doc_id in [key for key, (ts, _) in _status_cache.items() if now - ts > _STATUS_CACHE_TTL_S]:
+        _status_cache.pop(doc_id, None)
+    missing = [doc_id for doc_id in doc_ids if doc_id not in _status_cache]
+    if missing:
+        live = document_statuses(missing)
+        stamp = time.monotonic()
+        for doc_id in missing:
+            _status_cache[doc_id] = (stamp, live.get(doc_id))
+    return {
+        doc_id: status
+        for doc_id in doc_ids
+        if (status := _status_cache.get(doc_id, (0.0, None))[1]) is not None
+    }
+
+
+def _refresh_doc_statuses(db: Session, rows: list[KbDocument]) -> dict[str, str]:
+    """回读仍在建索引的文档状态，返回需要落库的新状态（不在此处提交）。
+
+    由调用方先用返回结果构造响应、再统一 UPDATE：``commit`` 会让会话对象过期，
+    逐行回表会把正文列（最大 20MB）重新拉进内存。引擎不可用或回读失败时返回
+    空集合，保留数据库原值，避免把「查不到」误写成 failed。
+    """
+    pending = [doc.id for doc in rows if doc.status == "indexing"]
+    if not pending:
+        return {}
+    current = {doc.id: doc.status for doc in rows}
+    live = _cached_statuses(pending)
+    return {
+        doc_id: status
+        for doc_id, status in live.items()
+        if status and current.get(doc_id) not in (None, status)
+    }
+
+
 @router.get("/{kb_id}/documents")
 def list_docs(
     kb_id: str,
@@ -343,16 +430,28 @@ def list_docs(
         .order_by(KbDocument.created_at.asc())
         .all()
     )
+    updates = _refresh_doc_statuses(db, rows)
+    # 先按新状态构造响应，再做 UPDATE：commit 后对象过期，任何属性访问都会回表。
     items = [
         KbDocOut(
             doc_id=doc.id,
             filename=doc.filename,
-            status=doc.status,
+            status=updates.get(doc.id, doc.status),
             size=_format_size(doc.size),
             created_at=doc.created_at,
         )
         for doc in rows
     ]
+    if updates:
+        try:
+            for doc_id, status in updates.items():
+                db.query(KbDocument).filter(KbDocument.id == doc_id).update(
+                    {"status": status}, synchronize_session=False
+                )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.warning("文档索引状态同步失败（保留原状态） 条数=%d", len(updates))
     return {"items": items, "total": len(items)}
 
 
@@ -382,8 +481,21 @@ def delete_doc(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """删除文档记录与磁盘文件。"""
+    """删除文档记录、磁盘文件与 LightRAG 索引。
+
+    先删引擎再删库内记录：引擎删除失败时抛错中止，避免留下「库里已删、
+    向量库里仍在」的脏召回。引擎未配置或空库场景由适配服务按幂等处理。
+    """
     doc = _get_doc_or_404(db, kb_id, doc_id)
+    if not delete_documents(kb_id, [doc.id]):
+        if doc.status == "indexed":
+            raise AppError(ErrorCode.UPSTREAM, "LightRAG 索引删除失败，请稍后重试")
+        # 从未建成索引的文档在引擎里可能没有记录：引擎不可用不该把用户锁死。
+        logger.warning(
+            "删除未完成索引的文档时引擎不可用，按无残留处理 doc_id=%s status=%s",
+            doc.id,
+            doc.status,
+        )
     if doc.storage_path:
         Path(doc.storage_path).unlink(missing_ok=True)
     db.add(

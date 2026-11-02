@@ -98,8 +98,15 @@ services:
       AGENT_PARALLEL_TOOL_BATCH_PROFILE_IDS: ${AGENT_PARALLEL_TOOL_BATCH_PROFILE_IDS:-}
       # Harness 记忆层 Redis 连接（短期回合状态 / 幂等键）；接入前无消费者，仅预注入。
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      # 检索 Playground / RAG 评测的 LightRAG 服务地址；stub 空返回时共享检索层自动回退本地关键词。
+      # LightRAG 适配服务地址与内部口令；引擎不可用时共享检索层回退本地关键词并标注降级。
       LIGHTRAG_BASE_URL: ${LIGHTRAG_BASE_URL:-http://lightrag:9621}
+      LIGHTRAG_API_KEY: ${LIGHTRAG_API_KEY:-}
+      # 检索/受理/状态/删除四类超时独立配置：检索需容忍关键词抽取，删除需容忍
+      # 图谱摘要重建，单一变量会把删除窗口缩短。
+      LIGHTRAG_QUERY_TIMEOUT_SECONDS: ${LIGHTRAG_QUERY_TIMEOUT_SECONDS:-60}
+      LIGHTRAG_INDEX_TIMEOUT_SECONDS: ${LIGHTRAG_INDEX_TIMEOUT_SECONDS:-15}
+      LIGHTRAG_STATUS_TIMEOUT_SECONDS: ${LIGHTRAG_STATUS_TIMEOUT_SECONDS:-15}
+      LIGHTRAG_DELETE_TIMEOUT_SECONDS: ${LIGHTRAG_DELETE_TIMEOUT_SECONDS:-120}
       # 沙箱 runner（compose 内网，不发布主机端口；P4-3 起 bash 由 runner 执行）
       SANDBOX_RUNNER_URL: ${SANDBOX_RUNNER_URL:-http://runner:8001}
       RUNNER_INTERNAL_TOKEN: ${RUNNER_INTERNAL_TOKEN:-}
@@ -234,8 +241,13 @@ services:
       PROFILE_ENV_FILE: ${PROFILE_ENV_FILE:-/run/config/.env}
       # 与 api 容器共享同一 Redis；Worker 后续按需消费任务事件。
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      # RAG 评测检索的 LightRAG 服务地址；stub 空返回时共享检索层自动回退本地关键词。
+      # RAG 评测检索的 LightRAG 适配服务地址与内部口令（超时与 api 保持一致）。
       LIGHTRAG_BASE_URL: ${LIGHTRAG_BASE_URL:-http://lightrag:9621}
+      LIGHTRAG_API_KEY: ${LIGHTRAG_API_KEY:-}
+      LIGHTRAG_QUERY_TIMEOUT_SECONDS: ${LIGHTRAG_QUERY_TIMEOUT_SECONDS:-60}
+      LIGHTRAG_INDEX_TIMEOUT_SECONDS: ${LIGHTRAG_INDEX_TIMEOUT_SECONDS:-15}
+      LIGHTRAG_STATUS_TIMEOUT_SECONDS: ${LIGHTRAG_STATUS_TIMEOUT_SECONDS:-15}
+      LIGHTRAG_DELETE_TIMEOUT_SECONDS: ${LIGHTRAG_DELETE_TIMEOUT_SECONDS:-120}
       # 压测引擎（容器内网）；Worker 只下发 / 轮询，不在本进程发压。
       STRESS_URL: ${STRESS_URL:-http://stress:19090}
       # 调度星图用稳定节点 ID；多副本时必须分别指定，避免互相覆盖心跳。
@@ -272,18 +284,43 @@ services:
 
   lightrag:
     image: ${LIGHTRAG_IMAGE:-ai-eval-platform-lightrag}
-    mem_limit: 512m
+    # 真实引擎要加载向量库、图存储与 pandas，建索引期间内存明显高于旧 stub；
+    # 768m 在长文档抽取时会 OOM，默认提到 1g（可用 LIGHTRAG_MEM_LIMIT 覆盖）。
+    mem_limit: ${LIGHTRAG_MEM_LIMIT:-1g}
     build: ./backend/lightrag
     restart: unless-stopped
     environment:
-      LIGHTRAG_LLM_API_KEY: ${LIGHTRAG_LLM_API_KEY:-}
+      # 图谱抽取（LLM）与向量化（Embedding）都走 OpenAI 兼容网关；
+      # Key 只注入本容器，平台 API/Worker 不持有。
       LIGHTRAG_LLM_BASE_URL: ${LIGHTRAG_LLM_BASE_URL:-}
+      LIGHTRAG_LLM_API_KEY: ${LIGHTRAG_LLM_API_KEY:-}
       LIGHTRAG_LLM_MODEL: ${LIGHTRAG_LLM_MODEL:-gpt-4o-mini}
+      LIGHTRAG_LLM_TIMEOUT_SECONDS: ${LIGHTRAG_LLM_TIMEOUT_SECONDS:-180}
+      LIGHTRAG_EMBEDDING_BASE_URL: ${LIGHTRAG_EMBEDDING_BASE_URL:-}
+      LIGHTRAG_EMBEDDING_API_KEY: ${LIGHTRAG_EMBEDDING_API_KEY:-}
       LIGHTRAG_EMBEDDING_MODEL: ${LIGHTRAG_EMBEDDING_MODEL:-BAAI/bge-m3}
+      LIGHTRAG_EMBEDDING_DIM: ${LIGHTRAG_EMBEDDING_DIM:-1024}
+      LIGHTRAG_CHUNK_TOKEN_SIZE: ${LIGHTRAG_CHUNK_TOKEN_SIZE:-1200}
+      LIGHTRAG_CHUNK_OVERLAP_TOKENS: ${LIGHTRAG_CHUNK_OVERLAP_TOKENS:-100}
+      # 引擎数据目录（图 + 向量 + doc_status），随 ./data 持久化。
+      LIGHTRAG_DATA_DIR: /data/lightrag
+      # 平台 → 适配服务的内部口令；api/worker 侧同名注入，仅走容器内网。
+      LIGHTRAG_API_KEY: ${LIGHTRAG_API_KEY:-}
+      # 待索引队列上限：排队文档的正文驻留内存，超限返回 429 由平台落 failed。
+      LIGHTRAG_MAX_QUEUE_DOCUMENTS: ${LIGHTRAG_MAX_QUEUE_DOCUMENTS:-64}
+      # 停机宽限期：给在建索引任务收尾时间，避免 doc_status 停在 processing。
+      LIGHTRAG_SHUTDOWN_GRACE_SECONDS: ${LIGHTRAG_SHUTDOWN_GRACE_SECONDS:-30}
     ports:
       - "${LIGHTRAG_PORT:-9621}:9621"
     volumes:
       - ./data/lightrag:/data/lightrag
+    healthcheck:
+      # 只检查进程可服务；是否真能建索引看响应里的 ready 字段（运维排查用）。
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9621/health', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   stress:
     image: ${STRESS_IMAGE:-ai-eval-platform-stress}

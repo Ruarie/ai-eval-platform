@@ -1,0 +1,28 @@
+# LightRAG 适配层的传递依赖锁定。
+#
+# lightrag-hku 对下列库只声明版本范围，不锁具体版本；不锁会让图谱存储、向量
+# 计算与模型调用的依赖随构建漂移（同一 commit 构建出不同行为）。版本取自
+# lightrag-hku==1.5.7 的真实安装结果，升级 lightrag-hku 时必须同步复核本文件。
+
+# 图存储与向量计算：直接决定图谱落盘结构和数值行为。
+pandas==3.1.0
+numpy==2.4.6
+networkx==3.6.1
+nano-vectordb==0.0.4.3
+
+# 模型调用与分词：行为变化会影响抽取结果和 token 计数。
+openai==3.42.1
+tiktoken==0.14.0
+google-genai==2.8.0
+
+# 数据模型与网络栈：pydantic 影响 doc_status 序列化，httpx/tenacity 影响重试。
+pydantic==2.10.4
+httpx==0.28.1
+tenacity==9.1.4
+
+# 文档解析与工具函数。
+python-dotenv==1.2.4
+xlsxwriter==3.3.1
+pypinyin==0.55.0
+json_repair==0.64.3
+aiohttp==3.14.5

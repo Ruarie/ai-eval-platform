@@ -6,8 +6,9 @@
 3. 每行落一条 ``eval_items``（profile_id=kb_id，score=首选 mode 的 hit_rate）；
 4. 汇总写 ``reports``（kind=rag，含 per_mode 明细）并置 succeeded。
 
-检索经 ``shared.kb`` 完成：LightRAG 服务可用时优先，空返回则回退本地关键词
-检索兜底，保证 E2E 能产出真实报告；M3 替换 lightrag-hku 后无需改动本执行器。
+检索经 ``shared.kb`` 完成：LightRAG 适配服务可用时优先（真实引擎，召回为空也算
+真实未命中）；只有未配置 / 不可达 / 服务端错误才回退本地关键词检索，并由报告
+的 ``degraded`` / ``engine_counts`` 标注来源，禁止把兜底成绩当作引擎结果。
 本执行器不做 LLM 调用，不写 UsageLedger；answer_contain 采用「参考答案子串
 出现在检索文本中」的文档包含判定。
 """

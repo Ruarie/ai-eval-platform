@@ -89,6 +89,8 @@ echo "==> [5/6] 生成 .env"
 if [ ! -f "$APP_DIR/.env" ]; then
     SECRET_KEY=$(openssl rand -hex 32)
     POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 20)
+    # LightRAG 适配服务的内部口令：9621 会发布到宿主机，必须默认不为空。
+    LIGHTRAG_API_KEY=$(openssl rand -hex 16)
     KEY_ENCRYPTION_KEY=""
     if command -v python3 >/dev/null 2>&1; then
         KEY_ENCRYPTION_KEY=$(python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
@@ -106,13 +108,29 @@ WS_TICKET_EXPIRE_MINUTES=5
 WEB_PORT=80
 API_PORT=8000
 LIGHTRAG_PORT=9621
+# 平台 ↔ LightRAG 适配服务内部口令；未填 LLM/Embedding 时引擎保持未就绪。
+LIGHTRAG_API_KEY=$LIGHTRAG_API_KEY
 STRESS_PORT=19090
 EOF
     chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR/.env"
     chmod 600 "$APP_DIR/.env"
     echo "已生成 $APP_DIR/.env（请修改 BOOTSTRAP_ADMIN_PASSWORD）"
 else
-    echo ".env 已存在，跳过"
+    echo ".env 已存在，跳过生成"
+    # 存量部署补齐 LightRAG 内部口令：9621 发布到宿主机，空口令等于无鉴权，
+    # 任何人可直接删除索引。仅在缺省或为空时补写，不覆盖已有值。
+    if ! grep -q '^LIGHTRAG_API_KEY=.\+' "$APP_DIR/.env"; then
+        LIGHTRAG_API_KEY=$(openssl rand -hex 16)
+        if grep -q '^LIGHTRAG_API_KEY=' "$APP_DIR/.env"; then
+            sed -i "s|^LIGHTRAG_API_KEY=.*|LIGHTRAG_API_KEY=$LIGHTRAG_API_KEY|" "$APP_DIR/.env"
+        else
+            printf '\n# LightRAG 适配服务内部口令（升级补写）\nLIGHTRAG_API_KEY=%s\n' \
+                "$LIGHTRAG_API_KEY" >> "$APP_DIR/.env"
+        fi
+        chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR/.env"
+        chmod 600 "$APP_DIR/.env"
+        echo "已为存量 .env 补写 LIGHTRAG_API_KEY（重新 up -d 后生效）"
+    fi
 fi
 
 echo "==> [6/6] 完成"

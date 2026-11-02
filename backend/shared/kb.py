@@ -1,8 +1,15 @@
 """知识库域共享工具：文本切块、检索与检索指标计算（api / worker 共用）。
 
-LightRAG 服务目前是空返回 stub。检索策略为「先调 LightRAG，无结果则回退
-本地关键词检索」，保证 RAG 评测链路端到端可产出真实报告；M3 替换为
-lightrag-hku 后，只要其 ``/query`` 返回非空 contexts 即自动切回。
+检索与索引统一走 ``backend/lightrag`` 适配服务（真实 LightRAG 引擎）：
+
+- 上传文档 → ``POST /documents/index`` 受理建索引（异步抽取），状态由
+  ``/documents/status`` 回读，平台据此展示 indexing / indexed / failed；
+- 删除文档 → ``POST /documents/delete`` 清掉切块与图谱元素；
+- 检索 → ``POST /query``（naive/local/global/hybrid），按知识库来源前缀过滤。
+
+**降级口径**：只有「未配置 / 不可达 / 5xx」才回退本地关键词检索，并在报告里
+标注 ``degraded``；引擎可用但召回为空属于真实「未命中」，仍按 lightrag 记账，
+不得用本地兜底掩盖引擎状态（AGENTS.md §5.2 第 5 条）。
 """
 
 import json
@@ -10,6 +17,7 @@ import logging
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 logger = logging.getLogger("ai-eval.kb")
@@ -20,13 +28,86 @@ MAX_K = 20
 DEFAULT_K = 5
 # 单次切块预览的最大分块数，防止超大文档一次生成海量切块
 MAX_CHUNK_PREVIEW = 200
-# 调用 LightRAG /query 的超时（秒）：stub 或不可达时快速回退本地检索
-LIGHTRAG_TIMEOUT_S = 2.0
+# 三类调用的超时各自独立：单一变量会把删除超时改小、把建索引受理超时放大。
+# 检索：hybrid/local/global 模式内部先做一轮关键词抽取，2 秒级别的旧 stub 超时
+# 会把正常检索误判为不可用。
+LIGHTRAG_QUERY_TIMEOUT_S = 60.0
+# 建索引受理：接口只负责入队，返回很快；超时说明服务异常。
+LIGHTRAG_INDEX_TIMEOUT_S = 15.0
+# 状态回读：只查 doc_status，不应长时间阻塞文档列表。
+LIGHTRAG_STATUS_TIMEOUT_S = 15.0
+# 删除索引：删除会重建受影响实体的图谱摘要，整库删除可能跨数分钟。
+LIGHTRAG_DELETE_TIMEOUT_S = 120.0
+# 单次请求携带的文档 ID 上限：避免整库删除/状态回读被服务端或代理截断。
+DOC_BATCH_SIZE = 50
+STATUS_BATCH_SIZE = 200
 
 
 def _lightrag_base_url() -> str:
     """读取 LightRAG 服务地址；未配置时返回空串表示禁用上游。"""
     return os.environ.get("LIGHTRAG_BASE_URL", "").strip()
+
+
+def _lightrag_timeout(env_name: str, default: float, legacy: str = "") -> float:
+    """读取指定环境变量覆盖该类调用的超时（非法值回退默认）。
+
+    ``legacy`` 指向旧版单一变量（``LIGHTRAG_TIMEOUT_SECONDS``）：只有检索沿用它，
+    删除与建索引必须使用各自的默认值，否则调小检索超时会连带缩短删除窗口。
+    """
+    names = [env_name] + ([legacy] if legacy else [])
+    for name in names:
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            continue
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        if value > 0:
+            return value
+    return default
+
+
+def _batched(items: list[str], size: int) -> list[list[str]]:
+    """按固定大小切分 ID 列表；``size`` 非法时退化为单批。"""
+    step = size if size and size > 0 else len(items) or 1
+    return [items[i : i + step] for i in range(0, len(items), step)]
+
+
+def _query_timeout() -> float:
+    """检索超时：优先新变量，兼容旧版 ``LIGHTRAG_TIMEOUT_SECONDS``。"""
+    return _lightrag_timeout(
+        "LIGHTRAG_QUERY_TIMEOUT_SECONDS", LIGHTRAG_QUERY_TIMEOUT_S, legacy="LIGHTRAG_TIMEOUT_SECONDS"
+    )
+
+
+def _lightrag_headers() -> dict:
+    """构造调用适配服务的请求头；内部口令仅走容器内网，不落日志。"""
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("LIGHTRAG_API_KEY", "").strip()
+    if token:
+        headers["X-API-Key"] = token
+    return headers
+
+
+def _lightrag_post(path: str, payload: dict, timeout: float) -> dict | None:
+    """POST 调用适配服务；不可达、未配置或返回 5xx 时返回 None。"""
+    base = _lightrag_base_url()
+    if not base:
+        return None
+    request = urllib.request.Request(
+        f"{base.rstrip('/')}{path}",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=_lightrag_headers(),
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError):
+        # 只记录路径与结果，不打上游响应正文，避免把引擎细节或密钥带进日志。
+        logger.warning("LightRAG 调用失败 path=%s，由调用方按降级口径处理", path)
+        return None
 
 
 def chunk_text(
@@ -94,45 +175,143 @@ def _score_chunk(chunk_text_: str, terms: list[str]) -> float:
     return hits / len(terms)
 
 
-def _try_lightrag(query: str, mode: str, k: int) -> list[dict] | None:
-    """调用 LightRAG ``/query``；返回映射后的上下文列表，不可用返回 None。"""
+def _try_lightrag(kb_id: str, query: str, mode: str, k: int) -> list[dict] | None:
+    """调用适配服务 ``/query``；返回映射后的上下文列表，不可用返回 None。
+
+    注意与旧 stub 的差别：引擎可用但召回为空时返回空列表（真实未命中），
+    只有未配置 / 不可达 / 5xx 才返回 None 触发本地兜底。
+    """
+    data = _lightrag_post(
+        "/query",
+        {"query": query, "mode": mode or "hybrid", "top_k": min(k, MAX_K), "kb_id": kb_id},
+        timeout=_query_timeout(),
+    )
+    if data is None:
+        return None
+    items: list[dict] = []
+    for ctx in data.get("contexts") or []:
+        if not isinstance(ctx, dict):
+            continue
+        chunk_id = str(ctx.get("id") or "")
+        if not chunk_id:
+            continue
+        # 适配层直接给出平台 doc_id；缺失时退化为按切块 ID 前缀解析（兼容旧数据）。
+        doc_id = str(ctx.get("doc_id") or "") or chunk_id.split("#", 1)[0]
+        items.append(
+            {
+                "chunk_id": chunk_id,
+                "doc_id": doc_id,
+                "doc_name": str(ctx.get("doc_name") or "") or doc_id,
+                "text": str(ctx.get("text") or ""),
+                "similarity": None,
+            }
+        )
+    return items
+
+
+def index_document(kb_id: str, doc_id: str, filename: str, text: str) -> dict:
+    """请求适配服务为文档建索引（异步受理）。
+
+    返回 ``{"accepted": bool, "status": "indexing"|"failed"}``：适配服务不可用
+    或拒绝受理时为 ``failed``，由调用方如实落库，禁止把未建索引的文档标成
+    ``indexed``。
+    """
+    if not (text or "").strip():
+        return {"accepted": False, "status": "failed"}
+    data = _lightrag_post(
+        "/documents/index",
+        {"kb_id": kb_id, "doc_id": doc_id, "filename": filename, "text": text},
+        timeout=_lightrag_timeout("LIGHTRAG_INDEX_TIMEOUT_SECONDS", LIGHTRAG_INDEX_TIMEOUT_S),
+    )
+    if data is None or data.get("status") not in {"indexing", "indexed", "failed"}:
+        return {"accepted": False, "status": "failed"}
+    return {"accepted": data.get("status") != "failed", "status": data.get("status")}
+
+
+def delete_documents(kb_id: str, doc_ids: list[str]) -> bool:
+    """请求适配服务删除文档索引；返回是否成功（未配置引擎视为无残留成功）。
+
+    LightRAG 未配置时本就没有索引可删，按成功处理以免阻塞知识库维护；一旦
+    配置了引擎，删除失败必须返回 False，由调用方中止并报错。删除会重建受影响
+    实体的图谱摘要，属于长耗时操作，因此使用独立的超时。
+    """
+    ids = [str(doc_id) for doc_id in (doc_ids or []) if doc_id]
+    if not ids:
+        return True
+    if not engine_available():
+        return True
+    timeout = _lightrag_timeout("LIGHTRAG_DELETE_TIMEOUT_SECONDS", LIGHTRAG_DELETE_TIMEOUT_S)
+    # 整库删除可能有上千篇文档，单请求既可能超出服务端也会撞上代理超时，按批提交。
+    for batch in _batched(ids, DOC_BATCH_SIZE):
+        data = _lightrag_post(
+            "/documents/delete",
+            {"kb_id": kb_id, "doc_ids": batch},
+            timeout=timeout,
+        )
+        if not data or not data.get("deleted"):
+            logger.warning(
+                "LightRAG 删除批次失败 kb_id=%s 本批=%d 已提交=%d", kb_id, len(batch), len(ids)
+            )
+            return False
+    return True
+
+
+def _fetch_status_batch(base: str, ids: list[str]) -> dict[str, str] | None:
+    """回读一批文档状态；请求失败返回 None（调用方保留本地状态）。"""
+    query = urllib.parse.urlencode({"doc_ids": ",".join(ids)})
+    request = urllib.request.Request(
+        f"{base.rstrip('/')}/documents/status?{query}",
+        headers=_lightrag_headers(),
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=_lightrag_timeout("LIGHTRAG_STATUS_TIMEOUT_SECONDS", LIGHTRAG_STATUS_TIMEOUT_S),
+        ) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError):
+        return None
+    statuses: dict[str, str] = {}
+    for item in data.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        doc_id = str(item.get("doc_id") or "")
+        status = str(item.get("status") or "")
+        if doc_id and status in {"indexing", "indexed", "failed"}:
+            statuses[doc_id] = status
+    return statuses
+
+
+def document_statuses(doc_ids: list[str]) -> dict[str, str]:
+    """批量回读引擎侧文档状态；不可用或未收录的 ID 不出现在结果中。
+
+    按批提交，避免库内待索引文档超过单次上限时尾部永远无法收敛（前端会因此
+    一直轮询）。某批失败即停止，已取到的批次照常返回，其余保留平台本地状态。
+    """
+    ids = [str(doc_id) for doc_id in (doc_ids or []) if doc_id]
+    if not ids:
+        return {}
     base = _lightrag_base_url()
     if not base:
-        return None
-    try:
-        payload = json.dumps(
-            {"query": query, "mode": mode or "hybrid", "top_k": min(k, MAX_K)}
-        ).encode("utf-8")
-        req = urllib.request.Request(
-            f"{base.rstrip('/')}/query",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=LIGHTRAG_TIMEOUT_S) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        contexts = data.get("contexts") or []
-        if not contexts:
-            return None
-        items = []
-        for ctx in contexts:
-            chunk_id = str(ctx.get("id") or "")
-            if not chunk_id:
-                continue
-            doc_id = chunk_id.split("#", 1)[0]
-            items.append(
-                {
-                    "chunk_id": chunk_id,
-                    "doc_id": doc_id,
-                    "doc_name": doc_id,
-                    "text": ctx.get("text") or "",
-                    "similarity": None,
-                }
+        return {}
+    statuses: dict[str, str] = {}
+    for batch in _batched(ids, STATUS_BATCH_SIZE):
+        part = _fetch_status_batch(base, batch)
+        if part is None:
+            logger.warning(
+                "LightRAG 文档状态回读不可用，保留平台本地状态 已回读=%d 总数=%d",
+                len(statuses),
+                len(ids),
             )
-        return items or None
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError):
-        logger.warning("LightRAG /query 不可用，回退本地关键词检索")
-        return None
+            break
+        statuses.update(part)
+    return statuses
+
+
+def engine_available() -> bool:
+    """适配服务是否已配置（仅判断地址，不发起网络请求）。"""
+    return bool(_lightrag_base_url())
 
 
 def _local_retrieve(db, kb_id: str, query: str, k: int) -> list[dict]:
@@ -169,13 +348,13 @@ def retrieve_with_source(
 ) -> tuple[list[dict], str]:
     """执行一次 Top-K 检索并返回引擎来源，供评测报告诚实标注降级。
 
-    返回 ``(items, source)``：``source`` ∈ {lightrag, local}——LightRAG
-    可用（返回非空）时为 ``lightrag``；未配置 / 不可达 / 空结果回退本地
-    关键词检索时为 ``local``。评测报告必须据此区分引擎来源，禁止把
-    本地兜底结果无标注地当作 LightRAG 引擎成绩对外呈现。
+    返回 ``(items, source)``：``source`` ∈ {lightrag, local}——适配服务可用
+    （HTTP 2xx）即为 ``lightrag``，召回为空也算引擎的真实结论；只有未配置 /
+    不可达 / 服务端错误才回退本地关键词检索并记 ``local``。评测报告必须据此
+    区分引擎来源，禁止把本地兜底结果无标注地当作 LightRAG 引擎成绩对外呈现。
     """
     k = max(1, min(int(k or DEFAULT_K), MAX_K))
-    items = _try_lightrag(query, mode, k)
+    items = _try_lightrag(kb_id, query, mode, k)
     if items is not None:
         return items, RETRIEVE_SOURCE_LIGHTRAG
     return _local_retrieve(db, kb_id, query, k), RETRIEVE_SOURCE_LOCAL

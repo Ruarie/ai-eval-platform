@@ -214,8 +214,9 @@
               <span v-else class="small tertiary">未命中</span>
             </div>
             <div class="sim-row">
-              <span class="sim-track"><i :style="{ width: `${Math.round(r.sim * 100)}%` }"></i></span>
-              <span class="mono small" style="width: 42px; text-align: right">{{ r.sim.toFixed(2) }}</span>
+              <!-- LightRAG 只返回召回排序、不返回相似度分数；缺分时显示占位符，不用 0 冒充。 -->
+              <span class="sim-track"><i :style="{ width: r.sim === null ? '0' : `${Math.round(r.sim * 100)}%` }"></i></span>
+              <span class="mono small" style="width: 42px; text-align: right">{{ r.sim === null ? '—' : r.sim.toFixed(2) }}</span>
             </div>
             <div class="ck-text" style="margin-top: 6px; font-size: 12px">{{ r.text }}</div>
           </div>
@@ -402,7 +403,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useDialog, useMessage } from 'naive-ui'
 import { api } from '../api/http'
 import type { KnowledgeBase, KbChunk, KbDoc, GoldQA, Profile } from '../api/types'
@@ -465,7 +466,7 @@ watch(showCreateKbModal, (show) => {
   if (show) void loadRagProfiles()
 })
 
-const recallResults = ref<Array<{ chunk: string; doc: string; sim: number; hit: boolean; text: string }>>([])
+const recallResults = ref<Array<{ chunk: string; doc: string; sim: number | null; hit: boolean; text: string }>>([])
 const rerankedIds = ref<string[]>([])
 const queryMetrics = ref({ hit_rate: null as number | null, mrr: null as number | null, recall: null as number | null, contain: null as number | null })
 
@@ -559,7 +560,10 @@ async function handleQuery() {
     recallResults.value = items.map((item: Record<string, unknown>) => ({
       chunk: String(item.chunk_id || ''),
       doc: String(item.doc_name || item.doc_id || '未知文档'),
-      sim: Number.isFinite(Number(item.similarity)) ? Number(item.similarity) : 0,
+      // 引擎未返回分数（LightRAG 只给排序）时保持 null，界面显示占位符。
+      sim: item.similarity === null || item.similarity === undefined || !Number.isFinite(Number(item.similarity))
+        ? null
+        : Number(item.similarity),
       hit: item.hit === true,
       text: String(item.text || ''),
     }))
@@ -696,6 +700,45 @@ async function loadGoldQas() {
     message.error(err.message || '加载黄金 QA 失败')
   }
 }
+
+// 建索引由 LightRAG 异步完成：仍有文档处于 indexing 时轮询状态，
+// 收敛后自动停止，避免用户手动切换页面才知道结果。
+const DOC_STATUS_POLL_MS = 5000
+let docStatusTimer: number | undefined
+
+let docStatusPolling = false
+
+async function refreshDocStatuses() {
+  // 引擎慢时上一轮可能还没返回：跳过本轮，避免 5 秒定时器叠加请求。
+  if (!activeKbId.value || docStatusPolling) return
+  const kbId = activeKbId.value
+  docStatusPolling = true
+  try {
+    const next = await api.kb.listDocs(kbId)
+    // 期间切换了知识库：丢弃旧响应，避免把上一个库的文档写回列表。
+    if (activeKbId.value === kbId) docs.value = next
+  } catch {
+    // 轮询失败不打断页面，保留上次状态并等待下一轮。
+  } finally {
+    docStatusPolling = false
+  }
+}
+
+watch(
+  () => docs.value.some(doc => doc.status === 'indexing'),
+  (pending) => {
+    if (pending && docStatusTimer === undefined) {
+      docStatusTimer = window.setInterval(() => void refreshDocStatuses(), DOC_STATUS_POLL_MS)
+    } else if (!pending && docStatusTimer !== undefined) {
+      window.clearInterval(docStatusTimer)
+      docStatusTimer = undefined
+    }
+  },
+)
+
+onBeforeUnmount(() => {
+  if (docStatusTimer !== undefined) window.clearInterval(docStatusTimer)
+})
 
 // 只要切换文档或调整预览参数，就重新请求当前文档的切块结果。
 watch([activeDocId, chunkSize, overlap], () => {
