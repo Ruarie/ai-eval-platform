@@ -44,6 +44,7 @@ import {
   type TestCaseInput,
   type CaseGenerateInput,
   type CaseGenerateResult,
+  type CaseCompareResult,
   type CaseCoverageResult,
   type WhitelistItem,
   type DispatchOverview,
@@ -952,6 +953,55 @@ export const api = {
         checks: Array.isArray(data?.checks) ? data.checks : [],
         sourceTruncated: Boolean(data?.source_truncated),
         dropped: data?.dropped || { dropped_unknown_strategy: 0, dropped_over_quota: 0 },
+      }
+    },
+    // 同一需求并行交给两个协议档。超时与单次生成相同：两侧同时跑，墙钟接近较慢的一侧。
+    async compareCases(payload: CaseGenerateInput & { source_doc_id?: string; profile_ids: [string, string] }): Promise<CaseCompareResult> {
+      if (getDataMode() === 'mock') {
+        const sample = (name: string, feature: string): TestCase => ({
+          id: 'c-cmp-' + name,
+          strategy: '正向',
+          priority: 'HX',
+          module: '通用',
+          name,
+          feature_point: feature,
+          expected: '系统展示成功提示并跳转首页',
+          precondition: '服务已就绪',
+          steps: '1. 提交表单\n2. 核对结果',
+        })
+        const run = (id: string, name: string, feature: string) => ({
+          profile_id: id,
+          profile_name: name,
+          model: name,
+          ok: true,
+          error: null,
+          elapsed_ms: 20,
+          items: [sample(name, feature)],
+          checks: [],
+          dropped: { dropped_unknown_strategy: 0, dropped_over_quota: 0 },
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        })
+        return {
+          sourceTruncated: false,
+          runs: [run(payload.profile_ids[0], '模型 A', '登录成功'), run(payload.profile_ids[1], '模型 B', '登录失败提示')],
+          comparison: {
+            winner: 'tie',
+            summary: '示例模式：两个模型本轮结构分接近。共同功能点 0 个，模型 A 独有 1 个，模型 B 独有 1 个。',
+            scores: [
+              { side: 'a', score: 80, grade: 'B', case_count: 1, dimensions: { complete: 0.8, actionable: 1, strategy: 0.6, review: 0 }, issues: [] },
+              { side: 'b', score: 80, grade: 'B', case_count: 1, dimensions: { complete: 0.8, actionable: 1, strategy: 0.6, review: 0 }, issues: [] },
+            ],
+            shared_points: [],
+            only_a: ['登录成功'],
+            only_b: ['登录失败提示'],
+          },
+        }
+      }
+      const { data } = await http.post('/api/case-sets/ai-compare', payload, { timeout: 290000 })
+      return {
+        sourceTruncated: Boolean(data?.source_truncated),
+        runs: Array.isArray(data?.runs) ? data.runs : [],
+        comparison: data?.comparison || { winner: null, summary: '', scores: [], shared_points: [], only_a: [], only_b: [] },
       }
     },
     // 契约 POST /api/case-sets/ai-coverage：需求覆盖自检，独立请求，不改变候选内容。

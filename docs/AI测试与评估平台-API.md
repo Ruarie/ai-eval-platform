@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.43 |
-| 本轮审查日期 | 2026-11-02（账号活动统计接线；Worker 进程心跳登记调度节点） |
+| 文档版本 | V2.45 |
+| 本轮审查日期 | 2026-11-02（同一需求两个协议档并行生成并对比本轮结构差异） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.55（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -249,7 +249,7 @@ WS `error` 事件 payload 与上表同一套 `code` + `message`（可带 `fields
 | **任务中心 (tasks.html)** | 24h 状态趋势 / 六态过滤表格 / 抽屉详情 / 取消与重跑 | `/api/tasks`, `/api/tasks/summary`, `/api/tasks/{id}`, `/api/tasks/{id}/cancel`, `/api/tasks/{id}/rerun` | GET/POST | 成员 · 全员同权 |
 | **报告中心 (report.html)** | 历史评测与压测报告只读查询、Markdown 导出；既有分享链接继续可读 | `/api/reports`, `/api/reports/{id}`, `/api/reports/{id}/samples` | GET | 成员 · 全员同权 |
 | **数据集工作台 (datasets.html)** | 数据集目录树 / 行内即点即改网格 / 自定义列扩展 / AI 数据集生成 | `/api/dataset-folders`, `/api/datasets`, `/api/datasets/{id}`, `/api/datasets/{id}/rows`, `/api/datasets/ai-generate`, `/api/kb` | GET/POST/PUT/DELETE | 成员 · 全员同权 |
-| **用例工作台 (cases.html)** | 6 大策略分布、自检、草稿编辑与审核、72h 倒计时、Excel 导入导出及 AI PRD 用例抽取；旧评测映射入口停用 | `/api/case-folders`, `/api/case-sets`, `/api/case-sets/from-candidates`, `/api/case-sets/{id}`, `/api/case-sets/{id}/cases`, `/api/case-sets/{id}/confirm`, `/api/case-sets/{id}/cancel`, `/api/case-sets/ai-generate`, `/api/case-sets/import-template`, `/api/case-sets/{id}/import`, `/api/case-sets/{id}/export` | GET/POST/PUT/DELETE | 成员 · 全员同权 |
+| **用例工作台 (cases.html)** | 6 大策略分布、自检、草稿编辑与审核、72h 倒计时、Excel 导入导出及 AI PRD 用例抽取；旧评测映射入口停用 | `/api/case-folders`, `/api/case-sets`, `/api/case-sets/from-candidates`, `/api/case-sets/{id}`, `/api/case-sets/{id}/cases`, `/api/case-sets/{id}/confirm`, `/api/case-sets/{id}/cancel`, `/api/case-sets/ai-generate`, `/api/case-sets/ai-compare`, `/api/case-sets/import-template`, `/api/case-sets/{id}/import`, `/api/case-sets/{id}/export` | GET/POST/PUT/DELETE | 成员 · 全员同权 |
 | **知识库 (kb.html)** | 3栏工作台 / 文档与切块预览 / 4模式检索 Playground / 黄金 QA | `/api/kb`, `/api/kb/{id}`, `/api/kb/{id}/documents`, `/api/kb/{id}/documents/{doc_id}/chunks`, `/api/kb/{id}/query`, `/api/kb/{id}/gold-qa` | GET/POST/DELETE | 成员 · 全员同权 |
 | **协议档与智能体 (admin-profiles.html)** | 4 Tab 架构（协议档、MCP 工具只读、技能受控说明、运行时治理）/ 连通性探活 Ping | `/api/profiles`, `/api/profiles/{id}/check`, `/api/mcp/tools`, `/api/admin/settings` | GET/POST/PUT/DELETE | 成员 · 全员同权 |
 | **压测治理 (admin-stress.html)** | 7天峰值 QPS 面积图 / Host 白名单表格 / 安全阈值 / 成本预算 / Prometheus `/metrics` | `/api/admin/stress/settings`, `/api/admin/stress/whitelist`, `/api/admin/stress/usage`, `/metrics` | GET/POST/PUT/DELETE | 成员 · 全员同权 |
@@ -1233,7 +1233,27 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 - `checks`：按**本次请求的策略配比**计算的自检结果，只检查权重 > 0 的策略（只选正向时不会报「缺少反向」）。
 - `source_truncated`：来源是否被截断到 20000 字符。
 - `pending_complete`：候选缺 `expected` 或 `steps` 时为 `true`，供审核页与脚本一致识别待补全项。
-- `dropped`：整理统计，用于向用户解释「模型给了 N 条、实际保留 M 条」。`dropped_duplicate` 为同名同策略或「步骤+预期完全一致」的近似重复条数（去重在配额裁剪之前执行）；`dropped_missing_name` / `dropped_non_object` 为缺用例名称、非对象条目被丢弃的条数。
+- 生成提示要求 `steps` 至少两行并使用「1. / 2.」编号，`expected` 写出可核对的提示、跳转、状态、状态码、金额或次数；需求中的编号规则与「必填 / 不可 / 不得 / 必须 / 校验」约束会逐条列入提示，`feature_point` 保留规则原词。服务端会把分号拼在一行的多个操作整理成编号步骤。
+- `dropped`：整理统计，用于向用户解释「模型给了 N 条、实际保留 M 条」。`dropped_duplicate` 为同名同策略、「步骤+预期完全一致」，或名称与功能点高度重合的近似重复条数（去重在配额裁剪之前执行）；`dropped_missing_name` / `dropped_non_object` 为缺用例名称、非对象条目被丢弃的条数。
+
+#### `POST /api/case-sets/ai-compare`
+
+同一需求、同一策略配比与条数上限，并行交给两个已启用 `agent` 用途的协议档生成候选，并返回本轮结构对比。不创建用例集，不写入任务。
+
+```json
+{
+  "source_text": "登录需要验证码",
+  "profile_ids": ["协议档 A", "协议档 B"],
+  "strategy_weights": { "positive": 100 },
+  "max_count": 10
+}
+```
+
+- 来源、配比、`max_count` 与 `ai-generate` 相同。`profile_ids` 恰好两个、互不相同，且都存在并启用 `agent` 用途；缺失返回 `NOT_FOUND`，用途不对返回 `VALIDATION`。
+- 两侧同时调用。单侧超时、上游失败或解析失败记在该侧 `runs[].error`，HTTP 仍为 200，以便看到另一侧结果。两侧都失败时 `comparison.winner` 为 `null`。
+- 响应不回显 API Key。`runs[]` 含 `profile_id`、`profile_name`、`model`、`ok`、`error`、`elapsed_ms`、`items`、`checks`、`dropped`、`usage`。`items` 与单次生成一样带 `pending_complete`。
+- `comparison.scores` 是本轮结构分：字段完整度 0.35、步骤可执行且预期可观察 0.35、策略配比贴合 0.20、自检通过 0.10。分差小于 1 为 `tie`。这不是模型长期排名。
+- `shared_points` / `only_a` / `only_b` 按功能点词面重合划分，各最多 8 条。
 
 前端审核候选后，可调用下述单次事务接口保存到新草稿；也可将候选追加到当前可编辑草稿并按原有修订号保存。保存失败保留待审核候选，不得显示“创建成功”。
 
@@ -4117,3 +4137,31 @@ Excel 导入在本批缓存已写入但尚未 flush 的用例，重复编号按�
 - `backend/api/app/seed.py`：停止播种并清理原名演示节点。
 - `docker-compose.yml`：默认 `WORKER_NODE_ID=worker-1`。
 - `backend/worker/tests/test_dispatch_presence.py`、`backend/api/tests/test_preview_seed_retirement.py`：心跳保留治理状态，播种不再留下演示节点。
+
+## V2.44 用例生成可执行性与覆盖（2026-11-02）
+
+- 不新增 REST 字段。生成提示要求步骤编号、可观察预期，并把需求里的编号规则和硬约束逐条列入用户提示，`feature_point` 保留原词。
+- 服务端把分号拼在一行的多个操作整理成「1. / 2.」编号。名称与功能点高度重合的改写计入既有 `dropped.dropped_duplicate`，仍在配额裁剪之前去掉。
+- `pending_complete` 仍由服务端标记缺 `expected` 或 `steps` 的候选，不把它当成模型输出的身份字段。
+
+### 修改代码文件与作用清单
+
+- `backend/shared/casegen.py`：规则摘录、步骤编号、近似功能点去重，提示词补可观察预期与原词覆盖。
+- `backend/worker/app/testcase.py`：整理事件写明近似功能点去重。
+- `backend/api/tests/test_casegen.py`：规则列入提示、分号步骤编号、近似去重。
+- `tools/agent-eval/agent_eval/quality.py`：评分前去掉服务端 `pending_complete`，避免把待补全标记算成模型保留字段。
+
+## V2.45 双模型用例对比（2026-11-02）
+
+- 新增 `POST /api/case-sets/ai-compare`。请求在 `ai-generate` 上增加恰好两个不同的 `profile_ids`。同一提示并行调用，不新增任务类型，候选不落库。
+- 一侧失败仍返回 200 和另一侧结果。`comparison` 只描述本轮完整度、可执行性、策略贴合和自检，以及共有 / 独有功能点。
+- 用例抽屉第一步可选两个 agent 协议档对比，并采用其中一侧候选进入原有审核保存。
+
+### 修改代码文件与作用清单
+
+- `backend/shared/case_compare.py`：本轮结构分、功能点拆分和结论文案。
+- `backend/api/app/llm_client.py`：抽出按指定协议档调用，当前 Agent 档仍走原入口。
+- `backend/api/app/schemas.py`、`routers/cases.py`：对比请求与并行生成。
+- `backend/api/tests/test_case_compare.py`、`test_cases_audit.py`：分数口径，以及单侧失败仍返回另一侧。
+- `frontend/src/api/types.ts`、`http.ts`、`views/Cases.vue`：对比入口、结果和采用某一侧候选。
+- `docs/AI测试与评估平台-API.md`：登记 `ai-compare`。

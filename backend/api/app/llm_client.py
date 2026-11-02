@@ -51,13 +51,32 @@ def call_agent_model(
     max_tokens: int = DEFAULT_MAX_TOKENS,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> AdapterResult:
-    """按 Agent 协议档调用模型并返回统一结果；配置或上游异常抛 AppError。
+    """按当前 Agent 协议档调用模型。双模型对比改走 ``call_profile_model``。"""
+    return call_profile_model(
+        resolve_agent_profile(db),
+        system,
+        user,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout_s=timeout_s,
+    )
+
+
+def call_profile_model(
+    profile: ProtocolProfile,
+    system: str,
+    user: str,
+    *,
+    temperature: float = 0.3,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+) -> AdapterResult:
+    """按指定协议档调用模型。连接在进入函数时读完，调用本身不再碰数据库会话。
 
     被 ``max_tokens`` 截断时先抬预算重试一次：截断只会产出半截 JSON，直接
     报「无法解析」既误导用户（看起来像模型乱写），也浪费一次完整调用的成本。
     重试仍截断才以 BUDGET_EXCEEDED 明确告知「减少条数重试」。
     """
-    profile = resolve_agent_profile(db)
     base_url, model, api_key = _profile_connection(profile, allow_global_alias=True)
     if not base_url or not model or not api_key:
         missing = "、".join(

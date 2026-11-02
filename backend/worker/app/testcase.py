@@ -295,7 +295,7 @@ def run_testcase(task_id: str) -> None:
             # 去重与裁剪都是静默行为，必须让用户知道实际保留数与丢弃原因。
             parts = []
             if dropped_duplicate:
-                parts.append(f"同名/同内容用例去重 {dropped_duplicate} 条")
+                parts.append(f"同名、同内容或近似功能点去重 {dropped_duplicate} 条")
             if parse_stats["dropped_missing_name"]:
                 parts.append(f"缺少用例名称丢弃 {parse_stats['dropped_missing_name']} 条")
             if dropped["dropped_unknown_strategy"]:

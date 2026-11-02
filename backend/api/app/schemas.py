@@ -1008,6 +1008,21 @@ class CaseAiGenerateIn(ApiModel):
         return self
 
 
+class CaseAiCompareIn(CaseAiGenerateIn):
+    """同一需求交给两个 Agent 协议档生成，只对比候选，不创建用例集。"""
+
+    profile_ids: list[str] = Field(min_length=2, max_length=2)
+
+    @field_validator("profile_ids")
+    @classmethod
+    def validate_profile_ids(cls, value: list[str]) -> list[str]:
+        """必须是两个不同的协议档，避免用同一模型对比出虚假差异。"""
+        cleaned = [item.strip() for item in value]
+        if any(not item or len(item) > 64 for item in cleaned) or len(set(cleaned)) != 2:
+            raise ValueError("需要两个不同的协议档")
+        return cleaned
+
+
 class CaseAiFillIn(ApiModel):
     """行级 AI 补全请求；case_ids 必填且必须全部属于该用例集。"""
 

@@ -2,7 +2,7 @@
 
 包含两组 router：
 - ``router``：/api/case-sets 用例集 CRUD、用例行批量保存、确认/废弃/映射、
-  AI 候选生成与行级补全、xlsx 导入/模板、xlsx/xmind 导出；
+  AI 候选生成、双模型对比与行级补全、xlsx 导入/模板、xlsx/xmind 导出；
 - ``folders_router``：/api/case-folders 用例目录树管理（在 main.py 单独注册）。
 
 AI 候选生成（ai-generate）与行级补全（ai-fill）只返回未落库候选，前端人工
@@ -13,8 +13,11 @@ awaiting_case_confirm 时写入（+72h），本域不主动维护。
 
 import io
 import json
+import logging
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import UTC
 from typing import Any
 from urllib.parse import quote
@@ -24,6 +27,9 @@ from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from fastapi import Request as FastApiRequest
 from openpyxl import Workbook
 from pydantic import ValidationError
+from sqlalchemy.orm import Session
+
+from shared.case_compare import compare_case_runs
 from shared.casegen import (
     STRATEGY_WEIGHTS,
     build_coverage_prompt,
@@ -37,7 +43,6 @@ from shared.casegen import (
     rebalance_with_stats,
     selfcheck,
 )
-from sqlalchemy.orm import Session
 
 from ..case_excel import (
     EXPORT_FIXED_COLUMNS,
@@ -49,18 +54,20 @@ from ..case_excel import (
 from ..db import get_db
 from ..deps import get_current_user
 from ..errors import AppError, ErrorCode
-from ..llm_client import call_agent_model, extract_json_array
+from ..llm_client import call_agent_model, call_profile_model, extract_json_array
 from ..models import (
     AuditLog,
     CaseFolder,
     CaseItem,
     CaseSet,
+    ProtocolProfile,
     Task,
     User,
     utcnow,
     uuid_str,
 )
 from ..schemas import (
+    CaseAiCompareIn,
     CaseAiFillIn,
     CaseAiGenerateIn,
     CaseCancelIn,
@@ -82,6 +89,7 @@ from ._common import assert_folder_exists, client_ip, get_folder_or_404
 
 router = APIRouter(prefix="/api/case-sets", tags=["case-sets"])
 folders_router = APIRouter(prefix="/api/case-folders", tags=["case-folders"])
+logger = logging.getLogger("ai-eval.cases")
 
 # 用例行响应的固定字段键；扩展列同名键不写入 extras，避免平铺时覆盖固定字段
 _RESERVED_EXTRA_KEYS = {
@@ -460,21 +468,186 @@ def ai_generate_cases(
     result = call_agent_model(db, system, user_prompt, temperature=0.3,
                               max_tokens=generation_token_budget(max_count),
                               timeout_s=GENERATION_TIMEOUT_S)
-    try:
-        cases, parse_stats = parse_cases_with_stats(result.text)
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise AppError(ErrorCode.UPSTREAM, "模型输出无法解析为用例") from exc
-    # 先去重再裁剪：重复项会按配额挤掉真正不同的用例。
-    cases, dropped_duplicate = dedupe_cases(cases)
-    cases, dropped = rebalance_with_stats(cases, max_count, weights=weights)
+    cases, dropped = _materialize_cases(result.text, max_count, weights)
     if not cases:
         raise AppError(ErrorCode.UPSTREAM, "模型未返回符合所选策略的有效用例")
     return {
         "items": [mark_pending_complete(case) for case in cases],
         "checks": selfcheck(cases, weights=weights),
         "source_truncated": source_truncated,
-        "dropped": {**dropped, "dropped_duplicate": dropped_duplicate, **parse_stats},
+        "dropped": dropped,
     }
+
+
+def _materialize_cases(text: str, max_count: int, weights: dict[str, int]) -> tuple[list[dict], dict[str, int]]:
+    """解析、去重再按策略裁剪。两条生成路径共用，避免对比和单模型结果口径分叉。"""
+    try:
+        cases, parse_stats = parse_cases_with_stats(text)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise AppError(ErrorCode.UPSTREAM, "模型输出无法解析为用例") from exc
+    cases, dropped_duplicate = dedupe_cases(cases)
+    cases, dropped = rebalance_with_stats(cases, max_count, weights=weights)
+    return cases, {**dropped, "dropped_duplicate": dropped_duplicate, **parse_stats}
+
+
+def _load_compare_profiles(db: Session, profile_ids: list[str]) -> list[ProtocolProfile]:
+    """按请求顺序取出两个已启用 agent 用途的协议档。"""
+    found = {
+        profile.id: profile
+        for profile in db.query(ProtocolProfile).filter(ProtocolProfile.id.in_(profile_ids)).all()
+    }
+    profiles: list[ProtocolProfile] = []
+    for profile_id in profile_ids:
+        profile = found.get(profile_id)
+        if profile is None:
+            raise AppError(ErrorCode.NOT_FOUND, "协议档不存在")
+        if "agent" not in (profile.usages or []):
+            raise AppError(ErrorCode.VALIDATION, f"协议档「{profile.name}」未启用 agent 用途")
+        profiles.append(profile)
+    return profiles
+
+
+def _profile_snapshot(profile: ProtocolProfile) -> Any:
+    """复制线程需要的协议档字段，避免工作线程触发 ORM 懒加载。"""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id=profile.id,
+        name=profile.name,
+        model=profile.model,
+        protocol=profile.protocol,
+        base_url=profile.base_url,
+        usages=list(profile.usages or []),
+        anthropic_version=profile.anthropic_version,
+        encrypted_key=profile.encrypted_key,
+    )
+
+
+def _failed_run(profile: Any, code: str, message: str, elapsed_ms: int) -> dict[str, Any]:
+    return {
+        "profile_id": profile.id,
+        "profile_name": profile.name,
+        "model": profile.model,
+        "ok": False,
+        "error": {"code": code, "message": message},
+        "elapsed_ms": elapsed_ms,
+        "items": [],
+        "checks": [],
+        "dropped": {},
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
+def _generate_with_profile(
+    profile: Any,
+    system: str,
+    user_prompt: str,
+    max_count: int,
+    weights: dict[str, int],
+) -> dict[str, Any]:
+    """跑一侧模型。失败留在该侧结果里，不让另一侧的成功被整单错误盖掉。"""
+    started = time.perf_counter()
+    payload: dict[str, Any] = {
+        "profile_id": profile.id,
+        "profile_name": profile.name,
+        "model": profile.model,
+        "ok": False,
+        "error": None,
+        "elapsed_ms": 0,
+        "items": [],
+        "checks": [],
+        "dropped": {
+            "dropped_unknown_strategy": 0,
+            "dropped_over_quota": 0,
+            "dropped_duplicate": 0,
+            "dropped_missing_name": 0,
+            "dropped_non_object": 0,
+        },
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+    try:
+        result = call_profile_model(
+            profile, system, user_prompt, temperature=0.3,
+            max_tokens=generation_token_budget(max_count),
+            timeout_s=GENERATION_TIMEOUT_S,
+        )
+        cases, dropped = _materialize_cases(result.text, max_count, weights)
+        if not cases:
+            raise AppError(ErrorCode.UPSTREAM, "模型未返回符合所选策略的有效用例")
+        payload.update({
+            "ok": True,
+            "model": profile.model,
+            "items": [mark_pending_complete(case) for case in cases],
+            "checks": selfcheck(cases, weights=weights),
+            "dropped": dropped,
+            "usage": {
+                "prompt_tokens": int((result.usage or {}).get("prompt_tokens") or 0),
+                "completion_tokens": int((result.usage or {}).get("completion_tokens") or 0),
+                "total_tokens": int((result.usage or {}).get("total_tokens") or 0),
+            },
+        })
+    except AppError as exc:
+        payload["error"] = {"code": exc.code.value, "message": exc.message}
+    except Exception as exc:
+        logger.warning("模型对比单侧失败 type=%s", type(exc).__name__)
+        payload["error"] = {"code": ErrorCode.INTERNAL.value, "message": "AI 生成调用失败，请稍后重试"}
+    payload["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+    return payload
+
+
+@router.post("/ai-compare")
+def ai_compare_cases(
+    body: CaseAiCompareIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """同一需求并行交给两个协议档生成候选，并返回本轮结构对比。
+
+    候选不落库。两侧同时发起，墙钟时间接近较慢的一侧，而不是两次相加。
+    一侧失败时仍返回另一侧结果，方便看出是模型差异还是调用失败。
+    """
+    source_text = body.source_text or ""
+    if body.source_doc_id:
+        source_text = _read_stored_file_text(db, body.source_doc_id, user.id)
+    if not source_text.strip():
+        raise AppError(ErrorCode.VALIDATION, "需要提供需求文档内容 source_text 或来源文档 source_doc_id")
+    source_text, source_truncated = clip_source(source_text)
+    profiles = _load_compare_profiles(db, body.profile_ids)
+    weights = body.strategy_weights or STRATEGY_WEIGHTS
+    max_count = body.max_count
+    system, user_prompt = build_prompts(source_text, max_count, weights=weights)
+    # 先读完 ORM 字段再进线程。线程里只拿这份快照，避免复用请求上的数据库会话。
+    snapshots = [_profile_snapshot(profile) for profile in profiles]
+    pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="case-compare")
+    try:
+        futures = [
+            pool.submit(_generate_with_profile, profile, system, user_prompt, max_count, weights)
+            for profile in snapshots
+        ]
+        runs: list[dict[str, Any]] = []
+        for profile, future in zip(snapshots, futures, strict=True):
+            try:
+                runs.append(future.result(timeout=GENERATION_TIMEOUT_S + 5))
+            except FutureTimeout:
+                runs.append(_failed_run(
+                    profile,
+                    ErrorCode.TIMEOUT.value,
+                    "模型对比超时，请减少生成条数后重试",
+                    int(GENERATION_TIMEOUT_S * 1000),
+                ))
+    finally:
+        # 不等待卡住的工作线程，避免单侧超时把整次请求留在反向代理读超时之外。
+        pool.shutdown(wait=False, cancel_futures=True)
+    comparison = compare_case_runs(
+        runs[0]["items"] if runs[0]["ok"] else [],
+        runs[1]["items"] if runs[1]["ok"] else [],
+        weights,
+        left_name=runs[0]["profile_name"] or "模型 A",
+        right_name=runs[1]["profile_name"] or "模型 B",
+        left_ok=bool(runs[0]["ok"]),
+        right_ok=bool(runs[1]["ok"]),
+    )
+    return {"source_truncated": source_truncated, "runs": runs, "comparison": comparison}
 
 
 @router.post("/ai-coverage")

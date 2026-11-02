@@ -35,6 +35,7 @@ from app.models import (
 from app.routers import cases as routes
 from app.routers import tasks as task_routes
 from app.schemas import (
+    CaseAiCompareIn,
     CaseAiFillIn,
     CaseAiGenerateIn,
     CaseCancelIn,
@@ -740,3 +741,53 @@ def test_generate_flags_pending_items_and_reports_missing_name(cases_db, monkeyp
     )
     assert [item["pending_complete"] for item in result["items"]] == [False, True]
     assert result["dropped"]["dropped_missing_name"] == 1
+
+
+def test_compare_returns_both_sides_when_one_model_fails(cases_db, monkeypatch):
+    """一侧失败仍返回另一侧候选和本轮胜者，响应里不能带出密钥。"""
+    rich = {
+        "name": "验证码登录成功",
+        "strategy": "正向",
+        "priority": "HX",
+        "module": "登录",
+        "submodule": "验证码",
+        "feature_point": "验证码登录",
+        "precondition": "已获取验证码",
+        "steps": "1. 输入验证码\n2. 点击登录",
+        "expected": "登录成功并跳转首页",
+        "test_type": "核心业务",
+    }
+    profiles = [
+        SimpleNamespace(id="left", name="甲", model="m-a", protocol="openai_chat", base_url="http://a",
+                        usages=["agent"], anthropic_version=None, encrypted_key="secret"),
+        SimpleNamespace(id="right", name="乙", model="m-b", protocol="openai_chat", base_url="http://b",
+                        usages=["agent"], anthropic_version=None, encrypted_key="secret"),
+    ]
+    monkeypatch.setattr(routes, "_load_compare_profiles", lambda _db, _ids: profiles)
+
+    def fake(profile, *_args, **_kwargs):
+        if profile.id == "right":
+            raise AppError(ErrorCode.UPSTREAM, "上游失败")
+        return SimpleNamespace(
+            text=json.dumps([rich]),
+            usage={"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+        )
+
+    monkeypatch.setattr(routes, "call_profile_model", fake)
+    result = routes.ai_compare_cases(
+        CaseAiCompareIn(
+            source_text="登录需要验证码",
+            profile_ids=["left", "right"],
+            max_count=4,
+            strategy_weights={"positive": 100},
+        ),
+        cases_db,
+        _actor(),
+    )
+    assert result["runs"][0]["ok"] is True
+    assert result["runs"][0]["usage"]["total_tokens"] == 7
+    assert result["runs"][0]["items"][0]["name"] == "验证码登录成功"
+    assert result["runs"][1]["ok"] is False
+    assert result["runs"][1]["error"]["code"] == "UPSTREAM"
+    assert "secret" not in json.dumps(result)
+    assert result["comparison"]["winner"] == "a"

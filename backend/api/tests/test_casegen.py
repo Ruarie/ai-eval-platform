@@ -32,9 +32,9 @@ def test_build_prompts_guides_risk_traceability_and_observable_cases():
     assert "高风险流程覆盖正向、反向、边界、权限及中断恢复" in system
     assert "每条用例只验证一个明确行为" in system
     assert "feature_point 要能追溯到需求" in system
-    assert "steps 写出可执行的具体操作" in system
+    assert "steps 至少写成两行" in system
     assert "steps（可执行操作步骤）" in system
-    assert "expected 写出与操作对应、可观察的结果" in system
+    assert "expected 至少 6 个字" in system
     assert "需求未给出确定预期时不要编造" in system
 
 
@@ -265,6 +265,37 @@ def test_dedupe_cases_merges_same_steps_and_expected():
     kept, dropped = casegen.dedupe_cases(items)
     assert dropped == 1
     assert [item["name"] for item in kept] == ["验证码有效期校验", "验证码过期提示"]
+
+
+def test_build_prompts_lists_requirement_rules_for_coverage():
+    """编号规则和必填约束要出现在用户提示里，功能点才能沿用需求原词。"""
+    source = "需求：上传附件。\n1. 字段 file 必填。\n2. 已退款订单不可再次申请。\n补充说明不单列。"
+    _, user = casegen.build_prompts(source, 8)
+    assert "字段 file 必填" in user
+    assert "已退款订单不可再次申请" in user
+    assert "补充说明不单列" not in user.split("以下需求规则", 1)[-1]
+
+
+def test_format_steps_numbers_semicolon_actions():
+    """一行里用分号拼的两个操作要拆成编号步骤，已编号的多行保持原样。"""
+    assert casegen.format_steps("打开上传页；选择超过 20MB 的文件") == (
+        "1. 打开上传页\n2. 选择超过 20MB 的文件"
+    )
+    numbered = "1. 输入手机号\n2. 点击获取验证码"
+    assert casegen.format_steps(numbered) == numbered
+    assert casegen.format_steps("只点一次登录") == "只点一次登录"
+
+
+def test_dedupe_cases_drops_near_duplicate_feature_points():
+    """名称和功能点高度重合的改写只留第一条，不同规则都保留。"""
+    items = [
+        {"name": "重复退款申请被拦截", "strategy": "反向", "feature_point": "重复退款拦截"},
+        {"name": "重复退款再次申请被拦截", "strategy": "反向", "feature_point": "重复退款拦截"},
+        {"name": "缺少 file 字段时拒绝上传", "strategy": "反向", "feature_point": "必填字段校验"},
+    ]
+    kept, dropped = casegen.dedupe_cases(items)
+    assert dropped == 1
+    assert [item["feature_point"] for item in kept] == ["重复退款拦截", "必填字段校验"]
 
 
 def test_dedupe_cases_keeps_pending_cases_without_content_signature():

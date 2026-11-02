@@ -39,8 +39,14 @@ def run_quality(
             expect_status(resp, 200, f"{fixture['title']} 生成")
             body = resp.body if isinstance(resp.body, dict) else {}
             items = body.get("items") or []
+            # pending_complete 是服务端在返回前打上的待补全标记，不是模型写出的身份字段。
+            graded = [
+                {key: value for key, value in item.items() if key != "pending_complete"}
+                for item in items
+                if isinstance(item, dict)
+            ]
             report = grade(
-                items,
+                graded,
                 source_text=fixture["text"],
                 expected_points=fixture["expected_points"],
                 weights=weights or {"positive": 40, "negative": 25, "boundary": 15,

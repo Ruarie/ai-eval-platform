@@ -590,6 +590,47 @@ export interface CaseGenerateResult {
 }
 
 /** 需求覆盖自检结果：uncovered 为需求中疑似未被候选覆盖的功能点。 */
+/** 同一需求下两个协议档各跑一次的结果。分数只描述这一轮结构，不是长期排名。 */
+export interface CaseCompareScore {
+  side: 'a' | 'b'
+  score: number | null
+  grade: string | null
+  case_count: number
+  dimensions: {
+    complete: number
+    actionable: number
+    strategy: number
+    review: number
+  }
+  issues: string[]
+}
+
+export interface CaseCompareRun {
+  profile_id: string
+  profile_name: string
+  model: string
+  ok: boolean
+  error: { code: string; message: string } | null
+  elapsed_ms: number
+  items: TestCase[]
+  checks: TestCaseCheck[]
+  dropped: CaseGenerateResult['dropped']
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }
+}
+
+export interface CaseCompareResult {
+  sourceTruncated: boolean
+  runs: CaseCompareRun[]
+  comparison: {
+    winner: 'a' | 'b' | 'tie' | null
+    summary: string
+    scores: CaseCompareScore[]
+    shared_points: string[]
+    only_a: string[]
+    only_b: string[]
+  }
+}
+
 export interface CaseCoverageResult {
   uncovered: Array<{ requirement: string; reason: string }>
   notes: string
