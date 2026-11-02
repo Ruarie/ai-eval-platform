@@ -27,3 +27,16 @@ export function skillSummary(skillId?: string | null): string {
   if (!skillId) return ''
   return SKILL_SUMMARIES[skillId] || ''
 }
+
+/** 技能 kind 的展示名，与目录接口返回的 kind 对齐。 */
+export const SKILL_KIND_LABELS: Record<string, string> = {
+  benchmark: '基准评测',
+  rag: '知识库评测',
+  testcase: '用例生成',
+  stress: '压测',
+}
+
+export function skillKindLabel(kind?: string | null): string {
+  if (!kind) return '未分类'
+  return SKILL_KIND_LABELS[kind] || kind
+}

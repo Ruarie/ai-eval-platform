@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.41 |
-| 本轮审查日期 | 2026-11-02（用例生成第三批：去重、需求覆盖自检、解析器统一、提示词示例） |
+| 文档版本 | V2.43 |
+| 本轮审查日期 | 2026-11-02（账号活动统计接线；Worker 进程心跳登记调度节点） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.55（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -390,10 +390,21 @@ V1.84 起不再强制首次改密：登录成功直接进入系统，改密走�
 ```json
 {
   "range": { "from": "2026-08-17T00:00:00Z", "to": "2026-08-18T00:00:00Z" },
-  "kpis": { "active_members": 8, "new_members": 1, "login_count": 24, "disabled_members": 0 },
+  "kpis": {
+    "active_members": 8,
+    "new_members": 1,
+    "login_count": 24,
+    "login_failed": 2,
+    "disabled_members": 0,
+    "total_members": 12,
+    "total_tasks": 3,
+    "shared_reports": 0
+  },
   "login_buckets": [{ "ts": "2026-08-17T09:00:00Z", "count": 3 }]
 }
 ```
+
+`login_count` 与 `login_buckets[].count` 只统计成功登录。`login_failed` 是同一区间内审计动作 `login_failed` 的次数。`login_buckets[].ts` 为每个整点的 UTC 时间。`shared_reports` 在报告分享未落地前固定为 0。响应不含异地登录或风险判定。
 
 ---
 
@@ -1814,6 +1825,8 @@ Agent Loop v2 在执行会改动工作区的工具（`write`/`edit`/`bash` 等�
 #### `PUT /api/dispatch/workers/{id}`
 
 修改节点状态或权重（如维护下线、排空 `draining`、更新能力标签）：`{ "state", "weight", "caps" }`。
+
+运行中的 Worker 进程用环境变量 `WORKER_NODE_ID` / `WORKER_NODE_NAME` 登记或刷新自己的一行，约每 10 秒更新 `last_heartbeat_at`。执行中为 `busy` 且 `load_percent=100`，空闲为 `idle` 且 `load_percent=0`。心跳不改管理员设置的权重、能力、`draining` 和 `offline`。后两种状态不再领取新任务；任务选择仍是 `testcase` 队列的 `SKIP LOCKED`，不按权重或策略挑节点。超过 30 秒没有心跳的 `idle` / `busy` 仍按离线展示。预览种子不再插入演示节点。
 
 #### `PUT /api/dispatch/config`
 
@@ -4074,3 +4087,27 @@ Excel 导入在本批缓存已写入但尚未 flush 的用例，重复编号按�
 - `frontend/src/api/{http.ts,types.ts}`、`frontend/src/views/Cases.vue`：`checkCoverage` 封装、候选步骤的覆盖检查按钮与结果展示、去重条数提示。
 - `frontend/nginx.conf`：`/api/` 读超时 130s → 320s。
 - `backend/api/tests/{test_casegen,test_cases_audit}.py`：去重、覆盖提示词/解析、`/ai-coverage` 成功与失败分支。
+
+## V2.42 账号活动统计与技能目录接线（2026-11-02）
+
+- `GET /api/users/activity-summary` 的 `kpis` 增加 `login_failed`（区间内登录失败次数）。`login_buckets` 项字段为契约中的 `ts`（整点 UTC），不再使用未写入契约的 `h`。
+- 账号页右栏改为读取该接口与 `GET /api/admin/audit-logs`。协议档技能卡片改为读取 `GET /api/admin/skills`。两条路径都不新增浏览器写接口。
+
+### 修改代码文件与作用清单
+
+- `backend/api/app/routers/users.py`：登录失败计数，登录桶改为 `ts`。
+- `frontend/src/api/{http.ts,types.ts}`、`frontend/src/views/AdminUsers.vue`：活动摘要与审计时间线。
+- `frontend/src/views/AdminProfiles.vue`、`frontend/src/components/modals/SkillDetailModal.vue`、`frontend/src/agent/skillLabels.ts`：技能目录卡片与详情只展示目录字段。
+
+## V2.43 Worker 心跳登记调度节点（2026-11-02）
+
+- 不新增 REST 路径。Worker 进程把自身写入已有 `dispatch_workers`，并在长任务执行期间继续刷新心跳。
+- `draining` / `offline` 保持管理员设置，且该进程不再领取新任务。节点权重和分发策略仍不决定领取顺序。
+- 启动播种不再创建 `worker-01` 至 `worker-06` 演示节点；仍保持原名的历史演示行会被移除，改过名字的同 ID 保留。
+
+### 修改代码文件与作用清单
+
+- `backend/worker/app/dispatch_presence.py`、`main.py`、`models.py`：心跳线程、执行态刷新、排空时停止领取。
+- `backend/api/app/seed.py`：停止播种并清理原名演示节点。
+- `docker-compose.yml`：默认 `WORKER_NODE_ID=worker-1`。
+- `backend/worker/tests/test_dispatch_presence.py`、`backend/api/tests/test_preview_seed_retirement.py`：心跳保留治理状态，播种不再留下演示节点。

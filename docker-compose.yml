@@ -238,6 +238,9 @@ services:
       LIGHTRAG_BASE_URL: ${LIGHTRAG_BASE_URL:-http://lightrag:9621}
       # 压测引擎（容器内网）；Worker 只下发 / 轮询，不在本进程发压。
       STRESS_URL: ${STRESS_URL:-http://stress:19090}
+      # 调度星图用稳定节点 ID；多副本时必须分别指定，避免互相覆盖心跳。
+      WORKER_NODE_ID: ${WORKER_NODE_ID:-worker-1}
+      WORKER_NODE_NAME: ${WORKER_NODE_NAME:-用例 Worker}
     depends_on:
       postgres:
         condition: service_healthy

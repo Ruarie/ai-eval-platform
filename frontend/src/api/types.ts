@@ -45,6 +45,40 @@ export interface AuthUser {
   created_at?: string
 }
 
+/** 账号页近 24 小时 KPI。shared_reports 在分享域落地前由服务端固定返回 0。 */
+export interface UserActivityKpis {
+  active_members: number
+  total_tasks: number
+  new_members: number
+  shared_reports: number
+  login_count: number
+  login_failed: number
+  disabled_members: number
+  total_members: number
+}
+
+/** GET /api/users/activity-summary：登录柱与成员活跃，不含异地登录风险判定。 */
+export interface UserActivitySummary {
+  range: { from: string; to: string }
+  kpis: UserActivityKpis
+  login_buckets: { ts: string; count: number }[]
+}
+
+/** 审计日志单行。detail 只含服务端写入的结构化摘要，不含密钥。 */
+export interface AuditLogEntry {
+  id: string
+  at: string
+  actor_id: string | null
+  action: string
+  target: { type?: string | null; id?: string | null }
+  detail?: Record<string, unknown> | null
+}
+
+export interface AuditLogPage {
+  items: AuditLogEntry[]
+  total: number
+}
+
 export interface WsTicketOut {
   ticket: string
   expires_in: number

@@ -21,8 +21,7 @@
         <div class="kpi-label">已停用账号</div>
       </div>
       <div class="kpi">
-        <!-- 契约（API.md）无登录活跃统计接口，无数据时显示 —，不虚构 -->
-        <div class="kpi-num num">—</div>
+        <div class="kpi-num num">{{ activeMembersText }}</div>
         <div class="kpi-label">24h 登录活跃</div>
       </div>
     </div>
@@ -58,7 +57,7 @@
               <span>开通新成员</span>
             </button>
 
-            <button class="btn btn-secondary btn-sm" :disabled="loading" @click="loadUsers">
+            <button class="btn btn-secondary btn-sm" :disabled="loading" @click="loadPage">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="23 4 23 10 17 10"></polyline>
                 <polyline points="1 20 1 14 7 14"></polyline>
@@ -125,34 +124,29 @@
         </table>
       </div>
 
-      <!-- 右 340px 侧栏：AI 安全监控与审计流水（对齐原型 admin-users.html 157-214） -->
+      <!-- 右栏：活动摘要、登录分布与审计都来自已有查询接口 -->
       <div class="section-gap" style="gap: 16px">
-        <!-- 1. AI 账号安全与异常行为检测卡（mock 演示数据，契约无安全检测接口） -->
-        <div class="ai-card">
-          <div class="ai-card-head">
-            <span class="ai-badge"><i class="ai-dot"></i>AI 账号异常检测</span>
+        <div class="panel glow" style="--glow-c: var(--c-users); padding: 16px 18px">
+          <div class="panel-title" style="margin-bottom: 10px">近 24 小时</div>
+          <div v-if="activityLoading && !activity" class="small tertiary">正在统计近 24 小时…</div>
+          <div v-else-if="activityError" class="small">
+            {{ activityError }}
+            <button class="link-btn" @click="loadActivity">重试</button>
           </div>
-          <div class="section-gap" style="gap: 8px; margin-bottom: 10px">
-            <div
-              v-for="(line, i) in anomalyLines"
-              :key="i"
-              class="small ai-gen-line"
-              style="color: var(--text-secondary); line-height: 1.5"
-              :style="{ animationDelay: `${i * 90}ms` }"
-              v-html="line"
-            ></div>
-          </div>
-          <div class="row" style="justify-content: flex-end">
-            <button class="btn btn-ai btn-sm" :disabled="locking" @click="handleAiLock">
-              临时锁定 {{ ANOMALY_USERNAME }}
-            </button>
+          <div v-else class="section-gap" style="gap: 8px">
+            <div class="row-between small"><span class="tertiary">活跃成员</span><b class="num">{{ kpiText(activity?.kpis.active_members) }}</b></div>
+            <div class="row-between small"><span class="tertiary">新开通</span><b class="num">{{ kpiText(activity?.kpis.new_members) }}</b></div>
+            <div class="row-between small"><span class="tertiary">新建任务</span><b class="num">{{ kpiText(activity?.kpis.total_tasks) }}</b></div>
+            <div class="row-between small"><span class="tertiary">已停用</span><b class="num">{{ kpiText(activity?.kpis.disabled_members) }}</b></div>
           </div>
         </div>
 
-        <!-- 2. 24h 登录活跃分布柱状图（内联 SVG 手绘 24 根柱；mock 演示数据） -->
         <div class="panel glow" style="--glow-c: var(--c-users); padding: 16px 18px">
           <div class="panel-title" style="margin-bottom: 8px">24h 登录活跃分布</div>
-          <svg width="100%" height="72" viewBox="0 0 280 72" preserveAspectRatio="none" aria-hidden="true" style="margin-bottom: 8px">
+          <div v-if="activityError" class="small tertiary" style="margin-bottom: 8px">登录分布暂时不可用</div>
+          <div v-else-if="activityLoading && !activity" class="small tertiary" style="margin-bottom: 8px">正在读取登录分布…</div>
+          <div v-else-if="!loginBars.length" class="small tertiary" style="margin-bottom: 8px">暂无登录分布</div>
+          <svg v-else width="100%" height="72" viewBox="0 0 280 72" preserveAspectRatio="none" role="img" aria-label="24 小时登录次数" style="margin-bottom: 8px">
             <rect
               v-for="(b, i) in loginBars"
               :key="i"
@@ -163,21 +157,28 @@
               rx="2"
               fill="var(--c-users)"
               :opacity="b.v ? 0.8 : 0.18"
-            />
+            >
+              <title>{{ b.title }}</title>
+            </rect>
           </svg>
           <div class="row-between small">
-            <span class="tertiary">登录成功 <b class="num" style="color: var(--accent-success)">{{ loginSuccessCount }} 次</b></span>
-            <span class="tertiary">拦截失败 <b class="num" style="color: var(--accent-error)">3 次</b></span>
+            <span class="tertiary">登录成功 <b class="num" style="color: var(--accent-success)">{{ kpiText(activity?.kpis.login_count) }} 次</b></span>
+            <span class="tertiary">登录失败 <b class="num" style="color: var(--accent-error)">{{ kpiText(activity?.kpis.login_failed) }} 次</b></span>
           </div>
         </div>
 
-        <!-- 3. 近期合规审计轨迹时间线（静态示例数据 + 锁定操作实时追加） -->
         <div class="panel glow" style="--glow-c: var(--c-users); padding: 16px 18px">
           <div class="panel-title" style="margin-bottom: 12px">近期合规审计轨迹</div>
-          <div class="timeline">
-            <div v-for="(a, i) in auditLogs" :key="i" class="tl-item" :class="a.type">
-              <div class="tl-time mono">{{ a.at }}</div>
-              <div class="small">{{ a.text }}</div>
+          <div v-if="auditError" class="small">
+            {{ auditError }}
+            <button class="link-btn" @click="loadAudits">重试</button>
+          </div>
+          <div v-else-if="auditLoading" class="small tertiary">正在读取审计记录…</div>
+          <div v-else-if="auditLogs.length === 0" class="small tertiary">最近没有审计记录</div>
+          <div v-else class="timeline">
+            <div v-for="item in auditLogs" :key="item.id" class="tl-item" :class="auditTone(item)">
+              <div class="tl-time mono">{{ formatAuditTime(item.at) }}</div>
+              <div class="small">{{ auditText(item) }}</div>
             </div>
           </div>
         </div>
@@ -187,13 +188,13 @@
     <!-- 弹窗 -->
     <UserModal
       v-model:show="showUserModal"
-      @success="loadUsers"
+      @success="loadPage"
     />
 
     <ResetPasswordModal
       v-model:show="showResetModal"
       :user="selectedUser"
-      @success="loadUsers"
+      @success="loadPage"
     />
   </div>
 </template>
@@ -202,7 +203,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useMessage, useDialog } from 'naive-ui'
 import { api } from '../api/http'
-import type { AuthUser } from '../api/types'
+import type { AuditLogEntry, AuthUser, UserActivitySummary } from '../api/types'
 import UserModal from '../components/modals/UserModal.vue'
 import ResetPasswordModal from '../components/modals/ResetPasswordModal.vue'
 import { formatDate } from '../utils/format'
@@ -250,75 +251,115 @@ function lastLoginText(u: AuthUser): string {
   return at ? `${ip} · ${at}` : ip
 }
 
-/* ─── U6 右栏：AI 异常检测 / 登录活跃柱图 / 审计轨迹（均为本地演示数据） ─── */
+/* ─── 右栏：活动摘要、登录柱与审计轨迹均来自服务端 ─── */
 
-// AI 异常检测命中的演示账号（mock：契约无安全检测接口，仅作交互演示）
-const ANOMALY_USERNAME = 'ops-li'
-const locking = ref(false)
+const activity = ref<UserActivitySummary | null>(null)
+const activityLoading = ref(true)
+const activityError = ref('')
+const auditLogs = ref<AuditLogEntry[]>([])
+const auditLoading = ref(true)
+const auditError = ref('')
 
-// 异常检测结论行（mock 演示文案，对齐原型）
-const anomalyLines = ref<string[]>([
-  `· 账号 <b>${ANOMALY_USERNAME}</b> 今晨 03:12 出现一次异地登录（IP: 198.51.100.22 归属地异常），平台安全网关已自动阻断。`,
-  '· 其余成员账号登录频次正常，无暴力破解特征。',
-])
+/** 统计尚未返回或失败时显示占位，避免把 0 和「还没读到」混在一起。 */
+function kpiText(value: number | undefined): string {
+  return value === undefined || Number.isNaN(value) ? '—' : String(value)
+}
 
-// 24h 登录活跃逐时数据（mock 演示；契约无该统计接口）
-const H24 = [0, 0, 1, 0, 0, 0, 1, 2, 5, 8, 6, 4, 3, 5, 7, 4, 3, 2, 1, 1, 0, 0, 0, 1]
-const loginSuccessCount = H24.reduce((s, v) => s + v, 0)
+const activeMembersText = computed(() => kpiText(activity.value?.kpis.active_members))
 
-/** 将 24 小时数据映射为 280x72 视窗内的 24 根柱（对齐原型 drawLoginBars） */
+/** 把登录桶画进 280×72 视窗；柱数随区间小时数变化。 */
 const loginBars = computed(() => {
-  const max = Math.max(...H24, 1)
-  const bw = 280 / 24
-  return H24.map((v, i) => {
-    const h = Math.max(2, (v / max) * 60)
+  const buckets = activity.value?.login_buckets ?? []
+  if (!buckets.length) return []
+  const max = Math.max(...buckets.map((bucket) => bucket.count), 1)
+  const width = 280 / buckets.length
+  return buckets.map((bucket, index) => {
+    const bar = Math.max(2, (bucket.count / max) * 60)
+    const hour = formatAuditTime(bucket.ts)
     return {
-      v,
-      x: +(i * bw + 1.5).toFixed(1),
-      y: +(68 - h).toFixed(1),
-      w: +(bw - 3).toFixed(1),
-      h: +h.toFixed(1),
+      v: bucket.count,
+      title: `${hour} · ${bucket.count} 次`,
+      x: +(index * width + 1.5).toFixed(1),
+      y: +(68 - bar).toFixed(1),
+      w: +Math.max(width - 3, 1).toFixed(1),
+      h: +bar.toFixed(1),
     }
   })
 })
 
-// 合规审计轨迹（静态示例数据；锁定操作会向前追加）
-interface AuditLog {
-  at: string
-  type: 'info' | 'warn' | 'err'
-  text: string
+const ACTION_LABELS: Record<string, string> = {
+  login: '登录',
+  login_failed: '登录失败',
+  user_create: '开通账号',
+  user_update: '更新资料',
+  user_status_change: '变更账号状态',
+  password_reset: '重置密码',
+  key_change: '更新协议档密钥',
+  profile_update: '更新协议档',
+  profile_delete: '删除协议档',
+  task_create: '创建任务',
+  task_cancel: '取消任务',
+  task_rerun: '复制任务',
+  task_quota_rejected: '任务配额拒绝',
+  case_set_create: '新建用例集',
+  case_set_confirm: '确认用例入库',
+  case_set_cancel: '废弃用例草稿',
+  whitelist_change: '变更压测白名单',
+  agent_skill_update: '更新技能文件',
 }
-const auditLogs = ref<AuditLog[]>([
-  { at: '10:42', type: 'info', text: '重置密码 · ops-li (操作人: admin)' },
-  { at: '09:18', type: 'info', text: '开户注册 · qa-wang (操作人: admin)' },
-  { at: '08:50', type: 'warn', text: '冻结基线 · task e5f2b8 设为评测基准' },
-  { at: '03:12', type: 'err', text: '异地登录拦截 · ops-li (IP: 198.51.100.22)' },
-])
 
-/** AI 临时锁定：对异常账号执行停用，写本地审计轨迹并 toast（对齐原型 ai-lock 交互） */
-async function handleAiLock() {
-  const target = users.value.find(x => x.username === ANOMALY_USERNAME)
-  if (!target) {
-    message.info(`演示账号 ${ANOMALY_USERNAME} 不存在于当前成员列表`)
-    return
-  }
-  if (target.disabled) {
-    message.info(`账号 ${ANOMALY_USERNAME} 当前已处于停用状态`)
-    return
-  }
-  locking.value = true
+function actorName(actorId: string | null): string {
+  if (!actorId) return '系统'
+  return users.value.find((user) => user.id === actorId)?.username || actorId.slice(0, 8)
+}
+
+function auditText(entry: AuditLogEntry): string {
+  const label = ACTION_LABELS[entry.action] || entry.action
+  return `${label} · ${actorName(entry.actor_id)}`
+}
+
+function auditTone(entry: AuditLogEntry): 'info' | 'warn' | 'err' {
+  if (entry.action === 'login_failed' || entry.action === 'task_quota_rejected') return 'err'
+  if (
+    entry.action === 'user_status_change'
+    || entry.action === 'password_reset'
+    || entry.action.endsWith('_delete')
+    || entry.action.endsWith('_cancel')
+  ) return 'warn'
+  return 'info'
+}
+
+function formatAuditTime(at: string): string {
+  const date = new Date(at)
+  if (Number.isNaN(date.getTime())) return at
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+async function loadActivity() {
+  activityLoading.value = true
+  activityError.value = ''
   try {
-    await api.users.toggleStatus(target.id, true)
-    target.disabled = true
-    // 写本地审计轨迹（前端演示；正式审计由后端落库）
-    const now = new Date()
-    const at = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-    auditLogs.value.unshift({ at, type: 'warn', text: `AI 临时锁定 · ${ANOMALY_USERNAME} (操作人: admin)` })
-    message.success(`账号 ${ANOMALY_USERNAME} 已临时锁定（写审计日志）`)
+    activity.value = await api.users.activitySummary()
   } catch (err: any) {
-    message.error(err.message || '临时锁定失败')
+    activity.value = null
+    activityError.value = err.message || '加载登录活跃失败'
   } finally {
-    locking.value = false
+    activityLoading.value = false
+  }
+}
+
+async function loadAudits() {
+  auditLoading.value = true
+  auditError.value = ''
+  try {
+    const page = await api.admin.listAuditLogs({ limit: 30 })
+    auditLogs.value = page.items || []
+  } catch (err: any) {
+    auditLogs.value = []
+    auditError.value = err.message || '加载审计记录失败'
+  } finally {
+    auditLoading.value = false
   }
 }
 
@@ -331,6 +372,13 @@ async function loadUsers() {
   } finally {
     loading.value = false
   }
+}
+
+/** 成员表、活跃统计和审计互不阻塞，单侧失败仍保留其余结果。 */
+function loadPage() {
+  void loadUsers()
+  void loadActivity()
+  void loadAudits()
 }
 
 function openResetPassword(user: AuthUser) {
@@ -360,6 +408,8 @@ function handleToggleStatus(user: AuthUser) {
         await api.users.toggleStatus(user.id, targetDisabled)
         user.disabled = targetDisabled
         message.success(`已${actionText}该账号`)
+        void loadActivity()
+        void loadAudits()
       } catch (err: any) {
         message.error(err.message || `${actionText}失败`)
       }
@@ -367,7 +417,7 @@ function handleToggleStatus(user: AuthUser) {
   })
 }
 
-onMounted(loadUsers)
+onMounted(loadPage)
 </script>
 
 <style scoped>

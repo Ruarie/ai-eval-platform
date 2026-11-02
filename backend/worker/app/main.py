@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from .benchmark import run_benchmark
+from .dispatch_presence import Presence
 from .dataset_import import (
     claim_next_dataset_import,
     recover_expired_dataset_import_leases,
@@ -239,7 +240,11 @@ def _expire_stale_case_confirmations(db) -> int:
 def loop() -> None:
     """轮询评测与导入两条独立队列，二者各自受并发闸门和租约约束。"""
     last_expire_scan = 0.0
+    # 任务租约使用进程内随机 ID，避免新进程续上已退出进程的租约。
+    # 调度星图使用稳定节点 ID，见 dispatch_presence。
     worker_id = uuid4().hex
+    presence = Presence()
+    presence.start()
     while True:
         db = SessionLocal()
         task_id: str | None = None
@@ -249,12 +254,14 @@ def loop() -> None:
             recover_expired_task_leases(db)
             # 导入租约独立于 Task；先回收异常退出的领取，再按设置尝试领取一个作业。
             recover_expired_dataset_import_leases(db)
-            import_claim = claim_next_dataset_import(db)
+            # 排空或离线维护时不领新任务；已经在执行的任务由租约心跳继续。
+            if presence.allows_claim():
+                import_claim = claim_next_dataset_import(db)
             # 平台并发闸门（PRD 3.4）：running 任务达到 max_running_tasks 时
             # 不领取新任务，queued 任务保持排队；会话内串行由 tasks 表的
             # 部分唯一索引 uq_tasks_active_session 在创建侧保证。
             running = db.query(Task).filter(Task.status == "running").count()
-            if not import_claim and running < _max_running_tasks(db):
+            if presence.allows_claim() and not import_claim and running < _max_running_tasks(db):
                 task = (
                     db.query(Task)
                     .filter(Task.status == "queued", Task.kind == "testcase")
@@ -279,18 +286,24 @@ def loop() -> None:
             import_id, lease_token = import_claim
             logger.info("开始执行 dataset import=%s", import_id)
             print(f"[worker] dataset-import start import={import_id}", flush=True)
+            presence.set_activity(busy=True, task_id=None)
             try:
                 run_dataset_import(import_id, lease_token)
             except Exception:
                 # 数据库故障等异常不得带崩主循环；租约到期后由回收逻辑兜底。
                 logger.exception("dataset import %s crashed", import_id)
+            finally:
+                presence.set_activity(busy=False, task_id=None)
         elif task_id:
+            presence.set_activity(busy=True, task_id=task_id)
             try:
                 with task_lease_heartbeat(task_id, worker_id) as active:
                     if active:
                         _run_task(task_id)
             except Exception:
                 logger.exception("task %s crashed outside executor", task_id)
+            finally:
+                presence.set_activity(busy=False, task_id=None)
         # 72h 超时扫描：节流执行，避免每秒全表扫（表量级小，代价可忽略）
         if time.monotonic() - last_expire_scan >= EXPIRE_SCAN_INTERVAL_S:
             last_expire_scan = time.monotonic()

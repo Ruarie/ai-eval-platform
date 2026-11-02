@@ -105,8 +105,8 @@ def activity_summary(
 ):
     """按 [from, to) 区间聚合成员活跃 KPI 与逐小时登录桶（API §3.3）。
 
-    缺省区间为最近 24 小时；登录事件来自 auth 登录打点的审计日志；
-    shared_reports 待 M2 报告分享域（share_links）落地后接入，当前如实返回 0。
+    缺省区间为最近 24 小时；成功登录与 login_failed 都来自审计日志。
+    shared_reports 待报告分享域落地后接入，当前如实返回 0。
     """
     to_bound = _parse_bound(to_ts, "to", datetime.now(UTC))
     from_bound = _parse_bound(from_ts, "from", to_bound - timedelta(hours=24))
@@ -123,8 +123,19 @@ def activity_summary(
         .all()
     )
     active_members = len({uid for uid, _ in login_rows if uid})
+    # 失败次数单独计数：不进入成功登录桶，供账号页替换原先写死的拦截数。
+    login_failed = (
+        db.query(func.count(AuditLog.id))
+        .filter(
+            AuditLog.action == "login_failed",
+            AuditLog.ts >= from_bound,
+            AuditLog.ts < to_bound,
+        )
+        .scalar()
+        or 0
+    )
 
-    # 逐小时登录桶：以区间起点对齐整点切分，桶键形如 2026-08-19T10:00
+    # 逐小时成功登录桶：内部键对齐整点，响应 ts 写成契约要求的 UTC ISO。
     buckets: dict[str, int] = {}
     cursor = from_bound.replace(minute=0, second=0, microsecond=0)
     while cursor < to_bound:
@@ -162,10 +173,11 @@ def activity_summary(
             # M2 前无 share_links 表：分享数为契约占位 0，不做假聚合
             "shared_reports": 0,
             "login_count": login_count,
+            "login_failed": int(login_failed),
             "disabled_members": disabled,
             "total_members": total,
         },
-        "login_buckets": [{"h": key, "count": count} for key, count in buckets.items()],
+        "login_buckets": [{"ts": f"{key}:00Z", "count": count} for key, count in buckets.items()],
     }
 
 

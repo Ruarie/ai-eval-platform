@@ -886,7 +886,7 @@
                 <n-input
                   v-model:value="skillSearchKeyword"
                   size="small"
-                  placeholder="搜索技能名称或依赖工具…"
+                  placeholder="搜索技能名称、类型或说明…"
                   clearable
                 />
               </div>
@@ -910,8 +910,14 @@
             </div>
           </div>
 
-          <!-- 卡片视图 -->
-          <div v-if="skillViewMode === 'cards'" class="skills-cards-grid mt16">
+          <div v-if="skillsLoading" class="expert-prompt-loading">正在读取技能目录…</div>
+          <div v-else-if="skillsError" class="expert-prompt-loading error">
+            {{ skillsError }}
+            <button class="btn btn-secondary btn-sm" @click="loadAgentSkills">重试</button>
+          </div>
+
+          <!-- 卡片视图：字段只来自 GET /api/admin/skills 的轻量目录 -->
+          <div v-else-if="skillViewMode === 'cards'" class="skills-cards-grid mt16">
             <div
               v-for="s in filteredSkills"
               :key="s.id"
@@ -920,56 +926,35 @@
               <div class="skill-card-top">
                 <div class="skill-card-heading">
                   <div class="skill-card-name">{{ s.name }}</div>
-                  <div class="skill-scenario-tag">{{ s.scenario }}</div>
+                  <div class="skill-scenario-tag">{{ skillKindLabel(s.kind) }}</div>
                 </div>
-                <span class="tag-soft">核心</span>
+                <span class="tag-soft">{{ s.enabled ? '已启用' : '已停用' }}</span>
               </div>
 
-              <div class="skill-card-desc">{{ s.desc }}</div>
+              <div class="skill-card-desc">{{ s.summary }}</div>
 
-              <!-- 调优参数 -->
               <div class="skill-tuning-chips">
                 <div class="tuning-chip">
-                  <span class="tuning-k">Temp</span>
-                  <span class="tuning-v mono">{{ s.temperature }}</span>
+                  <span class="tuning-k">版本</span>
+                  <span class="tuning-v mono">{{ s.version }}</span>
                 </div>
                 <div class="tuning-chip">
-                  <span class="tuning-k">MaxTokens</span>
-                  <span class="tuning-v mono">{{ s.maxTokens }}</span>
-                </div>
-                <div class="tuning-chip">
-                  <span class="tuning-k">TopP</span>
-                  <span class="tuning-v mono">{{ s.topP }}</span>
-                </div>
-              </div>
-
-              <!-- 斜杠命令 -->
-              <div class="skill-cmds-row">
-                <span class="cmd-label">命令:</span>
-                <div class="row wrap" style="gap: 4px">
-                  <span v-for="cmd in s.slashCommands" :key="cmd" class="cmd-tag mono">{{ cmd }}</span>
-                </div>
-              </div>
-
-              <!-- 依赖工具 -->
-              <div class="skill-tools-row">
-                <span class="tools-label">工具:</span>
-                <div class="row wrap" style="gap: 4px">
-                  <span v-for="t in s.tools" :key="t" class="tool-tag mono">{{ t }}</span>
+                  <span class="tuning-k">标识</span>
+                  <span class="tuning-v mono">{{ s.id }}</span>
                 </div>
               </div>
 
               <div class="skill-card-bottom">
                 <span class="small tertiary mono">SKILL.md</span>
                 <div class="row" style="gap: 6px">
-                  <button class="btn btn-secondary btn-xs" @click="handleOpenSkillModal(s)">编排详情</button>
+                  <button class="btn btn-secondary btn-xs" @click="handleOpenSkillModal(s)">目录详情</button>
                   <button class="btn btn-sign btn-xs" @click="handleOpenSkillFile(s)">预览 / 编辑</button>
                 </div>
               </div>
             </div>
 
             <div v-if="filteredSkills.length === 0" class="empty-state-wrap">
-              <EmptyState title="未找到匹配的 Agent 技能" description="请尝试清空搜索条件或重置筛选器" />
+              <EmptyState title="未找到匹配的 Agent 技能" description="请尝试清空搜索条件，或确认运行时技能目录可读" />
             </div>
           </div>
 
@@ -978,13 +963,11 @@
             <table class="ds-table">
               <thead>
                 <tr>
-                  <th style="width: 150px">技能名称</th>
-                  <th style="width: 140px">适用场景</th>
-                  <th>职责说明</th>
-                  <th style="width: 160px">触发命令</th>
-                  <th style="width: 180px">依赖短工具</th>
-                  <th style="width: 130px">调优参数</th>
-                  <th style="width: 80px">状态</th>
+                  <th style="width: 180px">技能名称</th>
+                  <th style="width: 120px">类型</th>
+                  <th>说明</th>
+                  <th style="width: 90px">版本</th>
+                  <th style="width: 90px">状态</th>
                   <th style="width: 120px; text-align: right">操作</th>
                 </tr>
               </thead>
@@ -994,25 +977,13 @@
                     <div style="font-weight: 600; font-size: 13px">{{ s.name }}</div>
                     <div class="mono small tertiary" style="font-size: 10px">{{ s.id }}</div>
                   </td>
-                  <td><span class="tag-soft">{{ s.scenario }}</span></td>
-                  <td class="small" style="color: var(--text-primary)">{{ s.desc }}</td>
+                  <td><span class="tag-soft">{{ skillKindLabel(s.kind) }}</span></td>
+                  <td class="small" style="color: var(--text-primary)">{{ s.summary }}</td>
+                  <td class="mono small">{{ s.version }}</td>
                   <td>
-                    <div class="row wrap" style="gap: 4px">
-                      <span v-for="cmd in s.slashCommands" :key="cmd" class="cmd-tag mono">{{ cmd }}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="row wrap" style="gap: 4px">
-                      <span v-for="t in s.tools" :key="t" class="tool-tag mono">{{ t }}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="mono small" style="color: var(--c-profiles)">
-                      T={{ s.temperature }} · {{ s.maxTokens }}t
-                    </div>
-                  </td>
-                  <td>
-                    <span class="badge badge-succeeded">活跃</span>
+                    <span class="badge" :class="s.enabled ? 'badge-succeeded' : 'badge-cancelled'">
+                      {{ s.enabled ? '已启用' : '已停用' }}
+                    </span>
                   </td>
                   <td style="text-align: right">
                     <div class="row" style="justify-content: flex-end; gap: 4px">
@@ -1023,8 +994,8 @@
                 </tr>
 
                 <tr v-if="filteredSkills.length === 0">
-                  <td colspan="8">
-                    <EmptyState title="未找到匹配的 Agent 技能" description="请尝试清空搜索条件或重置筛选器" />
+                  <td colspan="6">
+                    <EmptyState title="未找到匹配的 Agent 技能" description="请尝试清空搜索条件，或确认运行时技能目录可读" />
                   </td>
                 </tr>
               </tbody>
@@ -1170,6 +1141,7 @@
     <AgentSkillFileModal
       v-model:show="showSkillFileModal"
       :skill-id="selectedSkillFileId"
+      @saved="handleSkillFileSaved"
     />
 
     <AgentExpertPromptModal
@@ -1194,6 +1166,8 @@ import { api } from '../api/http'
 import type {
   AgentExpertPromptDocument,
   AgentExpertPromptMetadata,
+  AgentSkillDocument,
+  AgentSkillMetadata,
   MediaMcpConfig,
   Profile,
   ProfileCheckOut,
@@ -1207,7 +1181,8 @@ import { PROFILE_VENDORS, getProfileVendor } from '../utils/profileVendors'
 import ProfileModal from '../components/modals/ProfileModal.vue'
 import CheckResultModal from '../components/modals/CheckResultModal.vue'
 import McpToolModal from '../components/modals/McpToolModal.vue'
-import SkillDetailModal, { type SkillDetail } from '../components/modals/SkillDetailModal.vue'
+import SkillDetailModal from '../components/modals/SkillDetailModal.vue'
+import { skillKindLabel } from '../agent/skillLabels'
 import AgentSkillFileModal from '../components/modals/AgentSkillFileModal.vue'
 import AgentExpertPromptModal from '../components/modals/AgentExpertPromptModal.vue'
 import AgentPromptModal from '../components/modals/AgentPromptModal.vue'
@@ -1237,6 +1212,7 @@ function switchTab(key: TabKey) {
   } else if (key === 'rag_models') {
     loadRagModels()
   } else if (key === 'skills') {
+    loadAgentSkills()
     loadExpertPromptMetadata()
   }
 }
@@ -1549,24 +1525,13 @@ function handleOpenAddExternalServer() {
 // ═══════════════════════════════════════════════════════════════
 // Agent 技能编排 (Skills & Prompts)
 // ═══════════════════════════════════════════════════════════════
-const builtinSkills: SkillDetail[] = [
-  {
-    id: 'skill-testcase',
-    icon: '',
-    name: 'PRD 用例生成',
-    desc: '按 6 大策略精细配比提炼测试用例并支持确认转正。',
-    scenario: 'AI 需求与用例生成',
-    tools: ['dataset.list', 'task.create', 'testcase.confirm'],
-    slashCommands: ['/case', '/generate', '/prd'],
-    temperature: 0.3,
-    maxTokens: 3072,
-    topP: 0.95,
-  },
-]
-
 const skillViewMode = ref<'cards' | 'table'>('cards')
 const skillSearchKeyword = ref('')
-const selectedSkill = ref<SkillDetail | null>(null)
+const skillItems = ref<AgentSkillMetadata[]>([])
+const skillsLoading = ref(false)
+const skillsError = ref('')
+const selectedSkill = ref<AgentSkillMetadata | null>(null)
+let skillCatalogRequest = 0
 const showSkillModal = ref(false)
 const selectedSkillFileId = ref<string | null>(null)
 const showSkillFileModal = ref(false)
@@ -1578,30 +1543,51 @@ const showExpertPromptModal = ref(false)
 let expertPromptRequest = 0
 
 const filteredSkills = computed(() => {
-  return builtinSkills.filter((s) => {
-    if (skillSearchKeyword.value.trim()) {
-      const kw = skillSearchKeyword.value.toLowerCase().trim()
-      const matchName = s.name.toLowerCase().includes(kw)
-      const matchId = s.id.toLowerCase().includes(kw)
-      const matchDesc = s.desc.toLowerCase().includes(kw)
-      const matchScenario = s.scenario.toLowerCase().includes(kw)
-      const matchTools = s.tools.some((t) => t.toLowerCase().includes(kw))
-      if (!matchName && !matchId && !matchDesc && !matchScenario && !matchTools) return false
-    }
-    return true
+  const keyword = skillSearchKeyword.value.trim().toLowerCase()
+  if (!keyword) return skillItems.value
+  return skillItems.value.filter((skill) => {
+    const kind = `${skill.kind} ${skillKindLabel(skill.kind)}`.toLowerCase()
+    return skill.name.toLowerCase().includes(keyword)
+      || skill.id.toLowerCase().includes(keyword)
+      || skill.summary.toLowerCase().includes(keyword)
+      || kind.includes(keyword)
   })
 })
 
-function handleOpenSkillModal(skill: SkillDetail) {
+/** 打开技能页时读取目录头部，不把工作流正文留在列表状态里。 */
+async function loadAgentSkills() {
+  const request = ++skillCatalogRequest
+  skillsLoading.value = true
+  skillsError.value = ''
+  try {
+    const items = await api.admin.listAgentSkills()
+    if (request === skillCatalogRequest) skillItems.value = items
+  } catch (error: any) {
+    if (request !== skillCatalogRequest) return
+    skillItems.value = []
+    skillsError.value = error?.message || '技能目录读取失败'
+  } finally {
+    if (request === skillCatalogRequest) skillsLoading.value = false
+  }
+}
+
+function handleOpenSkillModal(skill: AgentSkillMetadata) {
   safeBlur()
   selectedSkill.value = skill
   showSkillModal.value = true
 }
 
-function handleOpenSkillFile(skill: SkillDetail) {
+function handleOpenSkillFile(skill: AgentSkillMetadata) {
   safeBlur()
   selectedSkillFileId.value = skill.id
   showSkillFileModal.value = true
+}
+
+/** 保存后用文件头部回写卡片，避免列表仍显示旧的启用状态或摘要。 */
+function handleSkillFileSaved(saved: AgentSkillDocument) {
+  const metadata = saved.metadata
+  skillItems.value = skillItems.value.map((item) => (item.id === metadata.id ? metadata : item))
+  if (selectedSkill.value?.id === metadata.id) selectedSkill.value = metadata
 }
 
 /** 仅在打开 Agent 技能页时读取专家目录，列表不携带任何提示词正文。 */
@@ -1640,11 +1626,19 @@ function handleExpertPromptSaved(document: AgentExpertPromptDocument) {
   ))
 }
 
-/** 保持既有技能数组导出格式，复制完成后才报告成功。 */
+/** 导出当前已加载的技能目录，不包含工作流正文。 */
 async function handleExportSkillsJson() {
   safeBlur()
+  if (skillsLoading.value) {
+    message.info('技能目录仍在读取')
+    return
+  }
+  if (!skillItems.value.length) {
+    message.info('当前没有可导出的技能目录')
+    return
+  }
   try {
-    const payload = JSON.stringify(builtinSkills, null, 2)
+    const payload = JSON.stringify(skillItems.value, null, 2)
     await navigator.clipboard.writeText(payload)
     message.success('已复制技能配置 JSON')
   } catch {

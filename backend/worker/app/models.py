@@ -17,6 +17,8 @@ from shared.models import (  # noqa: F401
     DatasetImportAttempt,
     DatasetImportRow,
     DatasetRow,
+    DispatchEvent,
+    DispatchWorker,
     DatasetSourceArtifact,
     DatasetVersion,
     DatasetVersionRow,

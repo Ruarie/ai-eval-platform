@@ -5,7 +5,6 @@
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -16,6 +15,7 @@ from .models import (
     Dataset,
     DatasetFolder,
     DatasetRow,
+    DispatchEvent,
     DispatchWorker,
     GoldQa,
     GoldQaItem,
@@ -26,11 +26,6 @@ from .models import (
 )
 
 logger = logging.getLogger("ai-eval")
-
-
-def _hours_ago(h: float) -> datetime:
-    """生成相对当前时间的过去时间戳，让预览数据的时间线更真实。"""
-    return datetime.now(UTC) - timedelta(hours=h)
 
 
 def _seed_profiles(db: Session, admin: User) -> list[ProtocolProfile]:
@@ -161,24 +156,32 @@ def _seed_cases(db: Session, admin: User) -> CaseSet | None:
     return case_set
 
 
-def _seed_workers(db: Session) -> list[DispatchWorker]:
-    """调度星图 Worker 节点：覆盖四大业务域，含离线节点演示状态分层；已有节点时返回现状供事件引用。"""
-    existing = db.query(DispatchWorker).order_by(DispatchWorker.id.asc()).all()
-    if existing:
-        return list(existing)
-    now = datetime.now(UTC)
-    workers = [
-        DispatchWorker(id="worker-01", name="GPU-Node-A1", caps=["benchmark", "judge"], state="idle", load_percent=18, weight=100, last_heartbeat_at=now),
-        DispatchWorker(id="worker-02", name="Vec-Node-V1", caps=["rag", "vector"], state="idle", load_percent=8, weight=100, last_heartbeat_at=now),
-        DispatchWorker(id="worker-03", name="Gen-Node-G1", caps=["testcase", "prd"], state="idle", load_percent=12, weight=80, last_heartbeat_at=now),
-        DispatchWorker(id="worker-04", name="Stress-Node-S1", caps=["stress", "load"], state="idle", load_percent=5, weight=120, last_heartbeat_at=now),
-        DispatchWorker(id="worker-05", name="Judge-Node-J1", caps=["benchmark", "prompt"], state="offline", load_percent=0, weight=100, last_heartbeat_at=_hours_ago(3)),
-        DispatchWorker(id="worker-06", name="Chunk-Node-C1", caps=["rag", "chunking"], state="idle", load_percent=6, weight=80, last_heartbeat_at=now),
-    ]
-    db.add_all(workers)
-    db.flush()
-    logger.info("已播种 %d 个 Worker 节点", len(workers))
-    return workers
+# 历史预览播种的假节点。只按「原 ID + 原名称」清理，改过名字的视为人工节点。
+_DEMO_WORKERS = {
+    "worker-01": "GPU-Node-A1",
+    "worker-02": "Vec-Node-V1",
+    "worker-03": "Gen-Node-G1",
+    "worker-04": "Stress-Node-S1",
+    "worker-05": "Judge-Node-J1",
+    "worker-06": "Chunk-Node-C1",
+}
+
+
+def _retire_demo_workers(db: Session) -> None:
+    """移除仍保持原名的预览节点。真实 Worker 由进程心跳自行登记。"""
+    rows = db.query(DispatchWorker).filter(DispatchWorker.id.in_(_DEMO_WORKERS)).all()
+    removed = 0
+    for row in rows:
+        if row.name != _DEMO_WORKERS.get(row.id):
+            continue
+        db.query(DispatchEvent).filter(DispatchEvent.worker_id == row.id).update(
+            {DispatchEvent.worker_id: None},
+            synchronize_session=False,
+        )
+        db.delete(row)
+        removed += 1
+    if removed:
+        logger.info("已移除 %d 个预览用 Worker 节点", removed)
 
 
 def _seed_kb(db: Session, admin: User) -> KnowledgeBase | None:
@@ -222,5 +225,5 @@ def bootstrap_preview_data(db: Session, admin: User) -> None:
     _seed_datasets(db, admin)
     _seed_cases(db, admin)
     _seed_kb(db, admin)
-    _seed_workers(db)
+    _retire_demo_workers(db)
     db.commit()

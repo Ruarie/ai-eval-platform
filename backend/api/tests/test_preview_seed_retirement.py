@@ -60,6 +60,17 @@ def test_preview_seed_does_not_forge_evaluation_and_keeps_history():
             assert db.query(Report).count() == 0
             assert db.query(TaskEvent).count() == 0
             assert db.query(DispatchEvent).count() == 0
+            assert db.query(DispatchWorker).count() == 0
+
+            demo = DispatchWorker(id="worker-01", name="GPU-Node-A1", caps=["benchmark"], state="idle")
+            kept = DispatchWorker(id="worker-02", name="手工节点", caps=["testcase"], state="idle")
+            db.add_all([demo, kept])
+            db.add(DispatchEvent(worker_id="worker-01", event="assigned", message="预览分配"))
+            db.commit()
+            bootstrap_preview_data(db, admin)
+            assert [row.id for row in db.query(DispatchWorker).order_by(DispatchWorker.id).all()] == ["worker-02"]
+            event = db.query(DispatchEvent).one()
+            assert event.worker_id is None
 
             db.add(Task(id="history", kind="benchmark", status="succeeded", created_by=admin.id))
             db.add(Report(id="history-report", task_id="history", kind="benchmark"))

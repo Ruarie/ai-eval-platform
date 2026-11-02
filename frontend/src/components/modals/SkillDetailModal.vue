@@ -9,109 +9,47 @@
     @update:show="$emit('update:show', $event)"
   >
     <div v-if="skill" class="skill-modal-content">
-      <!-- 头部概览条 -->
       <div class="skill-modal-header">
         <div class="skill-title-row">
-          <span class="skill-icon">{{ skill.icon }}</span>
           <div style="flex: 1">
             <div class="row-between">
-              <div class="row" style="gap: 8px; align-items: center">
+              <div class="row" style="gap: 8px; align-items: center; flex-wrap: wrap">
                 <span class="skill-name">{{ skill.name }}</span>
                 <span class="tag-soft mono" style="font-size: 11px">{{ skill.id }}</span>
-                <span class="tag-soft skill-builtin-badge">内置核心技能</span>
               </div>
-              <span class="status-badge-active">● 运行就绪</span>
+              <span :class="skill.enabled ? 'status-badge-active' : 'status-badge-off'">
+                {{ skill.enabled ? '已启用' : '已停用' }}
+              </span>
             </div>
             <div v-if="hintSummary" class="skill-hint">{{ hintSummary }}</div>
-            <div class="skill-desc">{{ skill.desc }}</div>
+            <div class="skill-desc">{{ skill.summary }}</div>
           </div>
         </div>
       </div>
 
-      <!-- 核心调优与运行指标 -->
       <div class="spec-grid">
         <div class="spec-item">
-          <span class="spec-label">适用场景</span>
-          <span class="spec-value">{{ skill.scenario }}</span>
+          <span class="spec-label">类型</span>
+          <span class="spec-value">{{ kindLabel }}</span>
         </div>
         <div class="spec-item">
-          <span class="spec-label">采样温度 (Temperature)</span>
-          <span class="spec-value mono text-ai">{{ skill.temperature }}</span>
+          <span class="spec-label">版本</span>
+          <span class="spec-value mono">{{ skill.version }}</span>
         </div>
         <div class="spec-item">
-          <span class="spec-label">最大输出 Token (Max Tokens)</span>
-          <span class="spec-value mono">{{ skill.maxTokens }}</span>
+          <span class="spec-label">启用状态</span>
+          <span class="spec-value">{{ skill.enabled ? '启用' : '停用' }}</span>
         </div>
         <div class="spec-item">
-          <span class="spec-label">Top-P 核心采样</span>
-          <span class="spec-value mono">{{ skill.topP }}</span>
+          <span class="spec-label">目录标识</span>
+          <span class="spec-value mono">{{ skill.id }}</span>
         </div>
       </div>
 
-      <!-- 触发机制与斜杠命令 -->
-      <div class="section-block">
-        <div class="section-title">
-          <span>⚡ 触发机制与斜杠命令 (Trigger & Commands)</span>
-        </div>
-        <div class="trigger-box">
-          <div class="row" style="gap: 8px; align-items: center; flex-wrap: wrap">
-            <span class="small tertiary">快捷斜杠命令:</span>
-            <span v-for="cmd in skill.slashCommands" :key="cmd" class="cmd-pill mono">{{ cmd }}</span>
-            <span class="small tertiary" style="margin-left: 8px">或通过自然语言直接描述意图唤醒</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 依赖的 MCP 受控短工具 -->
-      <div class="section-block">
-        <div class="section-title">
-          <span>🛠️ 绑定的受控短工具矩阵 (Bound MCP Short Tools)</span>
-          <span class="small tertiary">共 {{ skill.tools.length }} 个受控工具 · 毫秒级直连</span>
-        </div>
-        <div class="tools-grid">
-          <div v-for="t in skill.tools" :key="t" class="tool-item-card">
-            <div class="row-between">
-              <span class="tool-item-name mono">{{ t }}</span>
-              <span class="tag-soft" style="font-size: 10px">{{ t.includes('create') || t.includes('confirm') ? 'WRITE' : 'READ' }}</span>
-            </div>
-            <div class="tool-item-desc small">{{ getToolSimpleDesc(t) }}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 执行时序与工作流拓扑 -->
-      <div class="section-block">
-        <div class="section-title">
-          <span>🔄 执行拓扑与意图解析流 (Execution Pipeline)</span>
-        </div>
-        <div class="pipeline-flow">
-          <div class="flow-step">
-            <span class="step-num">1</span>
-            <span class="step-text">意图解析 & 实体提取</span>
-          </div>
-          <span class="flow-arrow">➔</span>
-          <div class="flow-step">
-            <span class="step-num">2</span>
-            <span class="step-text">资产查询 (MCP Tools)</span>
-          </div>
-          <span class="flow-arrow">➔</span>
-          <div class="flow-step">
-            <span class="step-num">3</span>
-            <span class="step-text">TaskSpec 构建 & 确认卡</span>
-          </div>
-          <span class="flow-arrow">➔</span>
-          <div class="flow-step highlight">
-            <span class="step-num">4</span>
-            <span class="step-text">生成用例草稿，审核后确认入库</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 安全与 System Prompt 托管说明 -->
       <div class="section-block guardrail-box">
-        <div class="guardrail-title">🔒 System Prompt 安全沙箱与边界说明 (PRD 5.5.2 & API §3.6.2)</div>
+        <div class="guardrail-title">技能正文</div>
         <div class="guardrail-desc">
-          本技能的完整工作流存放于统一 <code>SKILL.md</code>，仅在预览或 Agent 选中技能后按需读取。核心 System Prompt 由 Harness 固定生成；管理端只能为特定 Agent 协议档维护受审计的补充提示词，不能覆盖安全规则。
+          目录只返回名称、类型、版本和摘要。完整工作流在对应 <code>SKILL.md</code> 中，请通过「预览 / 编辑」读取；核心 System Prompt 仍由 Harness 固定生成。
         </div>
       </div>
     </div>
@@ -128,24 +66,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NModal } from 'naive-ui'
-import { skillSummary } from '../../agent/skillLabels'
-
-export interface SkillDetail {
-  id: string
-  icon: string
-  name: string
-  desc: string
-  scenario: string
-  tools: string[]
-  slashCommands: string[]
-  temperature: number
-  maxTokens: number
-  topP: number
-}
+import { skillKindLabel, skillSummary } from '../../agent/skillLabels'
+import type { AgentSkillMetadata } from '../../api/types'
 
 const props = defineProps<{
   show: boolean
-  skill: SkillDetail | null
+  skill: AgentSkillMetadata | null
 }>()
 
 defineEmits<{
@@ -153,21 +79,7 @@ defineEmits<{
 }>()
 
 const hintSummary = computed(() => skillSummary(props.skill?.id))
-
-function getToolSimpleDesc(toolName: string): string {
-  const map: Record<string, string> = {
-    'model.list': '查询系统协议档与可用模型列表',
-    'dataset.list': '检索标准测试集版本与样本总数',
-    'kb.list': '查询知识库切块与黄金 QA 资产',
-    'report.get': '读取已有评测报告并提取指标快照',
-    'task.get': '实时查询任务状态机与样本进度',
-    'task.create': '按 TaskSpec 创建任务并推入队列',
-    'task.cancel': '请求中止排队中或运行中的任务',
-    'dispatch.overview': '读取 Worker 算力节点健康与负载',
-    'testcase.confirm': '确认 AI 生成的候选用例转正入库',
-  }
-  return map[toolName] || '受控内置短工具'
-}
+const kindLabel = computed(() => skillKindLabel(props.skill?.kind))
 </script>
 
 <style scoped>
@@ -202,11 +114,18 @@ function getToolSimpleDesc(toolName: string): string {
   border-color: color-mix(in srgb, var(--accent-ai, #1f5947) 20%, transparent);
   font-size: 11px;
 }
-.status-badge-active {
+.status-badge-active,
+.status-badge-off {
   font-size: 11px;
-  color: var(--accent-success, #10b981);
   font-family: var(--font-mono, monospace);
   font-weight: 600;
+  white-space: nowrap;
+}
+.status-badge-active {
+  color: var(--accent-success, #10b981);
+}
+.status-badge-off {
+  color: var(--text-tertiary, #6b7280);
 }
 .skill-hint {
   font-size: 12px;

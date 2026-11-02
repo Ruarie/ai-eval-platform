@@ -6,7 +6,9 @@ import axios from 'axios'
 import {
   ErrorCode,
   ERROR_MESSAGES,
+  type AuditLogPage,
   type AuthUser,
+  type UserActivitySummary,
   type Profile,
   type ProfileCheckOut,
   type ProfileCreateIn,
@@ -330,6 +332,34 @@ export const api = {
         return
       }
       await http.put(`/api/users/${id}/status`, { disabled })
+    },
+    /** 近 24 小时成员活跃与逐小时成功登录次数。 */
+    async activitySummary(): Promise<UserActivitySummary> {
+      if (getDataMode() === 'mock') {
+        const to = new Date()
+        const from = new Date(to.getTime() - 24 * 60 * 60 * 1000)
+        from.setMinutes(0, 0, 0)
+        const login_buckets = Array.from({ length: 24 }, (_, index) => {
+          const hour = new Date(from.getTime() + index * 60 * 60 * 1000)
+          return { ts: hour.toISOString(), count: index === 10 ? 2 : 0 }
+        })
+        return {
+          range: { from: from.toISOString(), to: to.toISOString() },
+          kpis: {
+            active_members: 1,
+            total_tasks: mockStore.tasks.length,
+            new_members: 0,
+            shared_reports: 0,
+            login_count: 2,
+            login_failed: 0,
+            disabled_members: mockStore.users.filter((user) => user.disabled).length,
+            total_members: mockStore.users.length,
+          },
+          login_buckets,
+        }
+      }
+      const { data } = await http.get('/api/users/activity-summary')
+      return data
     },
   },
 
@@ -1241,6 +1271,12 @@ export const api = {
         return mockStore.settings
       }
       const { data } = await http.put('/api/admin/settings', payload)
+      return data
+    },
+    /** 平台合规审计。账号页时间线只取最近一页，不在浏览器补造示例事件。 */
+    async listAuditLogs(params: { from?: string; to?: string; offset?: number; limit?: number } = {}): Promise<AuditLogPage> {
+      if (getDataMode() === 'mock') return { items: [], total: 0 }
+      const { data } = await http.get('/api/admin/audit-logs', { params })
       return data
     },
     /** 读取技能目录；服务端只读取每个文件的固定头部。 */
