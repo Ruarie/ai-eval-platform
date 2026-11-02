@@ -28,9 +28,11 @@ from shared.casegen import (
     SOURCE_MAX_CHARS,
     TARGET_COUNT,
     build_prompts,
+    clip_source,
+    dedupe_cases,
     generation_token_budget,
     parse_cases,
-    rebalance_by_strategy,
+    rebalance_with_stats,
     selfcheck,
     validate_strategy_weights,
 )
@@ -82,7 +84,8 @@ def _read_source(db: Session, case_source: dict, user_id: str) -> str:
     """
     text = (case_source.get("text") or "").strip()
     if text:
-        return text[:SOURCE_MAX_CHARS]
+        # 不在读取层截断：上层需要知道「是否发生过截断」才能提示用户拆分需求。
+        return text
     file_id = case_source.get("file_id")
     if not file_id:
         raise ValueError("case_source 缺少 file_id 或 text")
@@ -109,8 +112,8 @@ def _read_source(db: Session, case_source: dict, user_id: str) -> str:
                             lines.append(line)
             finally:
                 workbook.close()
-        return "\n".join(lines)[:SOURCE_MAX_CHARS]
-    return path.read_bytes().decode("utf-8", errors="ignore")[:SOURCE_MAX_CHARS]
+        return "\n".join(lines)
+    return path.read_bytes().decode("utf-8", errors="ignore")
 
 
 def _to_case_items(case_set_id: str, cases: list[dict]) -> list[CaseItem]:
@@ -177,6 +180,17 @@ def run_testcase(task_id: str) -> None:
         if not source_text.strip():
             _fail(db, task, "VALIDATION", "来源文档内容为空，无法生成用例")
             return
+        source_text, source_truncated = clip_source(source_text)
+        if source_truncated:
+            # 截断必须留痕：否则用户会以为整份需求都参与了生成。
+            db.add(TaskEvent(
+                task_id=task.id, event="progress",
+                message=(
+                    f"来源文档超过 {SOURCE_MAX_CHARS} 字符，仅前 {SOURCE_MAX_CHARS} 字符参与生成；"
+                    "建议拆分需求后分别生成，避免后半段未被覆盖"
+                ),
+            ))
+            db.commit()
 
         max_count = config.get("max_count", TARGET_COUNT)
         try:
@@ -240,16 +254,33 @@ def run_testcase(task_id: str) -> None:
         except (ValueError, json.JSONDecodeError) as exc:
             _fail(db, task, "UPSTREAM", f"模型输出无法解析为用例：{exc}")
             return
+        # 先去重再判上限与裁剪：重复项属于灌水，不应让整单失败，也不该按配额
+        # 挤掉真正不同的用例。
+        cases, dropped_duplicate = dedupe_cases(cases)
         if len(cases) > MAX_COUNT:
             _fail(
                 db, task, "VALIDATION",
                 f"生成 {len(cases)} 条超过上限 {MAX_COUNT} 条，请拆分需求文档后重新发起",
             )
             return
-        cases = rebalance_by_strategy(cases, max_count, weights=weights)
+        cases, dropped = rebalance_with_stats(cases, max_count, weights=weights)
         if not cases:
             _fail(db, task, "UPSTREAM", "模型输出经配比校正后无有效用例")
             return
+        if dropped_duplicate or dropped["dropped_unknown_strategy"] or dropped["dropped_over_quota"]:
+            # 去重与裁剪都是静默行为，必须让用户知道实际保留数与丢弃原因。
+            parts = []
+            if dropped_duplicate:
+                parts.append(f"同名用例去重 {dropped_duplicate} 条")
+            if dropped["dropped_unknown_strategy"]:
+                parts.append(f"策略不匹配丢弃 {dropped['dropped_unknown_strategy']} 条")
+            if dropped["dropped_over_quota"]:
+                parts.append(f"超出配额丢弃 {dropped['dropped_over_quota']} 条")
+            db.add(TaskEvent(
+                task_id=task.id, event="progress",
+                message="按所选策略整理：" + "；".join(parts),
+            ))
+            db.commit()
 
         # ─── 落库用例集 + 自检红字 + 任务转 awaiting_case_confirm ───
         # 模型调用期间可能收到取消；落库前重新锁定任务，不能覆盖 cancelled 终态。
@@ -265,7 +296,7 @@ def run_testcase(task_id: str) -> None:
             status="generated",
             generated_count=len(cases),
             confirmed_count=0,
-            checks=selfcheck(cases),
+            checks=selfcheck(cases, weights=weights),
             expires_at=expires_at,
         )
         db.add(case_set)

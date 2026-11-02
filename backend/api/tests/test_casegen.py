@@ -132,3 +132,100 @@ def test_scale_contract_constants():
     # 规模口径：中等目标 45、硬上限 80（PRD 5.4.1）
     assert casegen.TARGET_COUNT == 45
     assert casegen.MAX_COUNT == 80
+
+
+def test_clip_source_reports_truncation():
+    """来源截断必须可被上层感知，否则长 PRD 后半段会静默不参与生成。"""
+    short, short_truncated = casegen.clip_source("需求")
+    assert short == "需求" and short_truncated is False
+
+    long_text = "需" * (casegen.SOURCE_MAX_CHARS + 500)
+    clipped, truncated = casegen.clip_source(long_text)
+    assert truncated is True
+    assert len(clipped) == casegen.SOURCE_MAX_CHARS
+
+
+def test_parse_cases_normalizes_strategy_and_priority_aliases():
+    """模型常写英文键或 P0/P1 档位；不归一会被配比裁剪当成未知策略丢弃。"""
+    items = casegen.parse_cases(
+        '[{"name":"登录成功","strategy":"positive","priority":"P0"},'
+        '{"name":"密码错误","strategy":"negative","priority":"p2"}]'
+    )
+    assert [item["strategy"] for item in items] == ["正向", "反向"]
+    assert [item["priority"] for item in items] == ["HX", "BJ"]
+
+
+def test_selfcheck_only_checks_strategies_with_positive_weight():
+    """用户显式只生成正向时，不能再按默认配比要求反向用例。"""
+    cases = [{"name": "登录成功", "strategy": "正向", "priority": "HX"}]
+    assert casegen.selfcheck(cases, weights={"positive": 100}) == []
+    # 默认配比下仍然要求反向用例，保持既有红字语义。
+    codes = {check["code"] for check in casegen.selfcheck(cases)}
+    assert codes == {"missing_constraint_negative"}
+
+
+def test_rebalance_reports_dropped_unknown_and_over_quota():
+    """裁剪统计用于向用户解释「模型给了 N 条、实际保留 M 条」。"""
+    items = [
+        {"name": "正向1", "strategy": "正向"},
+        {"name": "正向2", "strategy": "正向"},
+        {"name": "正向3", "strategy": "正向"},
+        {"name": "反向1", "strategy": "反向"},
+    ]
+    kept, dropped = casegen.rebalance_with_stats(items, 2, weights={"positive": 100})
+    assert [item["name"] for item in kept] == ["正向1", "正向2"]
+    assert dropped == {"dropped_unknown_strategy": 1, "dropped_over_quota": 1}
+
+
+def test_dedupe_cases_keeps_first_and_counts_duplicates():
+    """同名同策略只保留首条；名称空白差异不算不同用例。"""
+    items = [
+        {"name": "登录 成功", "strategy": "正向"},
+        {"name": "登录成功", "strategy": "正向"},
+        {"name": "登录成功", "strategy": "反向"},
+        {"name": "密码错误", "strategy": "反向"},
+    ]
+    kept, dropped = casegen.dedupe_cases(items)
+    assert [item["name"] for item in kept] == ["登录 成功", "登录成功", "密码错误"]
+    assert dropped == 1
+
+
+def test_extract_json_array_is_shared_tolerance_point():
+    """用例生成与数据集补全共用容错解析，围栏与前后解释文字都要能处理。"""
+    raw = '说明文字\n```json\n[{"name":"a"}]\n```\n结尾'
+    assert casegen.extract_json_array(raw) == [{"name": "a"}]
+    for broken in ("", "没有数组", '{"a":1}'):
+        try:
+            casegen.extract_json_array(broken)
+        except ValueError:
+            continue
+        raise AssertionError("非法输出必须抛 ValueError")
+
+
+def test_build_coverage_prompt_lists_case_summary():
+    """覆盖复审只需要清单与需求，不在提示词里放全量用例正文。"""
+    system, user = casegen.build_coverage_prompt(
+        "需求：退款需在 3 个工作日内到账",
+        [{"name": "退款到账", "module": "退款", "feature_point": "3 个工作日", "steps": "很长的步骤"}],
+    )
+    assert "uncovered" in system and "不要臆造" in system
+    assert "退款需在 3 个工作日内到账" in user
+    assert "1. [退款] 退款到账（功能点：3 个工作日）" in user
+    assert "很长的步骤" not in user
+
+
+def test_parse_coverage_caps_items_and_tolerates_strings():
+    """覆盖结果允许纯字符串条目，字段长度与条数都要截断。"""
+    import json
+
+    raw = "```json\n" + json.dumps({
+        "uncovered": ["退款超时处理"] + [
+            {"requirement": f"点{index}", "reason": "x" * 400} for index in range(30)
+        ],
+        "notes": "n" * 400,
+    }, ensure_ascii=False) + "\n```"
+    result = casegen.parse_coverage(raw)
+    assert result["uncovered"][0] == {"requirement": "退款超时处理", "reason": ""}
+    assert len(result["uncovered"]) == casegen.COVERAGE_MAX_ITEMS
+    assert all(len(item["reason"]) <= casegen.COVERAGE_MAX_FIELD_CHARS for item in result["uncovered"])
+    assert len(result["notes"]) == casegen.COVERAGE_MAX_FIELD_CHARS

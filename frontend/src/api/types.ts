@@ -542,6 +542,27 @@ export interface CaseGenerateInput {
   max_count: number
 }
 
+/** AI 候选生成结果：items 为未落库候选，附带自检与裁剪信息。 */
+export interface CaseGenerateResult {
+  items: TestCase[]
+  checks: TestCaseCheck[]
+  /** 需求超过 20000 字符时被截断，后端只用了前 20000 字符。 */
+  sourceTruncated: boolean
+  dropped: {
+    dropped_unknown_strategy: number
+    dropped_over_quota: number
+    dropped_duplicate?: number
+  }
+}
+
+/** 需求覆盖自检结果：uncovered 为需求中疑似未被候选覆盖的功能点。 */
+export interface CaseCoverageResult {
+  uncovered: Array<{ requirement: string; reason: string }>
+  notes: string
+  sourceTruncated: boolean
+  caseCount: number
+}
+
 export interface CaseFolder {
   id: string
   name: string

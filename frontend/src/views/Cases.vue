@@ -649,6 +649,45 @@
         </div>
 
         <div v-show="aiGen.step === 2" class="drawer-body">
+          <!-- 候选阶段即展示自检与裁剪提示：不必保存入库后才发现缺项 -->
+          <div v-if="aiGen.checks.length || aiGen.sourceTruncated || aiDroppedTotal" class="candidate-notices" role="status" aria-live="polite">
+            <p v-if="aiGen.sourceTruncated" class="candidate-notice check-warning">
+              需求超过 20000 字符，仅前 20000 字符参与生成；建议拆分需求后分别生成，避免后半段未被覆盖。
+            </p>
+            <p v-if="aiDroppedTotal" class="candidate-notice check-warning">
+              按所选策略整理：<template v-if="aiGen.droppedDuplicate">同名去重 {{ aiGen.droppedDuplicate }} 条，</template>策略不匹配丢弃 {{ aiGen.droppedUnknown }} 条，超出配额丢弃 {{ aiGen.droppedOverQuota }} 条。
+            </p>
+            <p v-for="check in aiGen.checks" :key="check.code" class="candidate-notice" :class="`check-${check.level}`">{{ check.message }}</p>
+          </div>
+          <div class="field">
+            <div class="row-between">
+              <label class="field-label">需求覆盖检查</label>
+              <button
+                class="btn btn-secondary btn-sm"
+                type="button"
+                :disabled="aiGen.coverageLoading || aiGen.generating || aiGen.applying"
+                @click="runCoverageCheck"
+              >
+                {{ aiGen.coverageLoading ? '检查中…' : '检查需求覆盖' }}
+              </button>
+            </div>
+            <p class="field-hint">额外调用一次模型，找出需求中未被候选覆盖的功能点；不修改候选内容。</p>
+            <div v-if="aiGen.coverage" class="coverage-result" role="status" aria-live="polite">
+              <p v-if="!aiGen.coverage.uncovered.length" class="coverage-ok">
+                未发现明显未覆盖的功能点（已检查 {{ aiGen.coverage.caseCount }} 条候选）。
+              </p>
+              <template v-else>
+                <p class="coverage-title">可能未覆盖 {{ aiGen.coverage.uncovered.length }} 处：</p>
+                <ul class="coverage-list">
+                  <li v-for="(item, index) in aiGen.coverage.uncovered" :key="index">
+                    <strong>{{ item.requirement }}</strong>
+                    <span v-if="item.reason" class="coverage-reason">{{ item.reason }}</span>
+                  </li>
+                </ul>
+              </template>
+              <p v-if="aiGen.coverage.notes" class="coverage-notes">{{ aiGen.coverage.notes }}</p>
+            </div>
+          </div>
           <div class="field">
             <label class="field-label">采纳目标</label>
             <div class="candidate-targets">
@@ -799,7 +838,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMessage, useDialog, type DropdownOption } from 'naive-ui'
 import { api } from '../api/http'
-import type { CaseSet, TestCase, TestCaseInput, ColumnSchemaItem, TaskStatus } from '../api/types'
+import type { CaseSet, TestCase, TestCaseInput, TestCaseCheck, CaseCoverageResult, ColumnSchemaItem, TaskStatus } from '../api/types'
 import { escapeHtml, escapeRegex, renderIcon } from '../utils/render'
 import ImportCasesExcelModal from '../components/modals/ImportCasesExcelModal.vue'
 
@@ -2020,10 +2059,20 @@ const aiGen = ref({
   appliedBaseSnapshot: '',
   appliedBaseUnsaved: false,
   candidates: [] as AiCaseCandidate[],
+  // 候选阶段的自检与裁剪信息：保存前就能看到缺项，而不是入库后才发现
+  checks: [] as TestCaseCheck[],
+  sourceTruncated: false,
+  droppedUnknown: 0,
+  droppedOverQuota: 0,
+  droppedDuplicate: 0,
+  // 需求覆盖自检按需触发（额外一次模型调用），结果只做提示
+  coverage: null as CaseCoverageResult | null,
+  coverageLoading: false,
 })
 
 const presetOptions = computed(() => PRD_PRESETS.map(p => ({ label: `${p.name} · ${p.desc.slice(0, 30)}...`, value: p.desc })))
 const aiSelectedCount = computed(() => aiGen.value.candidates.filter(c => c.selected).length)
+const aiDroppedTotal = computed(() => aiGen.value.droppedUnknown + aiGen.value.droppedOverQuota + aiGen.value.droppedDuplicate)
 const strategyWeightTotal = computed(() => Object.values(aiGen.value.strategyWeights).reduce((sum, weight) => sum + Number(weight || 0), 0))
 const strategyWeightsValid = computed(() => Object.values(aiGen.value.strategyWeights).every(weight => Number.isInteger(weight) && weight >= 0 && weight <= 100)
   && strategyWeightTotal.value === 100)
@@ -2114,6 +2163,12 @@ async function runAiGenerateCases(replaceExisting = false) {
     return
   }
   aiGen.value.generating = true
+  aiGen.value.checks = []
+  aiGen.value.sourceTruncated = false
+  aiGen.value.droppedUnknown = 0
+  aiGen.value.droppedOverQuota = 0
+  aiGen.value.droppedDuplicate = 0
+  aiGen.value.coverage = null
   const sourceMode = aiGen.value.sourceMode
   const sourceText = aiGen.value.prdText.trim()
   const sourceDocId = aiGen.value.sourceDocId
@@ -2143,19 +2198,33 @@ async function runAiGenerateCases(replaceExisting = false) {
         strategy_weights: weights,
         max_count: count,
       })
-      candidates = (generated as any[]).map((c, i) => ({
+      aiGen.value.checks = generated.checks
+      aiGen.value.sourceTruncated = generated.sourceTruncated
+      aiGen.value.droppedUnknown = generated.dropped.dropped_unknown_strategy
+      aiGen.value.droppedOverQuota = generated.dropped.dropped_over_quota
+      aiGen.value.droppedDuplicate = generated.dropped.dropped_duplicate || 0
+      candidates = generated.items.map((c, i) => {
+        // 模型可能用别名键（preconditions / expected_result / reference），按优先级兜底。
+        const raw = c as TestCase & {
+          preconditions?: string
+          expected_result?: string
+          reference?: string
+          question?: string
+        }
+        return {
         selected: true,
         code: c.code || `TC-${String(i + 1).padStart(3, '0')}`,
-        name: c.name || c.question || '',
+        name: c.name || raw.question || '',
         module: c.module || '通用',
         feature_point: c.feature_point || '',
         strategy: normalizeCaseStrategy(c.strategy),
         priority: (c.priority as CasePriority) || 'HX',
-        preconditions: c.preconditions || c.precondition || '',
-        stepsText: Array.isArray(c.steps) ? c.steps.join('\n') : typeof c.steps === 'string' ? c.steps : '',
-        expected_result: c.expected_result || c.expected || c.reference || '',
+        preconditions: raw.preconditions || c.precondition || '',
+        stepsText: Array.isArray(c.steps) ? (c.steps as unknown as string[]).join('\n') : typeof c.steps === 'string' ? c.steps : '',
+        expected_result: raw.expected_result || c.expected || raw.reference || '',
         source: c,
-      }))
+        }
+      })
     }
     if (!candidates.length) {
       message.warning('未生成候选用例，请补充需求后重试')
@@ -2177,6 +2246,35 @@ function toggleAllCandidates() {
   if (aiGen.value.appliedToSetId || aiGen.value.applying || aiGen.value.generating) return
   const target = aiSelectedCount.value < aiGen.value.candidates.length
   aiGen.value.candidates.forEach(c => { c.selected = target })
+}
+
+/** 需求覆盖自检：独立请求，只提示未覆盖的功能点，不修改候选内容。 */
+async function runCoverageCheck() {
+  const state = aiGen.value
+  if (state.coverageLoading || state.generating || state.applying) return
+  const selected = state.candidates.filter(candidate => candidate.selected && candidate.name.trim())
+  if (!selected.length) {
+    message.warning('请先勾选至少一条有名称的候选')
+    return
+  }
+  state.coverageLoading = true
+  state.coverage = null
+  try {
+    state.coverage = await api.cases.checkCoverage({
+      source_text: state.sourceMode === 'text' ? state.prdText.trim() : '',
+      ...(state.sourceMode === 'file' ? { source_doc_id: state.sourceDocId } : {}),
+      cases: selected.map(candidate => ({
+        name: candidate.name.trim(),
+        strategy: candidate.strategy,
+        module: candidate.module,
+        feature_point: candidate.feature_point,
+      })),
+    })
+  } catch (err: any) {
+    message.error(err.message || '需求覆盖检查失败')
+  } finally {
+    state.coverageLoading = false
+  }
 }
 
 /** 把已追加行的后续编辑同步回候选；原草稿只在新草稿创建成功后移除本批行。 */
@@ -2892,6 +2990,48 @@ onUnmounted(() => {
   color: var(--accent-success);
   font-weight: 500;
 }
+
+/* 候选阶段提示：截断、裁剪与自检红字 */
+.candidate-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.candidate-notice {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.candidate-notice.check-error {
+  color: var(--accent-error);
+  font-weight: 600;
+}
+.candidate-notice.check-warning {
+  color: var(--accent-warning);
+}
+
+/* 需求覆盖自检结果 */
+.coverage-result {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.coverage-ok { margin: 0; color: var(--accent-success); }
+.coverage-title { margin: 0 0 6px; font-weight: 600; color: var(--accent-warning); }
+.coverage-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.coverage-list strong { color: var(--text-primary); font-weight: 600; }
+.coverage-reason { margin-left: 6px; color: var(--text-secondary); }
+.coverage-notes { margin: 8px 0 0; color: var(--text-tertiary); }
 
 .review-summary {
   display: flex;

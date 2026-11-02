@@ -4,6 +4,7 @@
 ``Setting.agent_profile_id`` -> ``ProtocolProfile`` -> 环境文件连接 -> ``call_protocol``。
 """
 
+import json
 import logging
 
 from sqlalchemy.orm import Session
@@ -73,20 +74,13 @@ def call_agent_model(
 
 
 def extract_json_array(text: str) -> list[dict]:
-    """从容错模型输出提取 JSON 数组（容忍代码围栏与首尾解释文字）。"""
-    cleaned = (text or "").strip()
-    if not cleaned:
-        raise AppError(ErrorCode.UPSTREAM, "模型返回空内容")
-    if cleaned.startswith("```"):
-        cleaned = "\n".join(
-            ln for ln in cleaned.splitlines() if not ln.strip().startswith("```")
-        ).strip()
-    start, end = cleaned.find("["), cleaned.rfind("]")
-    if start < 0 or end <= start:
-        raise AppError(ErrorCode.UPSTREAM, "模型输出无法解析为 JSON 数组")
-    import json
+    """容错提取 JSON 数组；解析实现与用例生成共用 ``shared.casegen``。"""
+    from shared.casegen import extract_json_array as _extract
 
-    data = json.loads(cleaned[start : end + 1])
-    if not isinstance(data, list):
-        raise AppError(ErrorCode.UPSTREAM, "模型返回的不是 JSON 数组")
-    return data
+    try:
+        return _extract(text)
+    except ValueError as exc:
+        # 保持既有错误码与文案：调用方按 UPSTREAM 展示「模型输出不可解析」。
+        raise AppError(ErrorCode.UPSTREAM, str(exc)) from exc
+    except json.JSONDecodeError as exc:
+        raise AppError(ErrorCode.UPSTREAM, "模型输出无法解析为 JSON 数组") from exc

@@ -55,6 +55,51 @@ MODEL_RESERVED_KEYS = frozenset({
     "sort_order", "created_at", "updated_at",
 })
 
+# 策略别名：模型常写英文键或简称，若不归一会被配额裁剪当成未知策略整条丢弃。
+STRATEGY_ALIASES = {
+    "positive": "正向", "normal": "正向", "正向用例": "正向", "正常": "正向",
+    "negative": "反向", "反向用例": "反向", "异常": "反向", "约束": "反向",
+    "boundary": "边界", "边界值": "边界", "边界条件": "边界",
+    "equivalence": "等价类", "equivalence class": "等价类", "等价": "等价类",
+    "state": "状态迁移", "state transition": "状态迁移", "状态": "状态迁移",
+    "scenario": "场景", "end-to-end": "场景", "端到端": "场景",
+}
+
+# 优先级别名：文档早期示例使用 P0/P1，模型可能照抄；统一收敛到六档。
+PRIORITY_ALIASES = {
+    "p0": "HX", "p1": "FHX", "p2": "BJ", "p3": "YC", "p4": "ZD",
+    "critical": "HX", "high": "HX", "medium": "FHX", "low": "BJ",
+    "核心": "HX", "非核心": "FHX", "边界问题": "BJ",
+    "异常": "YC", "中断": "ZD", "遍历": "BL",
+}
+
+
+def clip_source(source_text: str) -> tuple[str, bool]:
+    """按 SOURCE_MAX_CHARS 截断来源，返回 ``(文本, 是否截断)``。
+
+    截断必须让调用方可见：一份完整 PRD 常超过 2 万字，静默截断会让后半段
+    需求完全不参与生成，而用户以为覆盖了全文。
+    """
+    if len(source_text) <= SOURCE_MAX_CHARS:
+        return source_text, False
+    return source_text[:SOURCE_MAX_CHARS], True
+
+
+def _alias(value: str, aliases: dict[str, str]) -> str:
+    """按原值、小写、去空白依次匹配别名；未命中保持原值。"""
+    key = value.strip()
+    return aliases.get(key) or aliases.get(key.lower()) or key
+
+
+def normalize_case(item: dict) -> dict:
+    """把模型输出的策略/优先级别名收敛到平台枚举（其余字段原样保留）。"""
+    normalized = dict(item)
+    strategy = _alias(str(item.get("strategy") or ""), STRATEGY_ALIASES)
+    normalized["strategy"] = strategy
+    if item.get("priority") is not None:
+        normalized["priority"] = _alias(str(item.get("priority") or ""), PRIORITY_ALIASES)
+    return normalized
+
 
 def validate_strategy_weights(weights: dict[str, int] | None) -> dict[str, int]:
     """校验百分比；省略的策略取零，未提供配置才使用默认配比。"""
@@ -92,6 +137,11 @@ def build_prompts(
         "module（模块）、submodule（子模块）、feature_point（功能点）、"
         "name（测试点/用例名称）、expected（预期结果）、precondition（前置条件）、"
         "steps（可执行操作步骤）、test_type（测试类型，如 核心业务/异常处理/兼容性）。"
+        "输出格式示例（仅示意结构与字段名，取值必须按当前需求重写，禁止照抄）："
+        '[{"strategy":"正向","priority":"HX","module":"登录","submodule":"短信验证码",'
+        '"feature_point":"验证码 5 分钟内有效","name":"有效期内输入验证码可登录",'
+        '"precondition":"已获取未过期的验证码","steps":"1. 输入手机号与验证码\\n2. 点击登录",'
+        '"expected":"登录成功并跳转首页","test_type":"核心业务"}]'
         "只输出一个 JSON 数组，不要输出任何解释文字或 markdown 代码围栏。"
     )
     user = (
@@ -101,19 +151,39 @@ def build_prompts(
     return system, user
 
 
-def parse_cases(text: str) -> list[dict]:
-    """从容错模型输出提取用例 JSON 数组（允许代码围栏与首尾解释文字）。"""
-    cleaned = text.strip()
+def _strip_code_fence(text: str) -> str:
+    """去掉模型习惯性包裹的 ```json 围栏。"""
+    cleaned = (text or "").strip()
     if cleaned.startswith("```"):
-        cleaned = "\n".join(ln for ln in cleaned.splitlines() if not ln.strip().startswith("```")).strip()
+        cleaned = "\n".join(
+            line for line in cleaned.splitlines() if not line.strip().startswith("```")
+        ).strip()
+    return cleaned
+
+
+def extract_json_array(text: str) -> list:
+    """从模型输出提取 JSON 数组（容忍代码围栏与首尾解释文字）。
+
+    用例生成、用例补全与数据集合成共用同一段容错逻辑：任何一侧放宽或收紧
+    解析规则都必须在这里改，避免两份实现长期漂移。
+    """
+    cleaned = _strip_code_fence(text)
+    if not cleaned:
+        raise ValueError("模型返回空内容")
     start, end = cleaned.find("["), cleaned.rfind("]")
     if start < 0 or end <= start:
-        raise ValueError("模型未返回可解析的用例 JSON 数组")
+        raise ValueError("模型输出无法解析为 JSON 数组")
     data = json.loads(cleaned[start : end + 1])
     if not isinstance(data, list):
         raise ValueError("模型返回的不是 JSON 数组")
+    return data
+
+
+def parse_cases(text: str) -> list[dict]:
+    """从容错模型输出提取用例 JSON 数组（允许代码围栏与首尾解释文字）。"""
+    data = extract_json_array(text)
     items = [
-        {key: value for key, value in item.items() if key not in MODEL_RESERVED_KEYS}
+        normalize_case({key: value for key, value in item.items() if key not in MODEL_RESERVED_KEYS})
         for item in data if isinstance(item, dict) and item.get("name")
     ]
     if not items:
@@ -121,41 +191,154 @@ def parse_cases(text: str) -> list[dict]:
     return items
 
 
-def rebalance_by_strategy(
+def dedupe_cases(items: list[dict]) -> tuple[list[dict], int]:
+    """按「策略 + 去空白小写名称」去重，返回 ``(保留项, 丢弃条数)``。
+
+    模型容易为凑数量重复输出同名用例；配额裁剪按条数算，重复项会挤掉真正
+    不同的用例，所以先去重再裁剪。缺名称的条目不参与去重（由上层判缺项）。
+    """
+    seen: set[tuple[str, str]] = set()
+    result: list[dict] = []
+    for item in items:
+        name = "".join(str(item.get("name") or "").split()).lower()
+        key = (str(item.get("strategy") or ""), name)
+        if name and key in seen:
+            continue
+        if name:
+            seen.add(key)
+        result.append(item)
+    return result, len(items) - len(result)
+
+
+# ─── 需求覆盖自检（可选，独立请求，不与生成争同一条超时预算） ───
+COVERAGE_MAX_ITEMS = 20
+COVERAGE_MAX_FIELD_CHARS = 300
+
+
+def build_coverage_prompt(
+    source_text: str, cases: list[dict]
+) -> tuple[str, str]:
+    """组装「需求覆盖」复审提示词：找出需求中有、用例里没有的功能点。"""
+    lines = []
+    for index, case in enumerate(cases, start=1):
+        module = str(case.get("module") or "通用").strip()
+        name = str(case.get("name") or "").strip()
+        feature = str(case.get("feature_point") or "未标注").strip()
+        lines.append(f"{index}. [{module}] {name}（功能点：{feature}）")
+    system = (
+        "你是测试评审专家。给定需求文档与已生成的测试用例清单，"
+        "找出需求中**明确描述**、但清单里没有任何用例覆盖的功能点或业务规则。"
+        "只报告确实缺失的项：不要臆造需求中不存在的内容，不要因为措辞不同就判定缺失，"
+        "不要把「已覆盖但没写全」当成缺失。"
+        "每条缺失项给出 requirement（需求中的功能点摘要，≤80 字）与 reason（为什么判定未被覆盖，≤120 字）。"
+        "若没有明显缺失，返回空数组并在 notes 说明覆盖情况。"
+        '只输出 JSON 对象：{"uncovered":[{"requirement":"...","reason":"..."}],"notes":"..."}，'
+        "不要输出解释文字或代码围栏。"
+    )
+    user = (
+        f"需求文档：\n{source_text}\n\n"
+        f"已生成用例清单（共 {len(cases)} 条）：\n" + "\n".join(lines)
+    )
+    return system, user
+
+
+def parse_coverage(text: str) -> dict:
+    """解析覆盖检查输出；严格拒绝非对象/非数组，字段长度截断到上限。"""
+    cleaned = _strip_code_fence(text)
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("覆盖检查输出无法解析为 JSON 对象")
+    data = json.loads(cleaned[start : end + 1])
+    if not isinstance(data, dict):
+        raise ValueError("覆盖检查输出必须是 JSON 对象")
+    raw = data.get("uncovered") or []
+    if not isinstance(raw, list):
+        raise ValueError("uncovered 必须是数组")
+    uncovered: list[dict[str, str]] = []
+    for entry in raw[:COVERAGE_MAX_ITEMS]:
+        if isinstance(entry, str):
+            requirement, reason = entry.strip(), ""
+        elif isinstance(entry, dict):
+            requirement = str(entry.get("requirement") or entry.get("feature_point") or "").strip()
+            reason = str(entry.get("reason") or "").strip()
+        else:
+            continue
+        if not requirement:
+            continue
+        uncovered.append({
+            "requirement": requirement[:80],
+            "reason": reason[:COVERAGE_MAX_FIELD_CHARS],
+        })
+    notes = str(data.get("notes") or "").strip()[:COVERAGE_MAX_FIELD_CHARS]
+    return {"uncovered": uncovered, "notes": notes}
+
+
+def rebalance_with_stats(
     items: list[dict], max_count: int, weights: dict[str, int] | None = None,
-) -> list[dict]:
-    """按策略配比对生成条数做软性校正：超出配比的截断，不足的保留。"""
+) -> tuple[list[dict], dict[str, int]]:
+    """按策略配比裁剪并返回丢弃统计：超出配比的截断，不足的保留。
+
+    统计用于向用户解释「模型给了 N 条、实际保留 M 条」：
+    ``dropped_unknown_strategy`` = 策略不在本次所选配比内的条目（含模型自创策略），
+    ``dropped_over_quota`` = 同一策略超过配额或总数超过 max_count 的条目。
+    """
     weights = validate_strategy_weights(weights)
     total_weight = sum(weights.values())
     quotas = {
         STRATEGY_NAMES[key]: (max(1, round(max_count * w / total_weight)) if w > 0 else 0)
         for key, w in weights.items()
     }
+    dropped_unknown = 0
+    dropped_over_quota = 0
     grouped: dict[str, list[dict]] = {}
     for item in items:
         strategy = str(item.get("strategy") or "")
-        if quotas.get(strategy, 0) > 0:
-            grouped.setdefault(strategy, []).append(item)
+        if quotas.get(strategy, 0) <= 0:
+            dropped_unknown += 1
+            continue
+        grouped.setdefault(strategy, []).append(item)
     result: list[dict] = []
     for strategy, group in grouped.items():
-        result.extend(group[:quotas[strategy]])
-    return result[:max_count]
+        quota = quotas[strategy]
+        result.extend(group[:quota])
+        dropped_over_quota += max(0, len(group) - quota)
+    if len(result) > max_count:
+        dropped_over_quota += len(result) - max_count
+        result = result[:max_count]
+    return result, {
+        "dropped_unknown_strategy": dropped_unknown,
+        "dropped_over_quota": dropped_over_quota,
+    }
 
 
-def selfcheck(cases: list[dict]) -> list[dict]:
-    """自检红字（PRD 5.4.1 P0）：无核心正向、缺约束反向 → 确认页红字检查项。"""
+def rebalance_by_strategy(
+    items: list[dict], max_count: int, weights: dict[str, int] | None = None,
+) -> list[dict]:
+    """按策略配比裁剪（只取结果，丢弃统计见 ``rebalance_with_stats``）。"""
+    return rebalance_with_stats(items, max_count, weights=weights)[0]
+
+
+def selfcheck(cases: list[dict], weights: dict[str, int] | None = None) -> list[dict]:
+    """自检红字（PRD 5.4.1 P0）：无核心正向、缺约束反向 → 确认页红字检查项。
+
+    ``weights`` 给定时只检查权重 > 0 的策略：用户主动选择「只生成正向」时，
+    再要求反向用例属于拿默认配比否定用户的显式配置。
+    """
+    weights = validate_strategy_weights(weights)
     checks: list[dict] = []
-    positives = [case for case in cases if case.get("strategy") == "正向"]
-    core_positives = [
-        case
-        for case in positives
-        if case.get("priority") == "HX" or "核心" in str(case.get("test_type") or "")
-    ]
-    if not positives:
-        checks.append({"level": "error", "code": "no_core_positive", "message": "自检未通过：未生成任何正向策略用例"})
-    elif not core_positives:
-        checks.append({"level": "error", "code": "no_core_positive", "message": "自检未通过：正向用例中没有 HX 核心用例"})
-    negatives = [case for case in cases if case.get("strategy") == "反向"]
-    if not negatives:
-        checks.append({"level": "error", "code": "missing_constraint_negative", "message": "自检未通过：缺少反向（约束/异常）策略用例"})
+    if weights.get("positive", 0) > 0:
+        positives = [case for case in cases if case.get("strategy") == "正向"]
+        core_positives = [
+            case
+            for case in positives
+            if case.get("priority") == "HX" or "核心" in str(case.get("test_type") or "")
+        ]
+        if not positives:
+            checks.append({"level": "error", "code": "no_core_positive", "message": "自检未通过：未生成任何正向策略用例"})
+        elif not core_positives:
+            checks.append({"level": "error", "code": "no_core_positive", "message": "自检未通过：正向用例中没有 HX 核心用例"})
+    if weights.get("negative", 0) > 0:
+        negatives = [case for case in cases if case.get("strategy") == "反向"]
+        if not negatives:
+            checks.append({"level": "error", "code": "missing_constraint_negative", "message": "自检未通过：缺少反向（约束/异常）策略用例"})
     return checks

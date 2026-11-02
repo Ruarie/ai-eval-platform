@@ -39,6 +39,7 @@ from app.schemas import (
     CaseAiGenerateIn,
     CaseCancelIn,
     CaseConfirmIn,
+    CaseCoverageIn,
     CaseMapIn,
     CaseSetFromCandidatesIn,
     CaseSetUpdate,
@@ -668,3 +669,54 @@ def test_import_repeated_ids_update_one_local_row(cases_db, mode, identity):
     if identity == "foreign":
         assert rows[0].id != "repeated"
         assert cases_db.get(CaseItem, "repeated").name == "其他集合原文"
+
+
+# ─── 第三批：去重与需求覆盖自检 ───
+
+
+def test_generate_dedupes_duplicate_names_before_quota(cases_db, monkeypatch):
+    """同名重复用例先去重再裁剪，不能挤掉真正不同的用例。"""
+    output = [
+        {"name": "登录成功", "strategy": "正向", "priority": "HX"},
+        {"name": "登录 成功", "strategy": "正向", "priority": "HX"},
+        {"name": "密码错误", "strategy": "反向", "priority": "YC"},
+    ]
+    monkeypatch.setattr(routes, "call_agent_model", lambda *a, **k: SimpleNamespace(text=json.dumps(output)))
+    result = routes.ai_generate_cases(
+        CaseAiGenerateIn(source_text="登录需求", max_count=10,
+                         strategy_weights={"positive": 50, "negative": 50}),
+        cases_db, _actor(),
+    )
+    assert [item["name"] for item in result["items"]] == ["登录成功", "密码错误"]
+    assert result["dropped"]["dropped_duplicate"] == 1
+
+
+def test_coverage_check_returns_uncovered_points(cases_db, monkeypatch):
+    """覆盖自检独立请求：返回未被覆盖的需求点与说明。"""
+    monkeypatch.setattr(routes, "call_agent_model", lambda *a, **k: SimpleNamespace(
+        text='```json\n{"uncovered":[{"requirement":"退款 3 个工作日到账","reason":"没有对账用例"}],"notes":"覆盖较完整"}\n```'
+    ))
+    result = routes.check_case_coverage(
+        CaseCoverageIn(
+            source_text="退款需在 3 个工作日内到账",
+            cases=[{"name": "退款申请", "strategy": "正向", "module": "退款", "feature_point": "发起退款"}],
+        ),
+        cases_db, _actor(),
+    )
+    assert result["uncovered"] == [{"requirement": "退款 3 个工作日到账", "reason": "没有对账用例"}]
+    assert result["notes"] == "覆盖较完整"
+    assert result["case_count"] == 1
+    assert result["source_truncated"] is False
+
+
+def test_coverage_check_requires_source_and_parseable_output(cases_db, monkeypatch):
+    """缺来源在请求校验阶段就被拒；模型输出不可解析报 UPSTREAM 而不是伪成功。"""
+    with pytest.raises(ValueError):
+        CaseCoverageIn(cases=[{"name": "登录"}])
+
+    monkeypatch.setattr(routes, "call_agent_model", lambda *a, **k: SimpleNamespace(text="无法解析"))
+    with pytest.raises(AppError) as broken:
+        routes.check_case_coverage(
+            CaseCoverageIn(source_text="需求", cases=[{"name": "登录"}]), cases_db, _actor(),
+        )
+    assert broken.value.code == ErrorCode.UPSTREAM

@@ -897,6 +897,32 @@ class CaseIn(ApiModel):
     test_type: str | None = Field(default=None, max_length=64)
 
 
+class CoverageCaseIn(ApiModel):
+    """覆盖自检的用例摘要：只取评审需要的四个字段，避免被无关必填项拒绝。"""
+
+    name: str = Field(min_length=1, max_length=200)
+    strategy: str | None = Field(default=None, max_length=32)
+    module: str | None = Field(default=None, max_length=100)
+    feature_point: str | None = Field(default=None, max_length=100)
+
+
+class CaseCoverageIn(ApiModel):
+    """需求覆盖自检请求：来源文档 + 已生成用例摘要，返回未被覆盖的需求点。"""
+
+    source_doc_id: str | None = Field(default=None, max_length=64)
+    source_text: str | None = Field(default=None, max_length=1_000_000)
+    cases: list[CoverageCaseIn] = Field(min_length=1, max_length=80)
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "CaseCoverageIn":
+        """与 ai-generate 一致：来源二选一必填。"""
+        has_doc = bool(self.source_doc_id)
+        has_text = bool(self.source_text and self.source_text.strip())
+        if not (has_doc or has_text):
+            raise ValueError("source_text 与 source_doc_id 至少填一项")
+        return self
+
+
 class CaseSetFromCandidatesIn(ApiModel):
     """把已审核的 AI 候选一次性保存为待确认草稿。"""
 
@@ -959,7 +985,8 @@ class CaseAiGenerateIn(ApiModel):
     source_text: str | None = Field(default=None, max_length=1_000_000)
     # 6 大策略配比（百分比），键取值 positive/negative/boundary/equivalence/state/scenario
     strategy_weights: dict[str, int] | None = None
-    complexity: str | None = Field(default=None, max_length=32)
+    # 规模只由 max_count 决定（简单/中等/复杂 = 20/45/80 由调用方直接传条数），
+    # 不再接受不生效的 complexity 字段。
     max_count: int = Field(default=45, strict=True, ge=1, le=80)
 
     @field_validator("strategy_weights", mode="before")

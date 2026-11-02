@@ -25,12 +25,16 @@ from fastapi import Request as FastApiRequest
 from openpyxl import Workbook
 from pydantic import ValidationError
 from shared.casegen import (
-    SOURCE_MAX_CHARS,
     STRATEGY_WEIGHTS,
+    build_coverage_prompt,
     build_prompts,
+    clip_source,
+    dedupe_cases,
     generation_token_budget,
     parse_cases,
-    rebalance_by_strategy,
+    parse_coverage,
+    rebalance_with_stats,
+    selfcheck,
 )
 from sqlalchemy.orm import Session
 
@@ -60,6 +64,7 @@ from ..schemas import (
     CaseAiGenerateIn,
     CaseCancelIn,
     CaseConfirmIn,
+    CaseCoverageIn,
     CaseIn,
     CaseMapIn,
     CaseSetCreate,
@@ -108,6 +113,13 @@ _STRATEGY_NAMES = {
     "state": "状态迁移",
     "scenario": "场景",
 }
+# 候选生成的模型调用超时：与 Worker 用例生成预算（280s）对齐，
+# 否则同为 80 条 / 16384 tokens 的请求在向导路径更容易被 120s 默认值掐断。
+GENERATION_TIMEOUT_S = 280.0
+# 需求覆盖复审是独立轻量请求（输入是清单而非全量需求生成），预算单独一档。
+COVERAGE_TIMEOUT_S = 120.0
+COVERAGE_MAX_TOKENS = 2048
+
 _DEFAULT_STRATEGY_WEIGHTS = {
     "positive": 40,
     "negative": 25,
@@ -257,7 +269,12 @@ def _merge_column_schema(case_set: CaseSet, extra_keys: list[str]) -> None:
 
 
 def _selfcheck_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """导入后刷新确认页红字：无核心正向、缺约束反向。"""
+    """编辑/导入后重算确认页提示：无核心正向、缺约束反向。
+
+    这里拿不到用户生成时的策略配比（用例集不持久化该配置），因此用 ``warning``
+    而不是 ``error``：用户主动选「只生成正向」时，不能拿默认配比否定其配置。
+    生成阶段的 ``selfcheck`` 有配比上下文，仍按 ``error`` 报缺项。
+    """
     checks: list[dict[str, Any]] = []
     positives = [item for item in items if item.get("strategy") == "正向"]
     core_positives = [
@@ -266,11 +283,11 @@ def _selfcheck_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if item.get("priority") == "HX" or "核心" in str(item.get("test_type") or "")
     ]
     if not positives:
-        checks.append({"level": "error", "code": "no_core_positive", "message": "自检未通过：未导入任何正向策略用例"})
+        checks.append({"level": "warning", "code": "no_core_positive", "message": "自检提示：未导入任何正向策略用例"})
     elif not core_positives:
-        checks.append({"level": "error", "code": "no_core_positive", "message": "自检未通过：正向用例中没有 HX 核心用例"})
+        checks.append({"level": "warning", "code": "no_core_positive", "message": "自检提示：正向用例中没有 HX 核心用例"})
     if not any(item.get("strategy") == "反向" for item in items):
-        checks.append({"level": "error", "code": "missing_constraint_negative", "message": "自检未通过：缺少反向（约束/异常）策略用例"})
+        checks.append({"level": "warning", "code": "missing_constraint_negative", "message": "自检提示：缺少反向（约束/异常）策略用例"})
     return checks
 
 
@@ -423,27 +440,69 @@ def ai_generate_cases(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """按 Agent 协议档生成候选用例（新八字段格式 + 新优先级）；候选不落库。"""
+    """按 Agent 协议档生成候选用例（新八字段格式 + 新优先级）；候选不落库。
+
+    响应同时返回自检结果与裁剪统计，前端可在采纳前就提示缺项，
+    不必等到保存后才发现「缺核心正向」。
+    """
     source_text = body.source_text or ""
     if body.source_doc_id:
         source_text = _read_stored_file_text(db, body.source_doc_id, user.id)
     if not source_text.strip():
         raise AppError(ErrorCode.VALIDATION, "需要提供需求文档内容 source_text 或来源文档 source_doc_id")
-    source_text = source_text[:SOURCE_MAX_CHARS]
+    source_text, source_truncated = clip_source(source_text)
 
     weights = body.strategy_weights or STRATEGY_WEIGHTS
     max_count = body.max_count
     system, user_prompt = build_prompts(source_text, max_count, weights=weights)
+    # 与 Worker 同一预算口径（280s）：80 条十六字段的中文 JSON 在 120s 内经常跑不完。
     result = call_agent_model(db, system, user_prompt, temperature=0.3,
-                              max_tokens=generation_token_budget(max_count))
+                              max_tokens=generation_token_budget(max_count),
+                              timeout_s=GENERATION_TIMEOUT_S)
     try:
         cases = parse_cases(result.text)
     except (ValueError, json.JSONDecodeError) as exc:
         raise AppError(ErrorCode.UPSTREAM, "模型输出无法解析为用例") from exc
-    cases = rebalance_by_strategy(cases, max_count, weights=weights)
+    # 先去重再裁剪：重复项会按配额挤掉真正不同的用例。
+    cases, dropped_duplicate = dedupe_cases(cases)
+    cases, dropped = rebalance_with_stats(cases, max_count, weights=weights)
     if not cases:
         raise AppError(ErrorCode.UPSTREAM, "模型未返回符合所选策略的有效用例")
-    return {"items": cases}
+    return {
+        "items": cases,
+        "checks": selfcheck(cases, weights=weights),
+        "source_truncated": source_truncated,
+        "dropped": {**dropped, "dropped_duplicate": dropped_duplicate},
+    }
+
+
+@router.post("/ai-coverage")
+def check_case_coverage(
+    body: CaseCoverageIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """需求覆盖自检：找出需求中有、候选里没有的功能点。
+
+    独立请求而非塞进生成流程：生成已占 280 秒预算，再叠加一次模型调用会突破
+    反向代理的读超时。这里只做一次轻量复审，失败直接报错由用户重试。
+    """
+    source_text = body.source_text or ""
+    if body.source_doc_id:
+        source_text = _read_stored_file_text(db, body.source_doc_id, user.id)
+    if not source_text.strip():
+        raise AppError(ErrorCode.VALIDATION, "需要提供需求文档内容 source_text 或来源文档 source_doc_id")
+    source_text, source_truncated = clip_source(source_text)
+    cases = [case.model_dump() for case in body.cases]
+    system, user_prompt = build_coverage_prompt(source_text, cases)
+    result = call_agent_model(db, system, user_prompt, temperature=0.1,
+                              max_tokens=COVERAGE_MAX_TOKENS,
+                              timeout_s=COVERAGE_TIMEOUT_S)
+    try:
+        coverage = parse_coverage(result.text)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise AppError(ErrorCode.UPSTREAM, "覆盖检查输出无法解析，请重试") from exc
+    return {**coverage, "source_truncated": source_truncated, "case_count": len(cases)}
 
 
 @router.post("/from-candidates", response_model=CaseSetDetailOut, status_code=201)
@@ -516,8 +575,9 @@ def _read_stored_file_text(db: Session, file_id: str, user_id: str) -> str:
                         lines.append(line)
         finally:
             wb.close()
-        return "\n".join(lines)[:SOURCE_MAX_CHARS]
-    return path.read_bytes().decode("utf-8", errors="ignore")[:SOURCE_MAX_CHARS]
+        # 截断由调用方 clip_source 统一处理，这里才能把「是否截断」如实报给前端。
+        return "\n".join(lines)
+    return path.read_bytes().decode("utf-8", errors="ignore")
 
 
 @router.get("/import-template")

@@ -41,6 +41,8 @@ import {
   type TestCase,
   type TestCaseInput,
   type CaseGenerateInput,
+  type CaseGenerateResult,
+  type CaseCoverageResult,
   type WhitelistItem,
   type DispatchOverview,
   type DispatchWorker,
@@ -895,21 +897,49 @@ export const api = {
       return { items: data.items, revision: data.revision, checks: data.checks }
     },
     // 仅生成未落库候选；调用方需要创建用例集并保存候选后才可显示创建成功。
-    async generateCases(payload: CaseGenerateInput & { source_doc_id?: string }): Promise<TestCase[]> {
+    async generateCases(payload: CaseGenerateInput & { source_doc_id?: string }): Promise<CaseGenerateResult> {
       if (getDataMode() === 'mock') {
-        return [{
-          id: 'c-ai-' + Date.now(),
-          strategy: '反向',
-          priority: 'FHX',
-          module: '通用',
-          name: 'AI 候选：异常输入校验',
-          expected: '系统拒绝无效输入并返回明确错误信息',
-          precondition: '服务已就绪',
-        }]
+        return {
+          items: [{
+            id: 'c-ai-' + Date.now(),
+            strategy: '反向',
+            priority: 'FHX',
+            module: '通用',
+            name: 'AI 候选：异常输入校验',
+            expected: '系统拒绝无效输入并返回明确错误信息',
+            precondition: '服务已就绪',
+          }],
+          checks: [],
+          sourceTruncated: false,
+          dropped: { dropped_unknown_strategy: 0, dropped_over_quota: 0 },
+        }
       }
-      // 服务端模型允许等待 120 秒，额外预留响应解析与传输时间。
-      const { data } = await http.post('/api/case-sets/ai-generate', payload, { timeout: 130000 })
-      return Array.isArray(data) ? data : data.items || []
+      // 服务端模型调用预算与 Worker 对齐（280 秒），客户端另留 10 秒传输与解析余量。
+      const { data } = await http.post('/api/case-sets/ai-generate', payload, { timeout: 290000 })
+      const items: TestCase[] = Array.isArray(data) ? data : data.items || []
+      return {
+        items,
+        checks: Array.isArray(data?.checks) ? data.checks : [],
+        sourceTruncated: Boolean(data?.source_truncated),
+        dropped: data?.dropped || { dropped_unknown_strategy: 0, dropped_over_quota: 0 },
+      }
+    },
+    // 契约 POST /api/case-sets/ai-coverage：需求覆盖自检，独立请求，不改变候选内容。
+    async checkCoverage(payload: {
+      source_text: string
+      source_doc_id?: string
+      cases: Array<{ name: string; strategy?: string; module?: string; feature_point?: string }>
+    }): Promise<CaseCoverageResult> {
+      if (getDataMode() === 'mock') {
+        return { uncovered: [], notes: '示例模式：未执行真实覆盖检查', sourceTruncated: false, caseCount: payload.cases.length }
+      }
+      const { data } = await http.post('/api/case-sets/ai-coverage', payload, { timeout: 150000 })
+      return {
+        uncovered: Array.isArray(data?.uncovered) ? data.uncovered : [],
+        notes: data?.notes || '',
+        sourceTruncated: Boolean(data?.source_truncated),
+        caseCount: Number(data?.case_count || payload.cases.length),
+      }
     },
     // 契约 POST /api/case-sets/{id}/ai-fill：行级 AI 补全，仅返回未落库候选，需随“保存修改”写入。
     async aiFillCases(id: string, payload: { case_ids: string[]; instruction?: string; fields?: string[] }): Promise<Array<Partial<TestCase> & { id: string }>> {

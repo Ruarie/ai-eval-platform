@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.39 |
-| 本轮审查日期 | 2026-11-02（工作区执行隔离人工解除通道：§3.12.3） |
+| 文档版本 | V2.41 |
+| 本轮审查日期 | 2026-11-02（用例生成第三批：去重、需求覆盖自检、解析器统一、提示词示例） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.55（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -1127,6 +1127,8 @@ Worker 按 `FOR UPDATE SKIP LOCKED` 领取导入，写入独立 15 分钟 lease 
 
 `checks` 给确认页红字。`expires_at` = 进入 `awaiting_case_confirm` + 72h。
 
+`checks[].level` 语义：生成阶段（Worker / `ai-generate`）按**本次所选策略配比**判定，缺项为 `error`；编辑、导入或采纳候选后重算时拿不到生成配比，统一降级为 `warning`（提示而不阻断），避免用默认配比否定用户显式选择的策略。两种级别都不阻塞 `confirm`，确认只要求至少一条用例。
+
 case item 包含：`id, strategy, priority, module, name, precondition, steps, expected, test_type, mapped, pending_complete` 及自定义扩展列。
 
 #### `POST /api/case-sets`
@@ -1184,7 +1186,6 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
   "source_doc_id": "可选，已上传文件 ID",
   "source_text": "可选，PRD / OpenAPI 原文；与 source_doc_id 至少填一项",
   "strategy_weights": { "positive": 40, "negative": 25, "boundary": 15, "equivalence": 10, "state": 5, "scenario": 5 },
-  "complexity": "medium",
   "max_count": 45
 }
 ```
@@ -1194,18 +1195,63 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 - `source_doc_id` 仅接受当前成员上传的文件；越权或不存在统一 `UNAUTHORIZED`。任务创建、重跑与 Worker 消费执行相同来源授权检查。
 - Excel 按上传时的 `filename / kind` 识别并抽取表格正文；存储文件的 UUID 路径不用于判断格式。
 - `strategy_weights` 只接受六类已知策略的整数百分比（0–100，合计 100，未提供的键视为 0）；未传时使用默认配比。提示词与结果裁剪使用同一份配比。
-- `max_count` 为 1–80 的整数；超出上限返回 `VALIDATION`，不静默截成 80。未传时默认 45。
+- `max_count` 为 1–80 的整数；超出上限返回 `VALIDATION`，不静默截成 80。未传时默认 45。规模只由该字段决定，不再接受不生效的 `complexity`。
 - 模型不能指定用例 `id / case_set_id / mapped / pending_complete` 等服务端身份或状态；这些字段不会作为模型扩展列透传。
+- 来源正文超过 20000 字符时**只使用前 20000 字符**，并返回 `source_truncated=true`；调用方必须提示用户拆分需求，不得当作完整覆盖。
+- 模型输出的 `strategy` / `priority` 别名（如 `positive`、`P0`）由服务端归一为六策略中文名与 `HX/FHX/BJ/YC/ZD/BL`；仍无法识别的策略按「不符合所选配比」裁剪，并计入 `dropped.dropped_unknown_strategy`。
+- 模型调用超时与 Worker 用例生成预算对齐为 280 秒（此前为 120 秒，80 条长输出更容易超时）。
 
 ```json
 {
   "items": [
-    { "strategy": "正向", "priority": "P0", "module": "收银台", "name": "余额支付成功", "expected": "订单核销成功", "precondition": "账户余额充足", "test_type": "核心业务" }
+    { "strategy": "正向", "priority": "HX", "module": "收银台", "name": "余额支付成功", "expected": "订单核销成功", "precondition": "账户余额充足", "test_type": "核心业务" }
+  ],
+  "checks": [
+    { "level": "error", "code": "missing_constraint_negative", "message": "自检未通过：缺少反向（约束/异常）策略用例" }
+  ],
+  "source_truncated": false,
+  "dropped": { "dropped_unknown_strategy": 0, "dropped_over_quota": 3, "dropped_duplicate": 2 }
+}
+```
+
+- `checks`：按**本次请求的策略配比**计算的自检结果，只检查权重 > 0 的策略（只选正向时不会报「缺少反向」）。
+- `source_truncated`：来源是否被截断到 20000 字符。
+- `dropped`：整理统计，用于向用户解释「模型给了 N 条、实际保留 M 条」。`dropped_duplicate` 为同名同策略去重条数，去重在配额裁剪之前执行。
+
+前端审核候选后，可调用下述单次事务接口保存到新草稿；也可将候选追加到当前可编辑草稿并按原有修订号保存。保存失败保留待审核候选，不得显示“创建成功”。
+
+#### `POST /api/case-sets/ai-coverage`
+
+需求覆盖自检：给定需求来源与已生成的候选清单，找出需求中**明确描述但没有任何候选覆盖**的功能点。仅作提示，不修改候选、不落库、不改变用例集状态。
+
+独立请求而非并入生成流程：生成已占 280 秒预算，再叠加模型调用会突破反向代理读超时；这里只做一次轻量复审（超时 120 秒、`max_tokens=2048`）。
+
+```json
+{
+  "source_text": "退款需在 3 个工作日内到账；超时未到账需自动补偿",
+  "source_doc_id": "可选，已上传文件 ID",
+  "cases": [
+    { "name": "退款申请成功", "strategy": "正向", "module": "退款", "feature_point": "发起退款" }
   ]
 }
 ```
 
-前端审核候选后，可调用下述单次事务接口保存到新草稿；也可将候选追加到当前可编辑草稿并按原有修订号保存。保存失败保留待审核候选，不得显示“创建成功”。
+- 来源规则与 `ai-generate` 一致：`source_text` / `source_doc_id` 至少一项，越权或不存在统一 `UNAUTHORIZED`；来源超 20000 字符时只取前 20000 字并返回 `source_truncated=true`。
+- `cases` 为 1–80 条，只取 `name`（必填）、`strategy`、`module`、`feature_point` 四个字段，避免因无关字段缺失被拒。
+- 成功响应：
+```json
+{
+  "uncovered": [
+    { "requirement": "超时未到账需自动补偿", "reason": "候选均为正向退款流程，无补偿校验" }
+  ],
+  "notes": "退款主流程覆盖较完整",
+  "source_truncated": false,
+  "case_count": 1
+}
+```
+- `uncovered` 最多返回 20 条，`requirement` ≤80 字、`reason`/`notes` ≤300 字，超出截断；`uncovered` 为空表示未发现明显缺失。
+- 模型输出不可解析返回 `UPSTREAM`（不返回空数组伪装成“无缺失”）。
+- 该结果**不写入** `case_sets.checks`，也不参与 `confirm` 校验；它回答的是「需求是否被覆盖」，与 `checks` 的「策略结构是否合理」互补。
 
 #### `POST /api/case-sets/from-candidates`
 
@@ -3990,3 +4036,41 @@ Excel 导入在本批缓存已写入但尚未 flush 的用例，重复编号按�
 - `frontend/src/styles/tokens.css`、`styles/base.css`、`naive-theme.ts`、`App.vue`、`stores/theme.ts`：令牌单一来源、深色主题接入 Naive UI、首访跟随系统配色。
 - `frontend/src/router/index.ts`、`views/NotFound.vue`（新增）、`layouts/MainLayout.vue`：404 兜底、`document.title` 同步、标题单源、角色文案。
 - `frontend/src/views/{Login,Agent,Report,AdminProfiles,Cases,Datasets,UserWorkspaces}.vue`、`components/agent/loop/{AgentWorkspace,InteractionDrawer}.vue`：登录错误分类、会话键盘可达、报告骨架屏、硬编码色值改令牌与深色补漏。
+
+## V2.40 用例生成质量闸门（2026-11-02）
+
+- 来源截断可观测：`POST /api/case-sets/ai-generate` 新增 `source_truncated`；Worker 任务在来源超过 20000 字符时写入 `progress` 事件提示拆分需求。此前两条路径都静默 `[:20000]`，长 PRD 后半段不参与生成且用户无从得知。
+- 裁剪可解释：`POST /api/case-sets/ai-generate` 新增 `dropped{dropped_unknown_strategy,dropped_over_quota}`；Worker 任务在发生裁剪时写入 `progress` 事件。未知策略（模型自创或英文键）不再无声消失。
+- 自检按配比：`shared.casegen.selfcheck` 支持 `weights`，只检查权重 > 0 的策略；用户选择「只生成正向」时不再误报「缺少反向」。编辑/导入路径拿不到生成配比，重算级别降为 `warning`（不阻断确认）。
+- 枚举归一：模型输出的策略/优先级别名（`positive`/`negative`/`P0`/`P1` 等）在 `parse_cases` 归一为六策略中文名与 `HX/FHX/BJ/YC/ZD/BL`，避免被配比裁剪误判为未知策略、避免自检误判核心正向。
+- 候选阶段可自检：响应返回 `checks`，前端在采纳前即展示缺项。
+- 超时对齐：候选生成的模型调用超时由 120 秒改为 280 秒（与 Worker 预算一致），前端 axios 超时同步 290 秒。
+- 移除从未生效的 `complexity` 请求字段（规模只由 `max_count` 决定），并修正响应示例中错误的 `priority: "P0"`。
+- 未改动：`len(cases) > 80` 时 Worker 整单失败的既有口径（PRD 5.4.1「禁止灌水」），以及 80 条的 16384 token 输出预算。
+
+### 修改代码文件与作用清单
+
+- `backend/shared/casegen.py`：新增 `clip_source` / `normalize_case` / 别名表 / `rebalance_with_stats`；`selfcheck` 支持配比。
+- `backend/worker/app/testcase.py`：来源与裁剪留痕、按配比自检、裁剪统计事件。
+- `backend/api/app/routers/cases.py`：候选返回 `checks`/`source_truncated`/`dropped`，超时对齐，编辑自检降级为 warning。
+- `backend/api/app/schemas.py`：移除 `complexity`。
+- `frontend/src/api/{http.ts,types.ts}`、`frontend/src/views/Cases.vue`：候选结果结构、超时、步骤 2 的截断/裁剪/自检提示。
+- `backend/api/tests/test_casegen.py`：新增截断、枚举归一、按配比自检、裁剪统计四组断言。
+
+## V2.41 用例生成第三批：去重、覆盖自检与解析统一（2026-11-02）
+
+- 同名去重：生成结果在配额裁剪**之前**按「策略 + 去空白小写名称」去重，`dropped.dropped_duplicate` 返回条数；Worker 任务写入对应 `progress` 事件。此前重复项会按配额挤掉真正不同的用例。
+- 需求覆盖自检：新增 `POST /api/case-sets/ai-coverage`（§3.8）。独立请求、独立超时（120s / 2048 tokens），返回需求中疑似未被候选覆盖的功能点；不落库、不写入 `case_sets.checks`、不参与 `confirm` 校验。前端在候选步骤按需触发，避免与生成共用同一条代理超时预算。
+- 解析器统一：容错 JSON 数组提取收敛到 `shared.casegen.extract_json_array`，`api/app/llm_client.extract_json_array` 改为委托实现（错误码与文案不变），用例生成、用例补全、数据集合成共用同一份规则。
+- 提示词补示例：系统提示词加入一条结构化示例（明确禁止照抄取值），降低字段名漂移（`expected_result` / `preconditions`）。
+- 代理超时对齐：`frontend/nginx.conf` 的 `/api/` `proxy_read_timeout` 由 130s 调整为 320s。**这是 V2.40 超时改动的必要配套**：后端 280 秒预算必须在反向代理放行后才生效，否则长输出仍会被 nginx 以 504 截断。
+
+### 修改代码文件与作用清单
+
+- `backend/shared/casegen.py`：`extract_json_array`、`dedupe_cases`、`build_coverage_prompt`、`parse_coverage`，提示词示例。
+- `backend/api/app/llm_client.py`：解析委托到 shared，保持 `UPSTREAM` 语义。
+- `backend/api/app/routers/cases.py`、`schemas.py`：去重接入、`/ai-coverage` 路由与 `CaseCoverageIn`/`CoverageCaseIn`。
+- `backend/worker/app/testcase.py`：去重与合并后的整理事件。
+- `frontend/src/api/{http.ts,types.ts}`、`frontend/src/views/Cases.vue`：`checkCoverage` 封装、候选步骤的覆盖检查按钮与结果展示、去重条数提示。
+- `frontend/nginx.conf`：`/api/` 读超时 130s → 320s。
+- `backend/api/tests/{test_casegen,test_cases_audit}.py`：去重、覆盖提示词/解析、`/ai-coverage` 成功与失败分支。
