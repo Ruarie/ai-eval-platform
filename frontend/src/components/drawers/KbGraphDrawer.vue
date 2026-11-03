@@ -23,7 +23,8 @@
         </div>
 
         <div v-if="!graph?.nodes.length" class="graph-state">
-          当前库还没有抽出实体：请先上传文档并等待索引状态变为 indexed，图谱由索引阶段的实体抽取产生。
+          <div>当前库还没有抽出实体：先上传文档，等索引状态变为 indexed 后图谱才会出现。</div>
+          <button class="btn btn-secondary btn-sm" @click="emit('upload')">↑ 上传文档</button>
         </div>
 
         <div v-else class="graph-body">
@@ -120,7 +121,10 @@ const props = defineProps<{
   docs?: Array<{ doc_id: string; filename: string }>
 }>()
 
-const emit = defineEmits<{ (event: 'update:show', value: boolean): void }>()
+const emit = defineEmits<{
+  (event: 'update:show', value: boolean): void
+  (event: 'upload'): void
+}>()
 
 const CANVAS_WIDTH = 820
 const CANVAS_HEIGHT = 520

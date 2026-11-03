@@ -46,7 +46,11 @@
 
         <!-- 库无文档空态：对齐原型，不再渲染下方的切块预览区。 -->
         <div v-if="!docs.length" class="empty" style="padding: 32px 20px">
-          <div class="small tertiary">当前库暂无文档，点上方「↑ 上传文档」开始分块建索引；doc_id 由系统自动生成。</div>
+          <div class="small tertiary" style="margin-bottom: 12px">
+            当前库暂无文档。上传后由 LightRAG 分块、抽取实体并建索引，doc_id 由系统自动生成。
+          </div>
+          <!-- 空态直接给上传入口：顶栏按钮在宽屏才醒目，空库时用户最需要这个操作。 -->
+          <button class="btn btn-secondary btn-sm" @click="showUploadDocModal = true">↑ 上传文档</button>
         </div>
 
         <template v-else>
@@ -407,6 +411,7 @@
       :kb-id="activeKbId"
       :kb-name="currentKb?.name"
       :docs="docs"
+      @upload="handleGraphUpload"
     />
 
     </template>
@@ -449,6 +454,12 @@ const showCreateKbModal = ref(false)
 const showUploadDocModal = ref(false)
 const showUploadGoldQaModal = ref(false)
 const showGraphDrawer = ref(false)
+
+/** 图谱空态里的「上传文档」：收起抽屉并打开上传弹窗，避免用户找不到入口。 */
+function handleGraphUpload() {
+  showGraphDrawer.value = false
+  showUploadDocModal.value = true
+}
 const creatingKb = ref(false)
 const newKbName = ref('')
 const newKbKind = ref<KnowledgeBase['kind']>('lightrag')
