@@ -41,6 +41,9 @@ class FakeRag:
         self.deleted: list[str] = []
         self.cancelled = False
         self.graph_calls: list[tuple[str, int, int | None]] = []
+        self.query_calls: list[object] = []
+        self.query_payloads: list[dict] = []
+        self.embedding_calls: list[list[str]] = []
         self._block = block
         self._delay = delay
         self._graph = SimpleNamespace(
@@ -67,6 +70,18 @@ class FakeRag:
     ) -> SimpleNamespace:
         self.graph_calls.append((node_label, max_depth, max_nodes))
         return self._graph
+
+    async def aquery_data(self, query: str, param: object = None) -> dict:
+        # 记录参数快照：同一 QueryParam 对象会在扩窗时被修改。
+        self.query_calls.append(SimpleNamespace(chunk_top_k=getattr(param, "chunk_top_k", None)))
+        if self.query_payloads:
+            return self.query_payloads.pop(0)
+        return {"data": {"chunks": []}}
+
+    async def embedding_func(self, texts: list[str]) -> list[list[float]]:
+        """假向量：首条为 query 基准，其余给固定相似度，便于断言补算逻辑。"""
+        self.embedding_calls.append(list(texts))
+        return [[1.0, 0.0, 0.0] if index == 0 else [0.6, 0.8, 0.0] for index in range(len(texts))]
 
 
 def _engine(**overrides) -> LightRAGEngine:
@@ -214,6 +229,49 @@ def test_missing_record_while_queued_stays_indexing():
         await engine.index_document("kb-1", "doc-x", "x.txt", "正文")
         assert await engine.document_statuses(["doc-x"]) == {"doc-x": "indexing"}
         await engine.stop()
+
+    asyncio.run(case())
+
+
+def test_query_attaches_similarity():
+    """检索结果用同一 embedding 模型补算余弦分数，前端不再只显示占位符。"""
+
+    async def case() -> None:
+        engine = _engine()
+        rag = FakeRag()
+        rag.query_payloads = [
+            {
+                "data": {
+                    "chunks": [
+                        {"chunk_id": "c1", "file_path": "kb-1__doc-a__a.txt", "content": "退款到账说明"},
+                        {"chunk_id": "c2", "file_path": "kb-1__doc-b__b.txt", "content": "发票开具说明"},
+                    ]
+                }
+            }
+        ]
+        engine._rag = rag
+        result = await engine.query("退款", "naive", 3, "kb-1")
+        assert [item["similarity"] for item in result["contexts"]] == [0.6, 0.6]
+        assert rag.embedding_calls
+
+    asyncio.run(case())
+
+
+def test_query_widens_window_when_filtered_short():
+    """首次召回被其它库挤空时扩大 chunk_top_k 重取一次。"""
+
+    async def case() -> None:
+        engine = _engine()
+        rag = FakeRag()
+        rag.query_payloads = [
+            {"data": {"chunks": [{"chunk_id": "z1", "file_path": "kb-2__doc-z__z.txt", "content": "别的库"}]}},
+            {"data": {"chunks": [{"chunk_id": "c1", "file_path": "kb-1__doc-a__a.txt", "content": "本库内容"}]}},
+        ]
+        engine._rag = rag
+        result = await engine.query("退款", "hybrid", 3, "kb-1")
+        assert len(rag.query_calls) == 2
+        assert rag.query_calls[1].chunk_top_k > rag.query_calls[0].chunk_top_k
+        assert [item["doc_id"] for item in result["contexts"]] == ["doc-a"]
 
     asyncio.run(case())
 

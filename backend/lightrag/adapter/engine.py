@@ -338,21 +338,25 @@ class LightRAGEngine:
         rag = self._require_rag()
         from lightrag import QueryParam
 
+        window = chunk_top_k_for(kb_id, top_k)
         param = QueryParam(
             mode=mode,
             only_need_context=True,
             # 平台不配置 rerank 模型，显式关闭以免 LightRAG 每次检索都告警。
             enable_rerank=False,
             top_k=self.config.entity_top_k,
-            chunk_top_k=chunk_top_k_for(kb_id, top_k),
+            chunk_top_k=window,
         )
-        try:
-            payload = await rag.aquery_data(query, param=param)
-        except Exception as exc:  # noqa: BLE001 - 统一转引擎不可用
-            logger.warning("LightRAG 检索失败 mode=%s err=%s", mode, type(exc).__name__)
-            raise EngineUnavailable("LightRAG 检索失败") from exc
-
-        contexts = map_chunks(payload, kb_id, top_k)
+        contexts = await self._retrieve(rag, query, param, kb_id, top_k, mode)
+        # 过滤后不足 K：多库共享同一向量库/图谱时，目标库的切块容易被其它库挤出
+        # 候选窗口，扩大窗口重取一次（引擎侧 LLM 关键词结果有缓存，代价可控）。
+        if kb_id and len(contexts) < max(1, int(top_k or 1)) and window < 200:
+            param.chunk_top_k = min(max(window * 3, 60), 200)
+            wider = await self._retrieve(rag, query, param, kb_id, top_k, mode)
+            # 扩窗结果更少时保留首次结果：重取不应让已有召回倒退。
+            if len(wider) > len(contexts):
+                contexts = wider
+        contexts = await self._attach_similarity(query, contexts)
         return {
             "text": "",
             "contexts": contexts,
@@ -360,6 +364,55 @@ class LightRAGEngine:
             "engine": "lightrag",
             "engine_version": self._version,
         }
+
+    async def _retrieve(
+        self,
+        rag: Any,
+        query: str,
+        param: Any,
+        kb_id: str,
+        top_k: int,
+        mode: str,
+    ) -> list[dict]:
+        """调用引擎并把结果映射为平台上下文；失败统一转引擎不可用。"""
+        try:
+            payload = await rag.aquery_data(query, param=param)
+        except Exception as exc:  # noqa: BLE001 - 统一转引擎不可用
+            logger.warning("LightRAG 检索失败 mode=%s err=%s", mode, type(exc).__name__)
+            raise EngineUnavailable("LightRAG 检索失败") from exc
+        return map_chunks(
+            payload, kb_id, top_k, max_per_doc=self.config.max_chunks_per_doc
+        )
+
+    async def _attach_similarity(self, query: str, contexts: list[dict]) -> list[dict]:
+        """用与索引一致的 embedding 模型补算 query↔chunk 余弦相似度。
+
+        LightRAG 的 ``aquery_data`` 只给排序不给分数，平台此前把 ``similarity``
+        填 null。这里复用引擎同一个 embedding 函数补算，前端能显示真实分数；
+        补算失败时保持 null，不影响召回顺序（不重排，避免破坏图检索语义）。
+        """
+        if not contexts:
+            return contexts
+        try:
+            vectors = await self._require_rag().embedding_func(
+                [query] + [item["text"] for item in contexts]
+            )
+        except Exception:  # noqa: BLE001 - 分数是增强信息，失败不阻断检索
+            logger.warning("检索相似度补算失败，similarity 保持为空", exc_info=True)
+            return contexts
+        try:
+            import numpy as np
+
+            matrix = np.asarray(vectors, dtype=float)
+            base = matrix[0]
+            base_norm = float(np.linalg.norm(base)) or 1.0
+            for item, vector in zip(contexts, matrix[1:]):
+                norm = float(np.linalg.norm(vector)) or 1.0
+                score = float(np.dot(base, vector) / (base_norm * norm))
+                item["similarity"] = round(max(0.0, min(1.0, score)), 4)
+        except Exception:  # noqa: BLE001 - 维度异常等只影响分数
+            logger.warning("检索相似度计算失败", exc_info=True)
+        return contexts
 
     # ─── 知识图谱（只读） ──────────────────────────────────────────────
 

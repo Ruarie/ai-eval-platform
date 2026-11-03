@@ -1411,7 +1411,7 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 
 #### `POST /api/kb/{id}/query`
 
-执行 LightRAG 原生 4 模式检索测试（Playground），返回 Top-K 切块与评测指标。平台只做召回、不生成答案（`only_need_context`），因此不产生额外答案生成费用；`similarity` 为 `null` 表示引擎只给排序、不给分数，前端显示占位符而不伪造 0。V1.0 不返回实验性的投影或 rerank 比对结果。
+执行 LightRAG 原生 4 模式检索测试（Playground），返回 Top-K 切块与评测指标。平台只做召回、不生成答案（`only_need_context`），因此不产生额外答案生成费用。`similarity` 由适配服务用与索引一致的 embedding 模型补算（query↔chunk 余弦，0–1），补算失败时为 `null`，前端显示占位符而不伪造 0；分数只用于展示，不改变引擎返回顺序。服务端还会做两件事：同一文档在 Top-K 中默认最多占 3 席（避免长文档的相邻切块挤满结果、让其它文档永远进不了 Top-K），以及按库过滤后不足 K 条时扩大候选窗口重取一次。V1.0 不返回实验性的投影或 rerank 比对结果。
 
 ```json
 {

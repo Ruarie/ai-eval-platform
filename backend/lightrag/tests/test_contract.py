@@ -161,6 +161,30 @@ def _graph_node(node_id: str, file_path: str, **extra) -> dict:
     }
 
 
+def test_map_chunks_caps_per_document_then_fills():
+    """每篇文档先限流一席，不足部分再放宽补齐，保证 Top-K 覆盖多篇文档。"""
+    chunks = [
+        {"chunk_id": f"a{i}", "file_path": "kb-1__doc-a__a.txt", "content": f"甲文档第{i}段"}
+        for i in range(4)
+    ]
+    chunks.append({"chunk_id": "b1", "file_path": "kb-1__doc-b__b.txt", "content": "乙文档内容"})
+
+    items = map_chunks(_payload(*chunks), "kb-1", 3, max_per_doc=1)
+
+    assert [item["doc_id"] for item in items] == ["doc-a", "doc-b", "doc-a"]
+
+
+def test_map_chunks_dedupes_overlapping_text():
+    """重叠窗口产生的相同文本只保留一次，避免重复占位挤掉其它文档。"""
+    body = "退款 1-3 个工作日到账" * 12
+    payload = _payload(
+        {"chunk_id": "c1", "file_path": "kb-1__doc-a__a.txt", "content": body},
+        {"chunk_id": "c2", "file_path": "kb-1__doc-a__a.txt", "content": body},
+    )
+
+    assert len(map_chunks(payload, "kb-1", 5)) == 1
+
+
 def test_parse_doc_ids_handles_multiple_sources():
     """实体可能由多篇文档共同抽取，只解析当前知识库的文档 ID。"""
     file_path = "kb-1__doc-a__a.txt<SEP>kb-2__doc-z__z.txt<SEP>kb-1__doc-b__b.txt"

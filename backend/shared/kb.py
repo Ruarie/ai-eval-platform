@@ -201,13 +201,21 @@ def _try_lightrag(kb_id: str, query: str, mode: str, k: int) -> list[dict] | Non
             continue
         # 适配层直接给出平台 doc_id；缺失时退化为按切块 ID 前缀解析（兼容旧数据）。
         doc_id = str(ctx.get("doc_id") or "") or chunk_id.split("#", 1)[0]
+        # 适配层用同一 embedding 模型补算了余弦分数；拿不到时保持 None，
+        # 前端显示占位符，绝不用 0 冒充真实相似度。
+        raw_score = ctx.get("similarity")
+        similarity = (
+            round(float(raw_score), 4)
+            if isinstance(raw_score, int | float) and not isinstance(raw_score, bool)
+            else None
+        )
         items.append(
             {
                 "chunk_id": chunk_id,
                 "doc_id": doc_id,
                 "doc_name": str(ctx.get("doc_name") or "") or doc_id,
                 "text": str(ctx.get("text") or ""),
-                "similarity": None,
+                "similarity": similarity,
             }
         )
     return items

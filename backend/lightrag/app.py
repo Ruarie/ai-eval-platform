@@ -79,6 +79,8 @@ class ContextItem(BaseModel):
     doc_name: str = ""
     text: str = ""
     reference_id: str = ""
+    # 适配层用同一 embedding 模型补算的余弦分数；补算失败时为 null。
+    similarity: float | None = None
 
 
 class QueryRequest(BaseModel):

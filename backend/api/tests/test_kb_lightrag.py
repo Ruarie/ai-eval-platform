@@ -21,6 +21,7 @@ def _payload_with_contexts():
                 "doc_name": "a.txt",
                 "text": "退款 1-3 个工作日到账",
                 "reference_id": "1",
+                "similarity": 0.87,
             },
             {
                 "id": "chunk-002",
@@ -45,7 +46,27 @@ def test_try_lightrag_maps_contexts(monkeypatch):
     assert [item["chunk_id"] for item in items] == ["chunk-001", "chunk-002"]
     assert [item["doc_id"] for item in items] == ["doc-a", "doc-b"]
     assert [item["doc_name"] for item in items] == ["a.txt", "b.txt"]
-    assert items[0]["similarity"] is None
+    # 适配层补算的分数要透传；缺失或非法时保持 None，不用 0 冒充。
+    assert items[0]["similarity"] == 0.87
+    assert items[1]["similarity"] is None
+
+
+def test_try_lightrag_rejects_invalid_similarity(monkeypatch):
+    """非数值或布尔值不当作分数，避免把脏数据渲染成 100% 相似。"""
+    monkeypatch.setattr(
+        kb_module,
+        "_lightrag_post",
+        lambda *a, **k: {
+            "contexts": [
+                {"id": "c1", "text": "a", "similarity": "0.9"},
+                {"id": "c2", "text": "b", "similarity": True},
+            ]
+        },
+    )
+
+    items = kb_module._try_lightrag("kb-1", "q", "naive", 5)
+
+    assert [item["similarity"] for item in items] == [None, None]
 
 
 def test_try_lightrag_falls_back_to_chunk_prefix(monkeypatch):

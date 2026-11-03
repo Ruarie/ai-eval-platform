@@ -96,19 +96,25 @@ def chunk_top_k_for(kb_id: str, top_k: int) -> int:
     return min(max(k * 4, 20), 60)
 
 
-def map_chunks(payload: dict, kb_id: str, top_k: int) -> list[dict]:
+def map_chunks(payload: dict, kb_id: str, top_k: int, max_per_doc: int = 0) -> list[dict]:
     """把 ``aquery_data`` 结果映射为平台上下文列表。
 
     返回 ``[{id, doc_id, doc_name, text, reference_id}]``，保持 LightRAG 的
     召回排序；``kb_id`` 非空时只保留该知识库的切块，并截断到 ``top_k``。
     来源标识非法的切块无法归属知识库：指定知识库时被过滤，未指定时作为纯文本
     上下文返回，但不参与命中判定。
+
+    ``max_per_doc > 0`` 时先按「每篇文档最多 N 条」做一轮配额，再补齐不足：
+    平台指标是文档级的（Hit Rate / Recall），一篇长文档切出的多个相近切块
+    占满 Top-K 会让其它文档永远进不了结果。
     """
+    limit = max(1, int(top_k or 1))
     data = (payload or {}).get("data") or {}
     chunks = data.get("chunks") or []
 
-    items: list[dict] = []
-    seen: set[str] = set()
+    candidates: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_text: set[str] = set()
     for chunk in chunks:
         if not isinstance(chunk, dict):
             continue
@@ -120,22 +126,49 @@ def map_chunks(payload: dict, kb_id: str, top_k: int) -> list[dict]:
         # 来源标识结构不合法（旧数据或人工写入）时不参与指标命中判定，
         # 但仍作为纯文本上下文返回，避免静默丢弃真实召回。
         if not chunk_uid:
-            chunk_uid = f"{doc_id or 'chunk'}#{len(items) + 1}"
-        if chunk_uid in seen:
+            chunk_uid = f"{doc_id or 'chunk'}#{len(candidates) + 1}"
+        if chunk_uid in seen_ids:
             continue
-        seen.add(chunk_uid)
-        items.append(
+        text = str(chunk.get("content") or "")
+        # 相邻切块有重叠窗口，文本前缀相同视为同一段内容，避免重复占位。
+        fingerprint = text[:80]
+        if fingerprint and fingerprint in seen_text:
+            continue
+        seen_ids.add(chunk_uid)
+        if fingerprint:
+            seen_text.add(fingerprint)
+        candidates.append(
             {
                 "id": chunk_uid,
                 "doc_id": doc_id,
                 "doc_name": filename or doc_id,
-                "text": str(chunk.get("content") or ""),
+                "text": text,
                 "reference_id": str(chunk.get("reference_id") or ""),
             }
         )
-        if len(items) >= max(1, int(top_k or 1)):
+
+    if max_per_doc <= 0:
+        return candidates[:limit]
+
+    selected: list[dict] = []
+    counts: dict[str, int] = {}
+    for item in candidates:
+        key = item["doc_id"] or item["id"]
+        if counts.get(key, 0) >= max_per_doc:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+        selected.append(item)
+        if len(selected) >= limit:
+            return selected
+    # 配额导致不足时再放宽填满，保证召回数量不因多样性下降。
+    chosen = {item["id"] for item in selected}
+    for item in candidates:
+        if item["id"] in chosen:
+            continue
+        selected.append(item)
+        if len(selected) >= limit:
             break
-    return items
+    return selected
 
 
 def parse_doc_ids(file_path: str, kb_id: str, separator: str = GRAPH_FIELD_SEP) -> list[str]:

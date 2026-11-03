@@ -63,6 +63,9 @@ class EngineConfig:
     chunk_overlap_token_size: int
     entity_top_k: int
     max_parallel_insert: int
+    # 单篇文档在 Top-K 中的最大占位数（0 表示不限制）：平台指标按文档计算，
+    # 一篇长文档的多个相近切块占满结果会让其它文档永远进不了 Top-K。
+    max_chunks_per_doc: int
     # 待索引队列上限：每篇排队文档的正文都驻留内存，无上限会在连续上传时 OOM。
     max_queue_documents: int
     # 停机时等待在建索引任务收尾的宽限期：直接取消会把 doc_status 留在 processing。
@@ -120,6 +123,7 @@ def load_config() -> EngineConfig:
         entity_top_k=_env_int("LIGHTRAG_ENTITY_TOP_K", 40),
         # LightRAG 实体抽取是重 IO 操作，默认串行以免打爆小规格上游配额。
         max_parallel_insert=_env_int("LIGHTRAG_MAX_PARALLEL_INSERT", 1),
+        max_chunks_per_doc=_env_int("LIGHTRAG_MAX_CHUNKS_PER_DOC", 3),
         max_queue_documents=_env_int("LIGHTRAG_MAX_QUEUE_DOCUMENTS", 64),
         shutdown_grace_s=_env_float("LIGHTRAG_SHUTDOWN_GRACE_SECONDS", 30.0),
         workspace=_env_str("LIGHTRAG_WORKSPACE", "aieval"),
