@@ -31,7 +31,7 @@ from adapter import (
     load_config,
 )
 from fastapi import FastAPI, Header, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -54,6 +54,14 @@ class IndexRequest(BaseModel):
     doc_id: str = Field(min_length=1)
     filename: str = ""
     text: str = Field(min_length=1, max_length=MAX_DOC_TEXT_CHARS)
+
+    @field_validator("text")
+    @classmethod
+    def _reject_blank(cls, value: str) -> str:
+        """纯空白正文是请求错误（422），不是引擎不可用（503）。"""
+        if not value.strip():
+            raise ValueError("文档正文不能为空")
+        return value
 
 
 class DeleteRequest(BaseModel):
