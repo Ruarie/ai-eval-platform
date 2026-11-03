@@ -16,8 +16,9 @@
           </span>
           <div class="row" style="gap: 8px">
             <span v-for="item in legend" :key="item.type" class="legend-item small">
-              <i :style="{ background: item.color }"></i>{{ item.type }}
+              <i :style="{ background: item.color }"></i>{{ item.label }}
             </span>
+            <button class="btn btn-secondary btn-sm" @click="resetView">重置视图</button>
             <button class="btn btn-secondary btn-sm" @click="load">刷新</button>
           </div>
         </div>
@@ -30,10 +31,16 @@
         <div v-else class="graph-body">
           <svg
             class="graph-canvas"
-            :viewBox="`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`"
+            :class="{ dragging }"
+            :viewBox="viewBoxAttr"
             preserveAspectRatio="xMidYMid meet"
             role="img"
             aria-label="知识图谱实体关系图"
+            @wheel.prevent="onWheel"
+            @pointerdown="onPointerDown"
+            @pointermove="onPointerMove"
+            @pointerup="onPointerUp"
+            @pointerleave="onPointerUp"
           >
             <g>
               <line
@@ -53,7 +60,7 @@
               :key="item.node.id"
               class="graph-node"
               :class="{ dimmed: isDimmed(item.node.id) }"
-              @click="selectedId = selectedId === item.node.id ? '' : item.node.id"
+              @click="onNodeClick(item.node.id)"
             >
               <circle
                 :cx="item.x"
@@ -64,13 +71,14 @@
                 :stroke-width="item.node.id === selectedId ? 2.4 : 1"
               />
               <text
-                v-if="item.node.degree >= 2 || item.node.id === selectedId"
+                v-if="showLabel(item.node)"
                 :x="item.x"
                 :y="item.y - item.radius - 5"
                 text-anchor="middle"
                 class="graph-label"
+                :class="{ strong: item.node.id === selectedId }"
               >
-                {{ item.node.id }}
+                {{ shortLabel(item.node.id) }}
               </text>
             </g>
           </svg>
@@ -80,7 +88,7 @@
               <div class="side-title">{{ selected.id }}</div>
               <div class="side-row">
                 <span class="small tertiary">类型</span>
-                <span class="chip">{{ selected.entity_type || '未标注' }}</span>
+                <span class="chip">{{ typeLabel(selected.entity_type) }}</span>
               </div>
               <div class="side-row">
                 <span class="small tertiary">关联数</span>
@@ -112,7 +120,7 @@
 import { computed, ref, watch } from 'vue'
 
 import { api } from '../../api/http'
-import type { KbGraph, KbGraphEdge, KbGraphNode } from '../../api/types'
+import type { KbGraph, KbGraphNode } from '../../api/types'
 
 const props = defineProps<{
   show: boolean
@@ -129,7 +137,6 @@ const emit = defineEmits<{
 const CANVAS_WIDTH = 820
 const CANVAS_HEIGHT = 520
 const PADDING = 44
-const ITERATIONS = 160
 const LEGEND_LIMIT = 6
 const TYPE_COLORS = ['#5b8def', '#e8894a', '#3fae8f', '#9b6be0', '#d0a03a', '#5aa9c9']
 
@@ -144,7 +151,8 @@ async function load() {
   error.value = ''
   selectedId.value = ''
   try {
-    graph.value = await api.kb.getGraph(props.kbId, 150)
+    // 默认取 100 个实体：更多节点会让环形布局过密，图例与标签失去可读性。
+    graph.value = await api.kb.getGraph(props.kbId, 100)
   } catch (err) {
     graph.value = null
     error.value = err instanceof Error ? err.message : '图谱读取失败，请稍后重试'
@@ -174,88 +182,57 @@ interface PlacedNode {
   radius: number
 }
 
-/** 力导向布局：斥力 + 边引力 + 向心引力，迭代固定次数后一次性渲染（不做持续动画）。 */
-function layout(nodes: KbGraphNode[], edges: KbGraphEdge[]): PlacedNode[] {
+/**
+ * 分层环形布局（按度数分环 + 环内均匀分布）。
+ *
+ * 之前用力导向：150 个节点时斥力把大半节点推到画布边界并被钳制成"边框一圈球"，
+ * 中间只剩交叉的边。环形布局稳定、有层次，也不会随数据量抖动；缩放/拖拽负责
+ * 看局部细节。
+ */
+function layout(nodes: KbGraphNode[]): PlacedNode[] {
   const total = nodes.length
   if (!total) return []
 
   const centerX = CANVAS_WIDTH / 2
   const centerY = CANVAS_HEIGHT / 2
-  const usableWidth = CANVAS_WIDTH - PADDING * 2
-  const usableHeight = CANVAS_HEIGHT - PADDING * 2
-  const ideal = Math.sqrt((usableWidth * usableHeight) / total) * 0.75
-  const xs: number[] = []
-  const ys: number[] = []
-  const indexOf = new Map<string, number>()
+  const maxRadiusY = Math.min(CANVAS_HEIGHT / 2 - PADDING, CANVAS_HEIGHT * 0.42)
+  const maxRadiusX = maxRadiusY * (CANVAS_WIDTH / CANVAS_HEIGHT)
+  const sorted = [...nodes].sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
 
-  nodes.forEach((node, index) => {
-    const angle = (index / total) * Math.PI * 2
-    // 度数最高的前 8 个实体放在内圈，核心实体不被挤到画布边缘。
-    const ring = index < 8 ? 0.52 : 1
-    xs.push(centerX + Math.cos(angle) * usableWidth * 0.34 * ring)
-    ys.push(centerY + Math.sin(angle) * usableHeight * 0.34 * ring)
-    indexOf.set(node.id, index)
+  // 内圈放度数最高的实体，外圈放长尾；数量按环周长近似分配。
+  const ringSizes = [
+    Math.min(12, total),
+    Math.min(40, Math.max(0, total - 12)),
+    Math.max(0, total - 52),
+  ]
+  const ringRadius = [0.36, 0.68, 1]
+  const placedNodes: PlacedNode[] = []
+  let cursor = 0
+
+  ringSizes.forEach((size, ringIndex) => {
+    const count = Math.min(size, total - cursor)
+    if (count <= 0) return
+    const rx = maxRadiusX * ringRadius[ringIndex]
+    const ry = maxRadiusY * ringRadius[ringIndex]
+    // 每环错开半个扇区，避免不同环的节点在视觉上连成直线。
+    const offset = ringIndex === 0 ? -Math.PI / 2 : -Math.PI / 2 + Math.PI / count
+    for (let i = 0; i < count; i += 1) {
+      const angle = offset + (i / count) * Math.PI * 2
+      const node = sorted[cursor + i]
+      placedNodes.push({
+        node,
+        x: centerX + Math.cos(angle) * rx,
+        y: centerY + Math.sin(angle) * ry,
+        radius: (ringIndex === 0 ? 8 : ringIndex === 1 ? 5.5 : 4) + Math.min(6, node.degree * 0.5),
+      })
+    }
+    cursor += count
   })
 
-  for (let step = 0; step < ITERATIONS; step += 1) {
-    const dx = new Array<number>(total).fill(0)
-    const dy = new Array<number>(total).fill(0)
-
-    for (let i = 0; i < total; i += 1) {
-      for (let j = i + 1; j < total; j += 1) {
-        let vx = xs[i] - xs[j]
-        let vy = ys[i] - ys[j]
-        let distance = Math.hypot(vx, vy)
-        if (distance < 0.01) {
-          vx = 0.01 * (i - j + 1)
-          vy = 0.01
-          distance = Math.hypot(vx, vy)
-        }
-        const force = (ideal * ideal) / distance
-        const ux = (vx / distance) * force
-        const uy = (vy / distance) * force
-        dx[i] += ux
-        dy[i] += uy
-        dx[j] -= ux
-        dy[j] -= uy
-      }
-    }
-
-    for (const edge of edges) {
-      const from = indexOf.get(edge.source)
-      const to = indexOf.get(edge.target)
-      if (from === undefined || to === undefined || from === to) continue
-      const vx = xs[from] - xs[to]
-      const vy = ys[from] - ys[to]
-      const distance = Math.max(Math.hypot(vx, vy), 0.01)
-      const force = (distance * distance) / ideal / 40
-      const ux = (vx / distance) * force
-      const uy = (vy / distance) * force
-      dx[from] -= ux
-      dy[from] -= uy
-      dx[to] += ux
-      dy[to] += uy
-    }
-
-    for (let i = 0; i < total; i += 1) {
-      dx[i] += (centerX - xs[i]) * 0.02
-      dy[i] += (centerY - ys[i]) * 0.02
-      const length = Math.hypot(dx[i], dy[i]) || 1
-      const stepSize = Math.min(length, 12)
-      xs[i] = Math.min(CANVAS_WIDTH - PADDING, Math.max(PADDING, xs[i] + (dx[i] / length) * stepSize))
-      ys[i] = Math.min(CANVAS_HEIGHT - PADDING, Math.max(PADDING, ys[i] + (dy[i] / length) * stepSize))
-    }
-  }
-
-  return nodes.map((node, index) => ({
-    node,
-    x: xs[index],
-    y: ys[index],
-    radius: 6 + Math.min(10, node.degree * 1.6),
-  }))
+  return placedNodes
 }
 
-const placed = computed(() => layout(graph.value?.nodes ?? [], graph.value?.edges ?? []))
+const placed = computed(() => layout(graph.value?.nodes ?? []))
 
 const positions = computed(() => new Map(placed.value.map((item) => [item.node.id, item])))
 
@@ -292,22 +269,134 @@ const neighbours = computed(() => {
 const legend = computed(() => {
   const types: string[] = []
   for (const node of graph.value?.nodes ?? []) {
-    const type = node.entity_type || '未标注'
+    const type = node.entity_type || 'other'
     if (!types.includes(type)) types.push(type)
     if (types.length >= LEGEND_LIMIT) break
   }
-  return types.map((type) => ({ type, color: typeColor(type) }))
+  return types.map((type) => ({ type, label: typeLabel(type), color: typeColor(type) }))
 })
+
+// ─── 视图缩放 / 平移：150 个节点在固定画布里会挤成一团，必须能放大看局部 ───
+const viewBox = ref({ x: 0, y: 0, w: CANVAS_WIDTH, h: CANVAS_HEIGHT })
+const viewBoxAttr = computed(
+  () => `${viewBox.value.x} ${viewBox.value.y} ${viewBox.value.w} ${viewBox.value.h}`,
+)
+const dragging = ref(false)
+let dragOrigin: { x: number; y: number; vx: number; vy: number } | null = null
+let moved = false
+
+function resetView() {
+  viewBox.value = { x: 0, y: 0, w: CANVAS_WIDTH, h: CANVAS_HEIGHT }
+}
+
+function onWheel(event: WheelEvent) {
+  const rect = (event.currentTarget as SVGSVGElement).getBoundingClientRect()
+  const factor = event.deltaY > 0 ? 1.12 : 0.89
+  const nextW = Math.min(CANVAS_WIDTH * 2.5, Math.max(CANVAS_WIDTH / 5, viewBox.value.w * factor))
+  const nextH = (nextW * CANVAS_HEIGHT) / CANVAS_WIDTH
+  const ratioX = (event.clientX - rect.left) / rect.width
+  const ratioY = (event.clientY - rect.top) / rect.height
+  viewBox.value = {
+    x: viewBox.value.x + (viewBox.value.w - nextW) * ratioX,
+    y: viewBox.value.y + (viewBox.value.h - nextH) * ratioY,
+    w: nextW,
+    h: nextH,
+  }
+}
+
+function onPointerDown(event: PointerEvent) {
+  dragging.value = true
+  moved = false
+  dragOrigin = {
+    x: event.clientX,
+    y: event.clientY,
+    vx: viewBox.value.x,
+    vy: viewBox.value.y,
+  }
+  ;(event.currentTarget as SVGSVGElement).setPointerCapture?.(event.pointerId)
+}
+
+function onPointerMove(event: PointerEvent) {
+  if (!dragOrigin) return
+  const rect = (event.currentTarget as SVGSVGElement).getBoundingClientRect()
+  if (Math.abs(event.clientX - dragOrigin.x) + Math.abs(event.clientY - dragOrigin.y) > 3) {
+    moved = true
+  }
+  viewBox.value = {
+    ...viewBox.value,
+    x: dragOrigin.vx - ((event.clientX - dragOrigin.x) * viewBox.value.w) / rect.width,
+    y: dragOrigin.vy - ((event.clientY - dragOrigin.y) * viewBox.value.h) / rect.height,
+  }
+}
+
+function onPointerUp() {
+  dragging.value = false
+  dragOrigin = null
+}
+
+/** 拖拽结束时不要顺带把节点选中，避免平移后误触详情。 */
+function onNodeClick(nodeId: string) {
+  if (moved) {
+    moved = false
+    return
+  }
+  selectedId.value = selectedId.value === nodeId ? '' : nodeId
+}
+
+/** 标签上限 14 个：节点多时只标度数最高的实体，否则长实体名会互相压住。 */
+const labelIds = computed(() => {
+  const ids = new Set<string>()
+  if (selectedId.value) ids.add(selectedId.value)
+  const total = placed.value.length
+  const threshold = total > 80 ? 8 : total > 40 ? 4 : 2
+  for (const item of placed.value) {
+    if (ids.size >= 14) break
+    if (item.node.degree >= threshold) ids.add(item.node.id)
+  }
+  return ids
+})
+
+function showLabel(node: KbGraphNode) {
+  return labelIds.value.has(node.id)
+}
+
+/** 长实体名截断显示，完整名称在右侧详情里看。 */
+function shortLabel(name: string) {
+  return name.length > 12 ? `${name.slice(0, 11)}…` : name
+}
 
 function isDimmed(nodeId: string) {
   if (!selectedId.value) return false
   return nodeId !== selectedId.value && !neighbours.value.has(nodeId)
 }
 
+// LightRAG 的实体类型枚举是英文，界面上给出中文名，避免中英混排。
+const TYPE_LABELS: Record<string, string> = {
+  other: '其他',
+  concept: '概念',
+  content: '内容',
+  artifact: '产物',
+  method: '方法',
+  data: '数据',
+  event: '事件',
+  person: '人物',
+  organization: '组织',
+  activity: '活动',
+  creature: '生物',
+  naturalobject: '自然对象',
+  location: '地点',
+  category: '类别',
+}
+
+function typeLabel(type: string) {
+  const key = (type || '').toLowerCase()
+  return TYPE_LABELS[key] || type || '未标注'
+}
+
 /** 按实体类型稳定取色，同一类型在刷新前后保持一致。 */
 function typeColor(type: string) {
   let hash = 0
-  for (const char of type || '未标注') hash = (hash * 31 + char.charCodeAt(0)) % 9973
+  for (const char of type || 'other') hash = (hash * 31 + char.charCodeAt(0)) % 9973
   return TYPE_COLORS[hash % TYPE_COLORS.length]
 }
 
@@ -371,9 +460,18 @@ function docName(docId: string) {
   border-radius: 12px;
 }
 
+.graph-canvas.dragging {
+  cursor: grabbing;
+}
+
 .graph-node {
   cursor: pointer;
   transition: opacity 0.15s ease;
+}
+
+.graph-label.strong {
+  font-weight: 600;
+  fill: var(--text-primary, #1f2430);
 }
 
 .graph-node.dimmed {

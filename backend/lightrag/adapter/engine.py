@@ -53,6 +53,33 @@ def _placeholder_key(api_key: str) -> str:
     return api_key.strip() or "EMPTY"
 
 
+_LANGUAGE_HINT = """
+
+---Output Language---
+- The input text is usually Chinese. Keep every entity name and both relation
+  endpoints EXACTLY as they appear in the text (do not translate them into
+  English, do not normalise them to another language).
+- Write entity descriptions, relation descriptions and keywords in the same
+  language as the input text.
+"""
+
+
+def localize_prompts() -> None:
+    """给抽取 prompt 追加语言约束，避免中文语料被抽成英文实体。
+
+    LightRAG 默认 prompt 是英文，模型会把「房间」「账号B」翻译成 ``Room`` /
+    ``Account B``，同一概念还会因语言不一致被拆成多个节点（图谱碎片化）。
+    这里只在 system prompt 末尾追加语言要求，不动输出格式说明与示例，
+    保证与原解析器兼容。
+    """
+    from lightrag.prompt import PROMPTS
+
+    for key in ("entity_extraction_system_prompt", "entity_extraction_json_system_prompt"):
+        base = PROMPTS.get(key) or ""
+        if base and "---Output Language---" not in base:
+            PROMPTS[key] = base + _LANGUAGE_HINT
+
+
 def _record_file_path(record: Any) -> str:
     """读取 doc_status 记录里的来源标识；兼容对象与 dict 两种返回形态。"""
     if record is None:
@@ -129,6 +156,8 @@ class LightRAGEngine:
             ),
         )
 
+        # 先本地化抽取 prompt，再建引擎实例（引擎在调用期读取 PROMPTS）。
+        localize_prompts()
         rag = LightRAG(
             working_dir=self.config.data_dir,
             workspace=self.config.workspace,
