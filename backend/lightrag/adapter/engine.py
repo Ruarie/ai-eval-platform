@@ -290,8 +290,11 @@ class LightRAGEngine:
     async def document_statuses(self, doc_ids: list[str]) -> dict[str, str]:
         """批量回读文档索引状态，返回 ``{doc_id: 平台三态}``。
 
-        只返回引擎确实有记录的文档；平台对未返回的 ID 保留自身状态，避免把
-        「尚未受理」误判成失败。
+        - 引擎有记录：按 doc_status 映射；
+        - 引擎无记录但本进程正在排队/抽取：仍为 indexing；
+        - 引擎无记录且本进程没有任务：内容哈希被判重复（LightRAG 会把重复文档
+          合并到原文档、不为新 doc_id 建记录）或上次进程中断，返回 failed，
+          否则平台会永远停在 indexing 并让前端无限轮询。
         """
         if not doc_ids:
             return {}
@@ -310,8 +313,7 @@ class LightRAGEngine:
                 continue
             record = records.get(doc_id) if isinstance(records, dict) else None
             if record is None:
-                if doc_id in self._queued:
-                    result[doc_id] = STATUS_INDEXING
+                result[doc_id] = STATUS_INDEXING if doc_id in self._queued else STATUS_FAILED
                 continue
             engine_status = getattr(record, "status", None)
             if engine_status is None and isinstance(record, dict):

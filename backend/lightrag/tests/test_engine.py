@@ -194,6 +194,30 @@ def test_delete_allows_same_kb_and_missing_record():
     asyncio.run(case())
 
 
+def test_missing_record_without_task_is_reported_failed():
+    """引擎无记录且本进程无任务：内容被判重复合并，标 failed 避免永久 indexing。"""
+
+    async def case() -> None:
+        engine = _engine()
+        engine._rag = FakeRag({})
+        assert await engine.document_statuses(["doc-x"]) == {"doc-x": "failed"}
+
+    asyncio.run(case())
+
+
+def test_missing_record_while_queued_stays_indexing():
+    """受理后、引擎尚未写入 doc_status 的窗口期仍报 indexing。"""
+
+    async def case() -> None:
+        engine = _engine()
+        engine._rag = FakeRag({}, block=True)
+        await engine.index_document("kb-1", "doc-x", "x.txt", "正文")
+        assert await engine.document_statuses(["doc-x"]) == {"doc-x": "indexing"}
+        await engine.stop()
+
+    asyncio.run(case())
+
+
 def test_graph_reads_wildcard_with_widened_window():
     """图谱按全局最高度数取候选，再按库过滤，因此请求窗口要大于返回上限。"""
 

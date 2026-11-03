@@ -1393,7 +1393,7 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 
 返回当前知识库文档及索引状态：`{ "items": [{ "doc_id", "filename", "size", "status" }] }`。`status` 为 `indexing | indexed | failed`；列表不内嵌文本或切块。
 
-列表会向 LightRAG 回读仍处于 `indexing` 的文档并落库收敛：`pending/processing → indexing`、`processed → indexed`、`failed → failed`。引擎不可用或回读失败时保留库内原状态，不猜测结果；若引擎侧的 `pending/processing` 记录已无对应在建任务（进程重启或崩溃残留），该文档按 `failed` 返回，由用户重新上传，避免永久 `indexing`。回读结果有 3 秒进程内缓存，用于抵消轮询造成的重复查询。
+列表会向 LightRAG 回读仍处于 `indexing` 的文档并落库收敛：`pending/processing → indexing`、`processed → indexed`、`failed → failed`。引擎不可用或回读失败时保留库内原状态，不猜测结果；若引擎侧的 `pending/processing` 记录已无对应在建任务（进程重启或崩溃残留），该文档按 `failed` 返回，由用户重新上传，避免永久 `indexing`。引擎完全无该 `doc_id` 记录且当前进程没有对应任务时同样按 `failed` 返回，覆盖两种真实情况：内容哈希重复（LightRAG 会把重复正文合并到原文档、不为新 ID 建记录）与索引中途进程中断。回读结果有 3 秒进程内缓存，用于抵消轮询造成的重复查询。
 
 #### `GET /api/kb/{id}/documents/{doc_id}/chunks?chunk_size=512&overlap=64`
 
