@@ -1,6 +1,5 @@
 <template>
   <div class="kb-workbench">
-    <template>
     <!-- 顶部知识库选择与操作栏 -->
     <div class="kb-bar row-between mb16">
       <div class="row wrap" style="gap: 8px">
@@ -414,7 +413,6 @@
       @upload="handleGraphUpload"
     />
 
-    </template>
   </div>
 </template>
 
