@@ -129,7 +129,7 @@ LightRAG 的 query 不支持按文档过滤，单实例多知识库共享同一�
 | --- | --- | --- |
 | `LIGHTRAG_LLM_BASE_URL` / `LIGHTRAG_LLM_API_KEY` | 空 | OpenAI 兼容网关；地址为空 = 引擎未就绪，密钥缺失时按 `EMPTY` 占位（适配无鉴权的本地网关） |
 | `LIGHTRAG_LLM_MODEL` | `gpt-4o-mini` | 图谱抽取模型 |
-| `LIGHTRAG_LLM_TIMEOUT_SECONDS` | `180` | 抽取单次超时 |
+| `LIGHTRAG_LLM_TIMEOUT_SECONDS` | `600` | 抽取单次超时；同时作为 LightRAG 内部 `default_llm_timeout`（其默认 240s，低于该值会先行超时） |
 | `LIGHTRAG_EMBEDDING_BASE_URL` / `_API_KEY` | 复用 LLM | 独立向量网关时才填 |
 | `LIGHTRAG_EMBEDDING_MODEL` / `LIGHTRAG_EMBEDDING_DIM` | `BAAI/bge-m3` / `1024` | **维度必须与模型一致**，否则写入向量报维度不匹配 |
 | `LIGHTRAG_CHUNK_TOKEN_SIZE` / `_OVERLAP_TOKENS` | `1200` / `100` | 切块粒度与抽取成本 |

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import OrderedDict
 from functools import partial
 from typing import Any
@@ -41,6 +42,10 @@ logger = logging.getLogger("lightrag.engine")
 
 # 失败表上限：失败原因只需保留到平台回读一次，无界增长会缓慢泄漏。
 _MAX_FAILED_RECORDS = 1000
+# 「引擎在处理、但本进程没有对应任务」的观察窗口：重启后 LightRAG 会从
+# doc_status 恢复未完成的抽取，此刻本地任务表是空的，立刻判 failed 会把
+# 正在恢复的文档误报成失败；超过该窗口仍无进展才认定中断残留。
+_STALE_GRACE_S = 180.0
 
 
 def _placeholder_key(api_key: str) -> str:
@@ -82,6 +87,8 @@ class LightRAGEngine:
         # 受理即失败（连入队都没成功）的文档，避免状态永远停在 indexing；
         # 用有序字典做容量上限，避免长期运行后无界增长。
         self._failed: OrderedDict[str, str] = OrderedDict()
+        # 无本地任务却仍在 processing 的首见时间，用于判断是"重启恢复"还是"残留"。
+        self._stale_since: dict[str, float] = {}
 
     # ─── 生命周期 ─────────────────────────────────────────────────────
 
@@ -132,6 +139,8 @@ class LightRAGEngine:
             chunk_overlap_token_size=self.config.chunk_overlap_token_size,
             top_k=self.config.entity_top_k,
             max_parallel_insert=self.config.max_parallel_insert,
+            # LightRAG 内部默认 240s，会先于 openai client 的 timeout 触发失败。
+            default_llm_timeout=int(self.config.llm_timeout_s),
         )
         await rag.initialize_storages()
         self._rag = rag
@@ -224,6 +233,7 @@ class LightRAGEngine:
         file_source = build_file_source(kb_id, doc_id, filename)
         self._queued.add(doc_id)
         self._failed.pop(doc_id, None)
+        self._stale_since.pop(doc_id, None)
 
         async def _worker() -> None:
             try:
@@ -282,6 +292,7 @@ class LightRAGEngine:
                     raise EngineUnavailable("LightRAG 删除文档失败") from exc
                 self._queued.discard(doc_id)
                 self._failed.pop(doc_id, None)
+                self._stale_since.pop(doc_id, None)
                 results[doc_id] = str(getattr(result, "status", "") or "")
         # not_found 属幂等场景：平台侧记录已删除，引擎无残留即可。
         deleted = all(status in {"success", "not_found"} for status in results.values())
@@ -322,10 +333,15 @@ class LightRAGEngine:
                 str(getattr(engine_status, "value", engine_status) or "")
             )
             if mapped == STATUS_INDEXING and doc_id not in self._queued:
-                # 引擎报 pending/processing 但本进程没有对应任务：上次进程在抽取
-                # 中途被中断，该文档不会再有进展。标 failed 让用户重传，而不是
-                # 让它永远停在 indexing 并让前端无限轮询。
-                mapped = STATUS_FAILED
+                # 引擎报 pending/processing 但本进程没有对应任务：可能是重启后
+                # LightRAG 正在恢复抽取（正常），也可能是上一次抽取被硬中断（残留）。
+                # 给一个观察窗口，窗口内仍按 indexing 返回；超时无进展才判 failed，
+                # 避免把重启后正在恢复的文档误报成失败。
+                first_seen = self._stale_since.setdefault(doc_id, time.monotonic())
+                if time.monotonic() - first_seen >= _STALE_GRACE_S:
+                    mapped = STATUS_FAILED
+            else:
+                self._stale_since.pop(doc_id, None)
             result[doc_id] = mapped
         return result
 

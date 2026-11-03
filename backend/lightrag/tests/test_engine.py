@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import time
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -138,12 +139,24 @@ def test_stop_cancels_after_grace():
     asyncio.run(case())
 
 
-def test_processing_without_local_task_is_reported_failed():
-    """引擎报 processing 但本进程无任务：判定为上次中断残留，标 failed 让用户重传。"""
+def test_processing_without_local_task_is_indexing_within_grace():
+    """重启后引擎会恢复未完成的抽取：观察窗口内保持 indexing，不误报失败。"""
 
     async def case() -> None:
         engine = _engine()
         engine._rag = FakeRag({"doc-a": SimpleNamespace(status="processing", file_path="kb-1__doc-a__a.txt")})
+        assert await engine.document_statuses(["doc-a"]) == {"doc-a": "indexing"}
+
+    asyncio.run(case())
+
+
+def test_processing_without_local_task_is_failed_after_grace():
+    """超过观察窗口仍无本地任务：认定上次中断残留，标 failed 让用户重传。"""
+
+    async def case() -> None:
+        engine = _engine()
+        engine._rag = FakeRag({"doc-a": SimpleNamespace(status="processing", file_path="kb-1__doc-a__a.txt")})
+        engine._stale_since["doc-a"] = time.monotonic() - 999
         assert await engine.document_statuses(["doc-a"]) == {"doc-a": "failed"}
 
     asyncio.run(case())
