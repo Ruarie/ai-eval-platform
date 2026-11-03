@@ -26,6 +26,7 @@ from typing import Any
 
 from .config import EngineConfig
 from .contract import (
+    MAX_GRAPH_NODES,
     STATUS_FAILED,
     STATUS_INDEXING,
     belongs_to_kb,
@@ -33,6 +34,7 @@ from .contract import (
     chunk_top_k_for,
     map_chunks,
     map_engine_status,
+    map_graph,
 )
 
 logger = logging.getLogger("lightrag.engine")
@@ -356,6 +358,40 @@ class LightRAGEngine:
             "engine": "lightrag",
             "engine_version": self._version,
         }
+
+    # ─── 知识图谱（只读） ──────────────────────────────────────────────
+
+    async def graph(self, kb_id: str, limit: int = 200) -> dict[str, Any]:
+        """读取当前知识库的实体关系子图。
+
+        单实例多库共享同一图谱，过滤只能发生在召回之后，因此先按倍数取候选
+        （与检索的 ``chunk_top_k`` 同一思路），再按文档来源前缀过滤并截断。
+        """
+        rag = self._require_rag()
+        limit = max(1, min(int(limit or 1), MAX_GRAPH_NODES))
+        fetch_nodes = min(max(limit * 5, 200), 1000)
+        try:
+            kg = await rag.get_knowledge_graph("*", max_depth=1, max_nodes=fetch_nodes)
+        except Exception as exc:  # noqa: BLE001 - 统一转引擎不可用
+            logger.warning("LightRAG 图谱读取失败 err=%s", type(exc).__name__)
+            raise EngineUnavailable("LightRAG 图谱读取失败") from exc
+
+        payload = {
+            "nodes": [
+                {"id": str(node.id), "properties": dict(node.properties or {})}
+                for node in getattr(kg, "nodes", None) or []
+            ],
+            "edges": [
+                {
+                    "source": str(edge.source),
+                    "target": str(edge.target),
+                    "properties": dict(edge.properties or {}),
+                }
+                for edge in getattr(kg, "edges", None) or []
+            ],
+            "is_truncated": bool(getattr(kg, "is_truncated", False)),
+        }
+        return map_graph(payload, kb_id, limit)
 
     # ─── 健康检查 ─────────────────────────────────────────────────────
 

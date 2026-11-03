@@ -726,6 +726,30 @@ export interface KbChunk {
   similarity?: number
 }
 
+// 知识图谱（只读）：节点/关系来自 LightRAG 索引阶段的实体抽取。
+export interface KbGraphNode {
+  id: string
+  entity_type: string
+  description: string
+  degree: number
+  doc_ids: string[]
+}
+
+export interface KbGraphEdge {
+  source: string
+  target: string
+  description: string
+  weight: number
+}
+
+export interface KbGraph {
+  kb_id: string
+  nodes: KbGraphNode[]
+  edges: KbGraphEdge[]
+  truncated: boolean
+  engine: string
+}
+
 // 评测报告
 export interface BenchmarkScore {
   // Worker 实际输出字段（benchmark _finish）

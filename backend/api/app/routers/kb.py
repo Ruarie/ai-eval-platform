@@ -17,10 +17,12 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi import Request as FastApiRequest
 from shared.kb import (
+    MAX_GRAPH_LIMIT,
     chunk_text,
     compute_metrics,
     delete_documents,
     document_statuses,
+    fetch_graph,
     index_document,
     retrieve,
 )
@@ -44,6 +46,7 @@ from ..schemas import (
     KbChunkOut,
     KbCreate,
     KbDocOut,
+    KbGraphOut,
     KbOut,
     KbQueryIn,
     KbQueryItemOut,
@@ -550,6 +553,27 @@ def query_kb(
         reranked_ids=reranked,
         metrics=metrics,
     )
+
+
+@router.get("/{kb_id}/graph", response_model=KbGraphOut)
+def get_kb_graph(
+    kb_id: str,
+    limit: int = Query(default=200, ge=1, le=MAX_GRAPH_LIMIT),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """返回当前知识库的实体关系子图（只读，按文档来源前缀过滤）。
+
+    图谱是引擎独有的产物，引擎不可用时返回 UPSTREAM 而不是空图：空图会被
+    用户理解成「库里没有实体」，属于误导。外部 Chat 库没有本地图谱，直接拒绝。
+    """
+    kb = _get_kb_or_404(db, kb_id)
+    if kb.kind != "lightrag":
+        raise AppError(ErrorCode.VALIDATION, "外部 Chat 知识库不提供知识图谱")
+    data = fetch_graph(kb_id, limit)
+    if data is None:
+        raise AppError(ErrorCode.UPSTREAM, "LightRAG 图谱读取失败，请稍后重试")
+    return KbGraphOut(kb_id=kb.id, **data)
 
 
 def _match_gold_qa(db: Session, kb_id: str, query: str) -> tuple[list[str], str]:

@@ -239,12 +239,22 @@ const IconMemories = () =>
     h('path', { d: 'M9 3v18M12 8h5M12 12h5M3 7h4M3 17h4' }),
   ])
 
+// 知识库：文档索引、检索 Playground 与只读知识图谱的统一入口。
+const IconKnowledge = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('ellipse', { cx: '12', cy: '6', rx: '7', ry: '3' }),
+    h('path', { d: 'M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6' }),
+    h('path', { d: 'M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6' }),
+  ])
+
 const evalRoutes = [
   { path: '/agent', label: '智能体', icon: IconAgent, t: 'var(--t-agent)', c: 'var(--c-agent)' },
   { path: '/dispatch', label: '调度中心', icon: IconDispatch, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)' },
   { path: '/tasks', label: '任务中心', icon: IconTasks, t: 'var(--t-tasks)', c: 'var(--c-tasks)' },
   { path: '/reports', label: '历史报告', icon: IconReports, t: 'var(--t-reports)', c: 'var(--c-reports)' },
   { path: '/cases', label: '用例', icon: IconCases, t: 'var(--t-cases)', c: 'var(--c-cases)' },
+  // PRD 5.8 路由表包含 /kb；RAG 评测停用后移出菜单，知识库的检索与图谱仍需可进入。
+  { path: '/kb', label: '知识库', icon: IconKnowledge, t: 'var(--t-kb)', c: 'var(--c-kb)' },
   // F1（G1）：我的工作区（用户自管数据域；管理端清理视图已于 V1.79 下线）
   { path: '/workspaces', label: '我的工作区', icon: IconWorkspaces, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
   { path: '/memories', label: '我的记忆', icon: IconMemories, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },

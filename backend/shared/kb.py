@@ -38,6 +38,10 @@ LIGHTRAG_INDEX_TIMEOUT_S = 15.0
 LIGHTRAG_STATUS_TIMEOUT_S = 15.0
 # 删除索引：删除会重建受影响实体的图谱摘要，整库删除可能跨数分钟。
 LIGHTRAG_DELETE_TIMEOUT_S = 120.0
+# 图谱读取：只读子图，但大图序列化明显慢于状态查询，单独给一个超时。
+LIGHTRAG_GRAPH_TIMEOUT_S = 30.0
+# 单次图谱返回的节点上限（与 API 契约一致）。
+MAX_GRAPH_LIMIT = 500
 # 单次请求携带的文档 ID 上限：避免整库删除/状态回读被服务端或代理截断。
 DOC_BATCH_SIZE = 50
 STATUS_BATCH_SIZE = 200
@@ -312,6 +316,60 @@ def document_statuses(doc_ids: list[str]) -> dict[str, str]:
 def engine_available() -> bool:
     """适配服务是否已配置（仅判断地址，不发起网络请求）。"""
     return bool(_lightrag_base_url())
+
+
+def fetch_graph(kb_id: str, limit: int = 200) -> dict | None:
+    """读取知识库的实体关系子图；不可用或响应异常时返回 None。
+
+    与检索不同，这里**不做本地兜底**：图谱是引擎独有的产物，本地没有等价数据，
+    伪造空图会把「引擎不可用」误导成「库里没有实体」，调用方应报 UPSTREAM。
+    """
+    data = _lightrag_post(
+        "/graph",
+        {"kb_id": kb_id, "limit": max(1, min(int(limit or 200), MAX_GRAPH_LIMIT))},
+        timeout=_lightrag_timeout("LIGHTRAG_GRAPH_TIMEOUT_SECONDS", LIGHTRAG_GRAPH_TIMEOUT_S),
+    )
+    if not isinstance(data, dict):
+        return None
+    nodes: list[dict] = []
+    for item in data.get("nodes") or []:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        try:
+            degree = int(item.get("degree") or 0)
+        except (TypeError, ValueError):
+            degree = 0
+        nodes.append(
+            {
+                "id": str(item["id"]),
+                "entity_type": str(item.get("entity_type") or ""),
+                "description": str(item.get("description") or ""),
+                "degree": degree,
+                "doc_ids": [str(doc_id) for doc_id in (item.get("doc_ids") or []) if doc_id],
+            }
+        )
+    edges: list[dict] = []
+    for item in data.get("edges") or []:
+        if not isinstance(item, dict) or not item.get("source") or not item.get("target"):
+            continue
+        try:
+            weight = float(item.get("weight") if item.get("weight") is not None else 1.0)
+        except (TypeError, ValueError):
+            weight = 1.0
+        edges.append(
+            {
+                "source": str(item["source"]),
+                "target": str(item["target"]),
+                "description": str(item.get("description") or ""),
+                "weight": weight,
+            }
+        )
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "truncated": bool(data.get("truncated")),
+        "engine": str(data.get("engine") or "lightrag"),
+    }
 
 
 def _local_retrieve(db, kb_id: str, query: str, k: int) -> list[dict]:

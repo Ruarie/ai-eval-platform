@@ -40,6 +40,7 @@ PRD F-RAG-01 要求「内置 LightRAG：Compose 服务；上传建索引；`doc_
 | GET | `/documents/status?doc_ids=a,b` | 批量回读 `{items:[{doc_id,status}]}`，未收录的 ID 不返回 |
 | POST | `/documents/delete` | 批量删除 `{kb_id, doc_ids[]}` → `{deleted, results}` |
 | POST | `/query` | 检索 `{query, mode, top_k, kb_id}` → `{text:"", contexts[], mode, engine, engine_version}` |
+| POST | `/graph` | 只读图谱 `{kb_id, limit}` → `{nodes[], edges[], truncated, engine}`；按来源前缀过滤 |
 
 约定：
 
@@ -104,7 +105,17 @@ LightRAG 的 query 不支持按文档过滤，单实例多知识库共享同一�
 
 删除前会用 `doc_status` 里的 `file_path` 做一次知识库前缀校验，跨库 doc_id 返回 `forbidden` 并拒绝删除（平台侧已校验归属，这里作为第二道防线）。
 
-### 4.5 健康与可观测
+### 4.5 图谱读取（只读）
+
+实体与关系是索引阶段的副产品，平台以 `GET /api/kb/{id}/graph` 只读展示：
+
+- 适配层调用 `get_knowledge_graph("*", max_nodes=…)` 取全局最高度数子图，再按节点属性里的 `file_path` 前缀过滤；过滤同样发生在召回之后，因此候选窗口取 `min(max(limit*5, 200), 1000)`；
+- 实体/关系节点上的 `file_path` 是 `<SEP>` 拼接的多来源字段，`parse_doc_ids` 逐段判定前缀并回填 `doc_ids`，供前端关联到文档名；
+- 返回前按库内度数降序截断到 `limit`（≤500），并丢弃两端不全在结果中的边，避免前端出现悬空关系；
+- 只读：不提供实体合并、关系编辑或图谱写入；`external_chat` 知识库无本地图谱，平台侧直接返回 `VALIDATION`；
+- 与检索不同，图谱**不做本地兜底**：引擎不可用返回 `UPSTREAM`，空图只表示"该库尚未抽出实体"，不用空图掩盖引擎故障。
+
+### 4.6 健康与可观测
 
 `GET /health` 返回 `ready / configured / missing[] / documents{status counts} / queued_documents / llm_model / embedding_model / embedding_dim`，不含密钥与正文。Compose 健康检查只验证进程可服务；是否真能建索引看 `ready` 字段。
 
@@ -172,16 +183,20 @@ curl -s localhost:9621/health | python -m json.tool
 | `backend/lightrag/app.py` | 由 stub 改为真实适配服务：`/health`、`/documents/index`、`/documents/status`、`/documents/delete`、`/query` + 内网 `X-API-Key` 鉴权 |
 | `backend/lightrag/adapter/config.py`（新增） | 环境变量归一为不可变配置；`ready` / `missing` 如实表达未就绪原因 |
 | `backend/lightrag/adapter/contract.py`（新增） | 文档来源标识、状态映射、召回窗口与切块映射（纯函数，可脱离引擎测试） |
-| `backend/lightrag/adapter/engine.py`（新增） | `LightRAG` 实例生命周期、异步串行建索引（含队列上限与停机宽限）、批量删除（含归属校验）、状态回读（含中断残留自愈）、检索封装；`EngineUnavailable` / `EngineBusy` 区分失败与队列满 |
+| `backend/lightrag/adapter/engine.py`（新增） | `LightRAG` 实例生命周期、异步串行建索引（含队列上限与停机宽限）、批量删除（含归属校验）、状态回读（含中断残留自愈）、检索与只读图谱读取；`EngineUnavailable` / `EngineBusy` 区分失败与队列满 |
 | `backend/lightrag/adapter/__init__.py`（新增） | 适配层包导出 |
 | `backend/lightrag/requirements.txt` | 新增 `lightrag-hku==1.5.7`（锁 tag）与 `openai` 绑定依赖 |
 | `backend/lightrag/constraints.txt`（新增） | 锁定 lightrag-hku 未锁的传递依赖（pandas/numpy/networkx/openai/tiktoken 等），避免构建漂移 |
 | `backend/lightrag/Dockerfile` | 拷贝适配层；构建期预热 tiktoken 词表（失败不阻塞构建） |
 | `backend/lightrag/conftest.py`、`backend/lightrag/tests/test_contract.py`、`tests/test_engine.py`（新增） | 适配层契约与引擎行为单测（不进镜像） |
-| `backend/shared/kb.py` | 新增 `index_document` / `delete_documents` / `document_statuses` / `engine_available`；检索改为按知识库过滤并收紧降级口径；超时从 2s 提升为可配置 60s |
-| `backend/api/app/routers/kb.py` | 上传即受理建索引并落真实状态；列表回读引擎状态；文档/知识库删除先清引擎索引；失败返回 `UPSTREAM` |
+| `backend/shared/kb.py` | 新增 `index_document` / `delete_documents` / `document_statuses` / `engine_available` / `fetch_graph`；检索改为按知识库过滤并收紧降级口径；超时从 2s 提升为可配置 60s |
+| `backend/api/app/routers/kb.py` | 上传即受理建索引并落真实状态；列表回读引擎状态；文档/知识库删除先清引擎索引；新增 `GET /{id}/graph`（只读，仅 lightrag 库）；失败返回 `UPSTREAM` |
+| `backend/api/app/schemas.py` | 新增 `KbGraphOut` / `KbGraphNodeOut` / `KbGraphEdgeOut` |
 | `backend/api/tests/test_kb_lightrag.py`（新增） | 客户端契约单测：映射、降级口径、受理失败、删除与状态回读 |
-| `frontend/src/views/Kb.vue` | `similarity` 允许为空并显示占位符（不再用 0 冒充）；`indexing` 期间 5s 轮询状态，收敛后自动停止 |
+| `frontend/src/views/Kb.vue` | `similarity` 允许为空并显示占位符（不再用 0 冒充）；`indexing` 期间 5s 轮询状态，收敛后自动停止；顶部新增「知识图谱」入口 |
+| `frontend/src/components/drawers/KbGraphDrawer.vue`（新增） | 只读图谱抽屉：自实现力导向布局（无额外图表依赖）、按实体类型着色、点击节点看描述与来源文档、截断与空态提示 |
+| `frontend/src/layouts/MainLayout.vue` | 评测组恢复「知识库」菜单项（PRD 5.8 路由 `/kb`），此前页面只能手输地址进入 |
+| `frontend/src/api/{http,types}.ts` | 新增 `kb.getGraph` 与图谱类型 |
 | `docker-compose.yml` | lightrag 服务补 LLM/Embedding 绑定、内部口令、数据目录、健康检查与内存上限；api/worker 注入内部口令与检索超时 |
 | `.env.example` | 新增/完善 LightRAG 配置段与说明 |
 | `docs/AI测试与评估平台-API.md` | V2.46：§3.9 明确异步建索引状态收敛、删除顺序、`similarity` 可空与降级口径 |

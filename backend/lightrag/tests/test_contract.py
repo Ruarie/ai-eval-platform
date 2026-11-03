@@ -2,6 +2,7 @@
 
 import pytest
 from adapter.contract import (
+    MAX_GRAPH_NODES,
     STATUS_FAILED,
     STATUS_INDEXED,
     STATUS_INDEXING,
@@ -10,6 +11,8 @@ from adapter.contract import (
     chunk_top_k_for,
     map_chunks,
     map_engine_status,
+    map_graph,
+    parse_doc_ids,
     parse_file_source,
     sanitize_filename,
 )
@@ -148,3 +151,104 @@ def test_map_chunks_handles_empty_payload():
     """空响应不抛异常，返回空列表。"""
     assert map_chunks({}, "kb-1", 5) == []
     assert map_chunks({"data": None}, "kb-1", 5) == []
+
+
+def _graph_node(node_id: str, file_path: str, **extra) -> dict:
+    """构造 LightRAG 子图节点（属性里带来源与类型）。"""
+    return {
+        "id": node_id,
+        "properties": {"file_path": file_path, "entity_type": "业务", "description": "说明", **extra},
+    }
+
+
+def test_parse_doc_ids_handles_multiple_sources():
+    """实体可能由多篇文档共同抽取，只解析当前知识库的文档 ID。"""
+    file_path = "kb-1__doc-a__a.txt<SEP>kb-2__doc-z__z.txt<SEP>kb-1__doc-b__b.txt"
+
+    assert parse_doc_ids(file_path, "kb-1") == ["doc-a", "doc-b"]
+
+
+def test_map_graph_filters_other_kb_and_drops_dangling_edges():
+    """跨库实体被过滤，悬空边一并丢弃，避免前端画出孤立关系。"""
+    payload = {
+        "nodes": [
+            _graph_node("退款", "kb-1__doc-a__a.txt"),
+            _graph_node("其它库实体", "kb-2__doc-z__z.txt"),
+        ],
+        "edges": [
+            {
+                "source": "退款",
+                "target": "其它库实体",
+                "properties": {"description": "跨库关系", "weight": 2},
+            }
+        ],
+        "is_truncated": False,
+    }
+
+    result = map_graph(payload, "kb-1", 10)
+
+    assert [node["id"] for node in result["nodes"]] == ["退款"]
+    assert result["edges"] == []
+    assert result["truncated"] is False
+    assert result["engine"] == "lightrag"
+
+
+def test_map_graph_orders_by_degree_and_truncates():
+    """节点按过滤后的度数降序，超出上限时标记 truncated。"""
+    payload = {
+        "nodes": [
+            _graph_node("n1", "kb-1__doc-a__a.txt"),
+            _graph_node("n2", "kb-1__doc-a__a.txt"),
+            _graph_node("n3", "kb-1__doc-a__a.txt"),
+        ],
+        "edges": [
+            {"source": "n2", "target": "n3", "properties": {"weight": 1}},
+            {"source": "n2", "target": "n1", "properties": {"weight": 1}},
+        ],
+        "is_truncated": False,
+    }
+
+    result = map_graph(payload, "kb-1", 2)
+
+    # n2 度数为 2 排首位；n1 与 n3 同度，按 ID 升序保留 n1。
+    assert [node["id"] for node in result["nodes"]] == ["n2", "n1"]
+    assert result["nodes"][0]["degree"] == 2
+    assert result["truncated"] is True
+    # n3 被截断后，n2-n3 边必须一起消失。
+    assert [(edge["source"], edge["target"]) for edge in result["edges"]] == [("n2", "n1")]
+
+
+def test_map_graph_normalises_types_and_descriptions():
+    """实体类型列表合并成文本，超长描述截断，权重缺失按 1.0。"""
+    payload = {
+        "nodes": [
+            _graph_node(
+                "退款",
+                "kb-1__doc-a__a.txt",
+                entity_type=["业务", "流程"],
+                description="长" * 500,
+            )
+        ],
+        "edges": [{"source": "退款", "target": "退款", "properties": {}}],
+    }
+
+    result = map_graph(payload, "kb-1", 10)
+
+    node = result["nodes"][0]
+    assert node["entity_type"] == "业务,流程"
+    assert len(node["description"]) == 400
+    assert node["description"].endswith("…")
+    assert result["edges"] == []
+
+
+def test_map_graph_caps_limit_and_handles_empty_payload():
+    """limit 收敛到契约上限；空 payload 返回空图而不是异常。"""
+    assert map_graph({}, "kb-1", 10) == {
+        "nodes": [],
+        "edges": [],
+        "truncated": False,
+        "engine": "lightrag",
+    }
+    result = map_graph({"nodes": [_graph_node("甲", "kb-1__doc-a__a.txt")]}, "kb-1", 10_000)
+    assert len(result["nodes"]) == 1
+    assert MAX_GRAPH_NODES >= 500

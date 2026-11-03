@@ -1110,6 +1110,35 @@ class KbQueryOut(ApiModel):
     metrics: dict = Field(default_factory=lambda: {"hit_rate": 0.0, "mrr": 0.0, "recall": 0.0, "contain": 0.0})
 
 
+class KbGraphNodeOut(ApiModel):
+    """图谱节点：``degree`` 为当前知识库内的关联数，``doc_ids`` 为来源文档。"""
+
+    id: str
+    entity_type: str = ""
+    description: str = ""
+    degree: int = 0
+    doc_ids: list[str] = Field(default_factory=list)
+
+
+class KbGraphEdgeOut(ApiModel):
+    """图谱关系：``weight`` 取引擎给出的强度，缺失时按 1.0。"""
+
+    source: str
+    target: str
+    description: str = ""
+    weight: float = 1.0
+
+
+class KbGraphOut(ApiModel):
+    """知识库图谱响应（只读）：truncated 表示节点数超过 limit 被截断。"""
+
+    kb_id: str
+    nodes: list[KbGraphNodeOut] = Field(default_factory=list)
+    edges: list[KbGraphEdgeOut] = Field(default_factory=list)
+    truncated: bool = False
+    engine: str = "lightrag"
+
+
 class GoldQaOut(ApiModel):
     """黄金 QA 集响应。"""
 

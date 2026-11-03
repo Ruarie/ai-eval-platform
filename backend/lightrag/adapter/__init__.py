@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from .config import EngineConfig, ensure_data_dir, load_config
 from .contract import (
+    MAX_GRAPH_NODES,
     STATUS_FAILED,
     STATUS_INDEXED,
     STATUS_INDEXING,
     build_file_source,
     map_chunks,
+    map_graph,
     parse_file_source,
 )
 from .engine import EngineBusy, EngineUnavailable, LightRAGEngine
@@ -22,6 +24,7 @@ __all__ = [
     "EngineConfig",
     "EngineUnavailable",
     "LightRAGEngine",
+    "MAX_GRAPH_NODES",
     "STATUS_FAILED",
     "STATUS_INDEXED",
     "STATUS_INDEXING",
@@ -29,5 +32,6 @@ __all__ = [
     "ensure_data_dir",
     "load_config",
     "map_chunks",
+    "map_graph",
     "parse_file_source",
 ]

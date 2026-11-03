@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.55 |
-| 本轮审查日期 | 2026-09-28（用例生成与审核工作台重构） |
+| 文档版本 | V1.56 |
+| 本轮审查日期 | 2026-11-03（知识库只读知识图谱视图，F-RAG-07 交付） |
 | 文档状态 | V1.31 已实现三类准备专家与受控草稿；V1.30 的完整计划/报告连接仍待实现，后台恢复与专家通讯仍待 P2/P3 |
 | 撰写日期 | 2026-08-17 |
 | 本轮修订 | 2026-09-26：V1.47 新增“我的记忆”，支持个人／个人工作区范围的主动保存、更正、撤回及私有主会话按预算召回；语义向量检索和自动抽取仍未交付。 |
@@ -382,7 +382,7 @@ REST、Agent 工具与历史重跑均创建新的生产压测会签请求，不�
 | F-RAG-04 | 指标 | P0 | M3 | `expected_doc_ids` 非空：Hit Rate@K、MRR、Recall@K，**K 默认 5 可配 1–20**。答案：contain。Judge P1 |
 | F-RAG-05 | LightRAG 模式 | P0 | M3 | naive/local/global/hybrid，一次任务可选 1–4 个 |
 | F-RAG-06 | 基线 | P0 | M3 | 同 kb + gold 版本对比；退化 ≥5pp 标红。**通知在 M4**，M3 只在报告内标红 |
-| F-RAG-07 | 过程可视化 | P1 | 后续 | |
+| F-RAG-07 | 知识图谱视图 | P1 | V1.56 交付只读版 | 知识库页面按知识库展示 LightRAG 抽取的实体与关系：节点含实体名、类型、描述、关联文档，边含关系描述与权重；只读、按库过滤、限量（单次 ≤500 节点），不做图编辑，不改变检索与评测口径 |
 
 命中判定：返回的 context.id 或可解析的 doc_id **集合相交** `expected_doc_ids` 即命中。纯文本无 id 时该样本不计入 Hit Rate 分母。
 
@@ -1231,3 +1231,21 @@ Excel 同一批次内的重复用例编号按最后一条更新，不重复创�
 - `backend/api/app/harness/execution/registry.py`、`harness/orchestration/{confirm,confirm_spec}.py`、`agent/workflow_nodes.py`、`agent/expert_prompts/testcase_agent.md`、`harness/skills/files/skill-testcase/SKILL.md`、`backend/worker/app/testcase.py`：Agent 确认及 Worker 使用指定数量与策略快照。
 - `frontend/src/views/Cases.vue`、`frontend/src/api/http.ts`：来源输入、六策略百分比配置、完整候选审核、草稿保存和自检展示。
 - 对应 API、Worker 和前端回归测试：覆盖生成与审核主流程、保存失败和参数边界。
+
+## V1.56 知识库只读知识图谱视图（2026-11-03）
+
+知识库工作台新增「知识图谱」入口：以当前知识库为范围，展示 LightRAG 在索引阶段抽取的实体与关系。数据直接读引擎自身的图存储，不额外调用大模型，也不改变检索与评测口径。
+
+展示约束：
+
+- **单知识库视角**：单实例多库共享同一图谱，服务端按文档来源标识 `{kb_id}__{doc_id}__{filename}` 前缀过滤实体与关系，前端只看到当前库的节点；
+- **只读**：不提供实体/关系的编辑、合并、删除；单次节点上限 500，超出时明确提示已截断；
+- **空态区分**：库内无文档、引擎未就绪、图谱为空分别提示，不用示例图冒充真实图谱；
+- **失败不静默**：引擎不可用时接口返回 `UPSTREAM`，前端提示重试，不渲染空图充当"没有实体"。
+
+### 修改代码文件与作用清单
+
+- `backend/lightrag/adapter/{contract,engine}.py`、`backend/lightrag/app.py`：新增 `/graph` 内部端点、来源前缀过滤与节点/边映射。
+- `backend/shared/kb.py`、`backend/api/app/routers/kb.py`、`schemas.py`：新增 `GET /api/kb/{id}/graph`。
+- `frontend/src/components/drawers/KbGraphDrawer.vue`、`views/Kb.vue`、`api/http.ts`、`api/types.ts`、`layouts/MainLayout.vue`：图谱抽屉、力导向绘制与知识库菜单入口。
+- 对应适配层与平台侧契约测试：覆盖按库过滤、截断、引擎不可用与空态。

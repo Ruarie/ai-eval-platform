@@ -28,6 +28,10 @@
         <button v-if="currentKb?.kind === 'lightrag'" class="btn btn-secondary btn-sm" @click="showUploadDocModal = true">
           ↑ 上传文档
         </button>
+        <!-- 图谱是引擎索引阶段的产物，只读展示；外部 Chat 库没有本地图谱，不显示入口。 -->
+        <button v-if="currentKb?.kind === 'lightrag'" class="btn btn-secondary btn-sm" @click="showGraphDrawer = true">
+          知识图谱
+        </button>
       </div>
     </div>
 
@@ -398,6 +402,13 @@
       @success="loadGoldQas"
     />
 
+    <KbGraphDrawer
+      v-model:show="showGraphDrawer"
+      :kb-id="activeKbId"
+      :kb-name="currentKb?.name"
+      :docs="docs"
+    />
+
     </template>
   </div>
 </template>
@@ -407,6 +418,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useDialog, useMessage } from 'naive-ui'
 import { api } from '../api/http'
 import type { KnowledgeBase, KbChunk, KbDoc, GoldQA, Profile } from '../api/types'
+import KbGraphDrawer from '../components/drawers/KbGraphDrawer.vue'
 import UploadKbDocModal from '../components/modals/UploadKbDocModal.vue'
 import UploadGoldQaModal from '../components/modals/UploadGoldQaModal.vue'
 
@@ -436,6 +448,7 @@ const isQuerying = ref(false)
 const showCreateKbModal = ref(false)
 const showUploadDocModal = ref(false)
 const showUploadGoldQaModal = ref(false)
+const showGraphDrawer = ref(false)
 const creatingKb = ref(false)
 const newKbName = ref('')
 const newKbKind = ref<KnowledgeBase['kind']>('lightrag')

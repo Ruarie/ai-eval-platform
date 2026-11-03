@@ -236,3 +236,56 @@ def test_document_statuses_filters_unknown_values(monkeypatch):
     monkeypatch.setattr(kb_module.urllib.request, "urlopen", lambda *a, **k: _Resp())
 
     assert kb_module.document_statuses(["doc-a", "doc-b"]) == {"doc-a": "indexed"}
+
+
+def test_fetch_graph_maps_nodes_and_edges(monkeypatch):
+    """图谱响应映射为平台结构，字段缺失按契约默认值补齐。"""
+    monkeypatch.setattr(
+        kb_module,
+        "_lightrag_post",
+        lambda *a, **k: {
+            "nodes": [
+                {"id": "退款", "entity_type": "业务", "description": "退款对象", "degree": 2, "doc_ids": ["doc-a"]},
+                {"id": "到账", "doc_ids": None},
+                {"id": ""},
+            ],
+            "edges": [
+                {"source": "退款", "target": "到账", "description": "1-3 个工作日"},
+                {"source": "退款", "target": ""},
+            ],
+            "truncated": True,
+            "engine": "lightrag",
+        },
+    )
+
+    result = kb_module.fetch_graph("kb-1", 10)
+
+    assert [node["id"] for node in result["nodes"]] == ["退款", "到账"]
+    assert result["nodes"][1]["degree"] == 0
+    assert result["nodes"][1]["doc_ids"] == []
+    assert result["edges"] == [
+        {"source": "退款", "target": "到账", "description": "1-3 个工作日", "weight": 1.0}
+    ]
+    assert result["truncated"] is True
+
+
+def test_fetch_graph_returns_none_when_unavailable(monkeypatch):
+    """引擎不可用时返回 None，由路由报 UPSTREAM，不用空图冒充无实体。"""
+    monkeypatch.setattr(kb_module, "_lightrag_post", lambda *a, **k: None)
+
+    assert kb_module.fetch_graph("kb-1") is None
+
+
+def test_fetch_graph_clamps_limit(monkeypatch):
+    """limit 收敛到契约上限，避免前端传入过大值把响应撑爆。"""
+    captured: dict = {}
+
+    def fake_post(path: str, payload: dict, timeout: float):
+        captured.update(payload)
+        return {"nodes": [], "edges": []}
+
+    monkeypatch.setattr(kb_module, "_lightrag_post", fake_post)
+
+    kb_module.fetch_graph("kb-1", 10_000)
+
+    assert captured["limit"] == kb_module.MAX_GRAPH_LIMIT

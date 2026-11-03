@@ -33,6 +33,14 @@ _ENGINE_STATUS_MAP = {
 
 _UNSAFE_NAME = re.compile(r"[/\\\x00-\x1f]")
 
+# LightRAG 在一个字段里用该分隔符连接多个来源（``GRAPH_FIELD_SEP``）。
+# 这里重复声明而不 import lightrag，保证契约层可脱离引擎依赖做单测。
+GRAPH_FIELD_SEP = "<SEP>"
+# 单次图谱返回的节点上限（与 API 契约一致）。
+MAX_GRAPH_NODES = 500
+# 节点/关系描述来自多个切块摘要拼接，回传前截断，避免单次响应过大。
+GRAPH_DESCRIPTION_LIMIT = 400
+
 
 def sanitize_filename(filename: str) -> str:
     """把上传文件名收敛成单段安全名称（去掉路径分隔符与控制字符）。"""
@@ -128,3 +136,105 @@ def map_chunks(payload: dict, kb_id: str, top_k: int) -> list[dict]:
         if len(items) >= max(1, int(top_k or 1)):
             break
     return items
+
+
+def parse_doc_ids(file_path: str, kb_id: str, separator: str = GRAPH_FIELD_SEP) -> list[str]:
+    """从 LightRAG 的 ``file_path`` 字段解析出属于该知识库的文档 ID（去重保序）。
+
+    实体/关系节点会把多个来源用 ``<SEP>`` 拼在一起，因此先拆分再逐个判定前缀，
+    避免多库共享图谱时把其它知识库的实体算进来。
+    """
+    doc_ids: list[str] = []
+    for item in str(file_path or "").split(separator):
+        item = item.strip()
+        if not item or not belongs_to_kb(item, kb_id):
+            continue
+        _, doc_id, _ = parse_file_source(item)
+        if doc_id and doc_id not in doc_ids:
+            doc_ids.append(doc_id)
+    return doc_ids
+
+
+def _graph_properties(item: dict) -> dict:
+    """取节点/边的属性字典；结构异常时返回空字典。"""
+    props = item.get("properties") if isinstance(item, dict) else None
+    return props if isinstance(props, dict) else {}
+
+
+def _graph_text(value: object, limit: int = GRAPH_DESCRIPTION_LIMIT) -> str:
+    """把属性值收敛成受长度限制的文本（实体类型可能是列表）。"""
+    if isinstance(value, list):
+        text = ",".join(str(part) for part in value if part)
+    else:
+        text = str(value or "")
+    text = text.strip()
+    return text if len(text) <= limit else text[: max(0, limit - 1)] + "…"
+
+
+def _graph_weight(value: object) -> float:
+    """边权重缺失或非法时按 1.0 处理，不臆造 0 权重。"""
+    try:
+        return round(float(value), 4)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def map_graph(payload: dict, kb_id: str, limit: int) -> dict:
+    """把 LightRAG 子图映射为平台图谱结构（按知识库过滤、按度截断）。
+
+    返回 ``{nodes, edges, truncated, engine}``：
+
+    - 实体/关系只保留来源标识以 ``{kb_id}__`` 开头的记录（单实例多库共享图谱）；
+    - 节点按过滤后的度数降序排序，截断到 ``limit``；
+    - 边只保留两端都在结果中的记录，避免前端出现悬空边。
+    """
+    limit = max(1, min(int(limit or 1), MAX_GRAPH_NODES))
+    raw_nodes = (payload or {}).get("nodes") or []
+    raw_edges = (payload or {}).get("edges") or []
+
+    kept: dict[str, dict] = {}
+    for node in raw_nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "")
+        if not node_id:
+            continue
+        props = _graph_properties(node)
+        doc_ids = parse_doc_ids(str(props.get("file_path") or ""), kb_id)
+        # 指定知识库时，无法归属的实体直接过滤（属于其它知识库的抽取结果）。
+        if kb_id and not doc_ids:
+            continue
+        kept[node_id] = {
+            "id": node_id,
+            "entity_type": _graph_text(props.get("entity_type"), 80),
+            "description": _graph_text(props.get("description")),
+            "doc_ids": doc_ids,
+        }
+
+    degree: dict[str, int] = {node_id: 0 for node_id in kept}
+    links: list[dict] = []
+    for edge in raw_edges:
+        if not isinstance(edge, dict):
+            continue
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if source not in kept or target not in kept or source == target:
+            continue
+        degree[source] += 1
+        degree[target] += 1
+        props = _graph_properties(edge)
+        links.append(
+            {
+                "source": source,
+                "target": target,
+                "description": _graph_text(props.get("description")),
+                "weight": _graph_weight(props.get("weight")),
+            }
+        )
+
+    ordered = sorted(kept.values(), key=lambda item: (-degree[item["id"]], item["id"]))
+    nodes = [{**item, "degree": degree[item["id"]]} for item in ordered[:limit]]
+    visible = {item["id"] for item in nodes}
+    edges = [link for link in links if link["source"] in visible and link["target"] in visible]
+    truncated = bool((payload or {}).get("is_truncated")) or len(ordered) > limit
+    return {"nodes": nodes, "edges": edges, "truncated": truncated, "engine": "lightrag"}

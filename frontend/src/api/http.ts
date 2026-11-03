@@ -68,6 +68,7 @@ import {
   type McpHealthCheckResponse,
   type AgentCollaborationDetail,
   type AgentCollaborationSummary,
+  type KbGraph,
 } from './types'
 import {
   MOCK_PROFILES,
@@ -1239,6 +1240,27 @@ export const api = {
         }
       }
       const { data } = await http.post(`/api/kb/${id}/query`, queryPayload)
+      return data
+    },
+    // 读取实体关系子图；后端按知识库过滤，空数组表示尚未抽出实体。
+    async getGraph(id: string, limit = 150): Promise<KbGraph> {
+      if (getDataMode() === 'mock') {
+        return {
+          kb_id: id,
+          nodes: [
+            { id: '退款', entity_type: '业务', description: '退款业务对象，覆盖申请到入账', degree: 2, doc_ids: ['d-01'] },
+            { id: '到账', entity_type: '流程', description: '退款到账时长 1-3 个工作日', degree: 2, doc_ids: ['d-01'] },
+            { id: '订单页', entity_type: '界面', description: '退款进度查询入口', degree: 1, doc_ids: ['d-02'] },
+          ],
+          edges: [
+            { source: '退款', target: '到账', description: '退款 1-3 个工作日到账', weight: 1 },
+            { source: '退款', target: '订单页', description: '退款进度可在订单页查询', weight: 0.8 },
+          ],
+          truncated: false,
+          engine: 'lightrag',
+        }
+      }
+      const { data } = await http.get(`/api/kb/${id}/graph`, { params: { limit } })
       return data
     },
     async getGoldQA(id: string): Promise<GoldQA[]> {

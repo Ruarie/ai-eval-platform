@@ -8,8 +8,9 @@ import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 from adapter.config import load_config
-from adapter.engine import _MAX_FAILED_RECORDS, EngineBusy, LightRAGEngine
+from adapter.engine import _MAX_FAILED_RECORDS, EngineBusy, EngineUnavailable, LightRAGEngine
 
 
 class FakeDocStatus:
@@ -31,13 +32,20 @@ class FakeRag:
         *,
         block: bool = False,
         delay: float = 0.0,
+        graph_nodes: list[object] | None = None,
+        graph_edges: list[object] | None = None,
+        graph_truncated: bool = False,
     ) -> None:
         self.doc_status = FakeDocStatus(records)
         self.inserted: list[str] = []
         self.deleted: list[str] = []
         self.cancelled = False
+        self.graph_calls: list[tuple[str, int, int | None]] = []
         self._block = block
         self._delay = delay
+        self._graph = SimpleNamespace(
+            nodes=graph_nodes or [], edges=graph_edges or [], is_truncated=graph_truncated
+        )
 
     async def ainsert(self, text: str, ids=None, file_paths=None, track_id=None) -> None:
         if self._block:
@@ -53,6 +61,12 @@ class FakeRag:
     async def adelete_by_doc_id(self, doc_id: str) -> SimpleNamespace:
         self.deleted.append(doc_id)
         return SimpleNamespace(status="success")
+
+    async def get_knowledge_graph(
+        self, node_label: str, max_depth: int = 3, max_nodes: int | None = None
+    ) -> SimpleNamespace:
+        self.graph_calls.append((node_label, max_depth, max_nodes))
+        return self._graph
 
 
 def _engine(**overrides) -> LightRAGEngine:
@@ -176,6 +190,45 @@ def test_delete_allows_same_kb_and_missing_record():
         result = await engine.delete_documents("kb-1", ["doc-a", "doc-missing"])
         assert result["deleted"] is True
         assert rag.deleted == ["doc-a", "doc-missing"]
+
+    asyncio.run(case())
+
+
+def test_graph_reads_wildcard_with_widened_window():
+    """图谱按全局最高度数取候选，再按库过滤，因此请求窗口要大于返回上限。"""
+
+    async def case() -> None:
+        engine = _engine()
+        rag = FakeRag(
+            graph_nodes=[
+                SimpleNamespace(
+                    id="退款",
+                    properties={
+                        "file_path": "kb-1__doc-a__a.txt",
+                        "entity_type": "业务",
+                        "description": "退款业务对象",
+                    },
+                )
+            ]
+        )
+        engine._rag = rag
+        result = await engine.graph("kb-1", 10)
+        assert result["nodes"] == [
+            {"id": "退款", "entity_type": "业务", "description": "退款业务对象", "doc_ids": ["doc-a"], "degree": 0}
+        ]
+        assert rag.graph_calls[0][0] == "*"
+        assert rag.graph_calls[0][2] >= 200
+
+    asyncio.run(case())
+
+
+def test_graph_requires_ready_engine():
+    """引擎未就绪时抛 EngineUnavailable，由接口层转 503，不返回空图冒充无实体。"""
+
+    async def case() -> None:
+        engine = _engine()
+        with pytest.raises(EngineUnavailable):
+            await engine.graph("kb-1", 10)
 
     asyncio.run(case())
 

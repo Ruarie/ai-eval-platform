@@ -6,7 +6,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.46 |
+| 文档版本 | V2.47 |
 | 本轮审查日期 | 2026-11-02（知识库接入真实 LightRAG：异步建索引状态收敛、删除顺序与降级口径；不新增路径与字段） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.55（功能唯一权威） |
@@ -20,6 +20,8 @@
 | 适用范围 | V1.0：浏览器 `web/` ↔ `api`；全域 REST + WS 接口规范 |
 
 > V2.46（2026-11-02）：知识库接入真实 LightRAG 引擎（§3.9）。**不新增平台 REST/WS 路径与字段**，仅明确既有语义：上传响应与文档列表的 `status` 由引擎异步建索引决定（`indexing | indexed | failed`），`indexing` 会在列表查询时向 LightRAG 回读并收敛；`DELETE` 文档/知识库改为「先删引擎索引、再删库内记录」，引擎已配置但删除失败返回 `UPSTREAM`；Playground 的 `similarity` 允许为 `null`（LightRAG 只给排序不给分数），前端显示占位符而不伪造 0；检索降级口径收紧为「仅不可达/服务端错误才回退本地关键词」，引擎可用但召回为空仍记 `lightrag`。删除与状态回读在服务端按批执行（删除 ≤50/批、状态 ≤200/批），对调用方仍是一次请求；`indexing`/`failed` 文档的删除不强制引擎成功，避免引擎不可用时无法清理。适配服务内部契约（`/documents/index`、`/documents/status`、`/documents/delete`、`/query`）属容器内网，不属于本契约范围，见《AI测试与评估平台-LightRAG接入技术方案.md》。
+
+> V2.47（2026-11-03）：知识库新增只读知识图谱视图（§3.9）。**新增一个 GET 路径** `GET /api/kb/{id}/graph`，其余路径与字段不变。图谱来自 LightRAG 索引阶段抽取的实体与关系，服务端按文档来源前缀 `{kb_id}__` 过滤，`limit` 1–500（默认 200）为节点上限；`truncated` 标明是否被截断；`external_chat` 库返回 `VALIDATION`，引擎不可用返回 `UPSTREAM`，空数组表示当前库尚未抽出实体，不得用示例数据填充。只读，无写接口。
 
 > V1.86（2026-09-09）：协议档页面 `POST /api/profiles/{id}/check` 的真实 ping 探活上限与通用协议调用统一为 30 秒，避免上游模型冷启动被误判为不可用；响应字段与错误码不变。
 
@@ -1431,6 +1433,30 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 ```
 
 检索服务不可达时回退本地关键词检索，RAG 报告以 `degraded` / `engine_counts` 标注来源；引擎可用但召回为空属于真实未命中，仍记 `lightrag`，不得用本地兜底掩盖引擎状态。
+
+#### `GET /api/kb/{id}/graph?limit=200`
+
+返回当前知识库的实体关系子图（LightRAG 索引阶段抽取的实体与关系），**只读**。`limit` 1–500，默认 200，为返回节点上限。
+
+```json
+{
+  "kb_id": "uuid",
+  "nodes": [
+    { "id": "退款", "entity_type": "业务", "description": "退款业务对象", "degree": 3, "doc_ids": ["uuid"] }
+  ],
+  "edges": [
+    { "source": "退款", "target": "到账", "description": "退款 1-3 个工作日到账", "weight": 1.0 }
+  ],
+  "truncated": false,
+  "engine": "lightrag"
+}
+```
+
+- **按库过滤**：单实例多库共享同一图谱，服务端按文档来源前缀 `{kb_id}__` 过滤实体与关系，前端只看到当前库的节点；
+- **只读**：不提供实体/关系的编辑、合并、删除接口；
+- `truncated=true` 表示节点数量超过 `limit`，前端须显式提示已截断；
+- `nodes` / `edges` 为空数组表示该库尚未抽出实体（未索引完成或文档过短），**不得**用示例数据填充；
+- `kind=external_chat` 的知识库返回 `VALIDATION`(400)；引擎不可用或读取失败返回 `UPSTREAM`(502)。
 
 #### `GET /api/kb/{id}/gold-qa` / `POST /api/kb/{id}/gold-qa`
 

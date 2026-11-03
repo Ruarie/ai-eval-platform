@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from adapter import (
+    MAX_GRAPH_NODES,
     EngineBusy,
     EngineConfig,
     EngineUnavailable,
@@ -80,6 +81,13 @@ class QueryRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=MAX_TOP_K)
     # 指定知识库时按文档来源前缀过滤；留空表示全部知识库（仅调试用）。
     kb_id: str = ""
+
+
+class GraphRequest(BaseModel):
+    """知识图谱请求（只读）；``limit`` 为返回节点上限。"""
+
+    kb_id: str = Field(min_length=1)
+    limit: int = Field(default=200, ge=1, le=MAX_GRAPH_NODES)
 
 
 class QueryResponse(BaseModel):
@@ -182,3 +190,16 @@ async def query(
     except EngineUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return QueryResponse(**result)
+
+
+@app.post("/graph")
+async def graph(
+    body: GraphRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict[str, Any]:
+    """读取当前知识库的实体关系子图；只读，不触发抽取或写入。"""
+    _authorize(x_api_key)
+    try:
+        return await _ENGINE.graph(body.kb_id, body.limit)
+    except EngineUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
