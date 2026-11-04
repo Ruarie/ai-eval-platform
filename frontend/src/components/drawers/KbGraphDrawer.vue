@@ -62,6 +62,8 @@
               :class="{ dimmed: isDimmed(item.node.id) }"
               @click="onNodeClick(item.node.id)"
             >
+              <!-- 透明热区：节点圆较小，点到标签与圆之间的缝隙也该选中。 -->
+              <circle :cx="item.x" :cy="item.y" :r="item.radius + 9" fill="transparent" />
               <circle
                 :cx="item.x"
                 :cy="item.y"
@@ -328,14 +330,19 @@ function onPointerDown(event: PointerEvent) {
     vx: viewBox.value.x,
     vy: viewBox.value.y,
   }
-  ;(event.currentTarget as SVGSVGElement).setPointerCapture?.(event.pointerId)
+  // 不在这里 capture：pointer capture 会把后续事件重定向到 svg，
+  // 节点上的 click 就收不到了（表现为「点节点没反应」）。拖动超过阈值再 capture。
 }
 
 function onPointerMove(event: PointerEvent) {
   if (!dragOrigin) return
   const rect = (event.currentTarget as SVGSVGElement).getBoundingClientRect()
-  if (Math.abs(event.clientX - dragOrigin.x) + Math.abs(event.clientY - dragOrigin.y) > 3) {
+  if (!moved) {
+    if (Math.abs(event.clientX - dragOrigin.x) + Math.abs(event.clientY - dragOrigin.y) <= 3) {
+      return
+    }
     moved = true
+    ;(event.currentTarget as SVGSVGElement).setPointerCapture?.(event.pointerId)
   }
   viewBox.value = clampViewBox({
     ...viewBox.value,
