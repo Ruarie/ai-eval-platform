@@ -45,5 +45,21 @@ fi
 printf '%s\t%s\t%s\n' "$STAMP" "$SUMMARY" "$STATUS" >>"$HISTORY"
 echo "$STAMP $SUMMARY exit=$STATUS"
 
+# 环比告警：与上一次记录相比通过率下降超过 10pp 时单独记一条，便于翻日志时
+# 一眼看到回归，而不是每天自己去比 history.tsv。
+ratio_of() {
+  echo "$1" | sed -E 's/.*SUMMARY ([0-9]+)\/([0-9]+).*/\1 \2/' | awk '{ if ($2 > 0) printf "%d", $1 * 100 / $2; else print 0 }'
+}
+if [ "$(wc -l <"$HISTORY")" -ge 2 ]; then
+  PREV_LINE="$(tail -2 "$HISTORY" | head -1)"
+  CUR_LINE="$(tail -1 "$HISTORY")"
+  PREV_RATIO="$(ratio_of "$PREV_LINE")"
+  CUR_RATIO="$(ratio_of "$CUR_LINE")"
+  DROP=$((PREV_RATIO - CUR_RATIO))
+  if [ "$DROP" -gt 10 ]; then
+    echo "$STAMP ALERT 通过率下降 ${DROP}pp（${PREV_RATIO}% -> ${CUR_RATIO}%）" | tee -a "$OUT_DIR/alerts.log"
+  fi
+fi
+
 echo "历史留档：$HISTORY"
 exit "$STATUS"

@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.18 ｜ 审查日期：2026-11-04（只读工具与巡检收尾Ⅱ：① `task.list` 复用 `task.status` 的口径返回 `case_set_id` 与 `report_id`，模型可直接给 `/cases?set_id=...`，少一轮工具调用；实测 10 条任务里 testcase 成功项的用例集 ID 正确（`b78a6f40` 等）；② `agent-quality-check.sh` 对比 `history.tsv` 末两行，通过率下降 >10pp 时写 `alerts.log`；题库复跑 10/10。）
+
 > 版本：V2.17 ｜ 审查日期：2026-11-04（只读工具与质量巡检收尾：① `kb.list` / `task.list` 加入 `permission_tier._ALWAYS_AUTO`——纯 SELECT 查询不再逐次弹确认卡（此前模型调用后卡在「等待交互参数」，题目全部超时）；② 工具名由 `platform.kb.list` 收敛为 `kb.list`/`task.list`（wire 名 `platform_kb_list`），避免双前缀；③ 质量题库完成判定改为「消息区出现本轮问题后连续 4s 文本不变，且不在生成/等待确认状态」，修复多步工具调用间隙被误判结束、抓到空回答；④ 断言随能力更新：知识库文档数不再要求「不编造数字」（有工具后应给真实值），任务 ID 题改为必须体现「去查」。实测题库 10/10（阈值 80%），巡检脚本 exit=0 并写入 `data/agent-quality/history.tsv`，已安装 crontab（每天 09:00）。）
 
 > 版本：V2.16 ｜ 审查日期：2026-11-04（Agent 可查性与可审性：① 新增 `platform.kb.list` / `platform.task.list` 两个只读工具（仅 SELECT、脱敏摘要：名称/类型/文档数/任务状态），通用助手回答「几个知识库」「有哪些任务」不再退化成 `bash`+`glob` 探索并卡在确认卡；注册表集合断言与工具总数同步更新（18→20）；② 工具确认卡新增「意图」行：优先展示模型给的工具 `description`，其次命令摘要，最后参数名列表，避免只展示原始 JSON；③ 新增 `deploy/agent-quality-check.sh`，每天跑题库并把 `SUMMARY` 追加到 `data/agent-quality/history.tsv`，低于阈值以非 0 退出；④ 提示词改为优先用只读工具查平台数据。实测三条「查数据」题目从超时/阻塞变为 3/3 通过（13.7s、4.7s、22.9s）。）

@@ -86,6 +86,10 @@ def list_tasks(arguments: Mapping[str, object], context: object | None = None) -
                 "kind": task.kind,
                 "status": task.status,
                 "session_id": task.session_id,
+                # 与 task.status 同源：用例任务完成后可从 result 里取到用例集 ID，
+                # 模型据此直接给出 /cases?set_id=... 链接，无需再调一次 task.status。
+                "case_set_id": (task.result or {}).get("case_set_id") if task.kind == "testcase" else None,
+                "report_id": task.report_id,
                 "created_at": task.created_at.isoformat() if task.created_at else None,
             }
             for task in rows
