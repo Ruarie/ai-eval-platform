@@ -26,6 +26,8 @@ from .registry_handlers import (  # noqa: F401
     _glob_handler,
     _grep_handler,
     _media_mcp_unavailable_handler,
+    _platform_kb_list_handler,
+    _platform_task_list_handler,
     _read_handler,
     _read_image_handler,
     _session_task_create_handler,
@@ -1235,6 +1237,91 @@ def _register_platform_task_tools(registry: ToolRegistry) -> None:
             display_name="查询任务状态",
             risk_level="read",
             contextual=True,
+            concurrency_class="read_only",
+        )
+    )
+    registry.register(
+        ToolDef(
+            name="platform.kb.list",
+            description=(
+                "列出知识库及每个库的文档数（与 /kb 页面同源）。"
+                "适用：用户问「我有几个知识库」「某库有多少篇文档」。"
+                "不适用：查看文档正文或切块（请在 /kb 页面查看）；不返回正文与凭据。"
+            ),
+            parameters_schema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "description": "最多返回多少个知识库，默认 20",
+                    }
+                },
+            },
+            permission="platform.kb.read",
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "items": {"type": "array", "items": {"type": "object"}},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "note": {"type": "string"},
+                },
+                "required": ["items", "total", "limit"],
+            },
+
+            timeout_s=10.0,
+            handler=_platform_kb_list_handler,
+            transport="native",
+            display_name="列出知识库",
+            risk_level="read",
+            concurrency_class="read_only",
+        )
+    )
+    registry.register(
+        ToolDef(
+            name="platform.task.list",
+            description=(
+                "列出最近的平台任务与状态（可按 kind 过滤）。"
+                "适用：用户问「我有哪些任务」「最近的用例生成任务」。"
+                "不适用：任务细节或报告正文（用 task.status，或在 /tasks、/reports 查看）。"
+            ),
+            parameters_schema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "description": "最多返回多少条，默认 10",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["testcase", "benchmark", "rag", "stress"],
+                        "description": "可选：按任务类型过滤",
+                    },
+                },
+            },
+            permission="platform.task.read",
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "items": {"type": "array", "items": {"type": "object"}},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "note": {"type": "string"},
+                },
+                "required": ["items", "total", "limit"],
+            },
+
+            timeout_s=10.0,
+            handler=_platform_task_list_handler,
+            transport="native",
+            display_name="列出任务",
+            risk_level="read",
             concurrency_class="read_only",
         )
     )

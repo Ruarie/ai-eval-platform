@@ -3,6 +3,8 @@
     <p v-if="interaction.restricted">交互内容受权限限制。</p>
     <template v-else>
       <strong>{{ titles[interaction.kind] }}</strong>
+      <!-- 意图说明：模型为什么需要这一步。只有参数 JSON 时用户无法判断要不要批准。 -->
+      <p v-if="interaction.kind === 'approval' && intentText" class="interaction-intent">{{ intentText }}</p>
       <p v-if="interaction.kind === 'approval'" class="interaction-meta">
         <span v-if="interaction.permission_tier">权限档位：{{ tierLabels[interaction.permission_tier] || interaction.permission_tier }}</span>
         <span v-if="interaction.risk_level"> · 风险等级：{{ interaction.risk_level }}</span>
@@ -43,6 +45,23 @@ onBeforeUnmount(() => clearInterval(timer))
 const values = reactive<Record<string, string>>({}), selected = reactive<Record<string, string[]>>({})
 const titles: Record<string, string> = { approval: '工具权限确认', question: '补充信息', task_confirmation: '确认任务规格' }
 const tierLabels: Record<string, string> = { tier1: '档1 请求批准', tier2: '档2 帮我批准', tier3: '档3 完全访问' }
+
+// 确认卡先回答「要做什么」：优先用模型给的工具 description，其次命令摘要，
+// 都没有时退回参数名列表，避免只丢一坨 JSON 让用户自己猜。
+const intentText = computed(() => {
+  const display = props.interaction.display as Record<string, unknown> | null | undefined
+  if (!display || typeof display !== 'object') return ''
+  const tool = typeof display.tool === 'string' ? display.tool.trim() : ''
+  const desc = typeof display.description === 'string' ? display.description.trim() : ''
+  const prefix = tool ? `意图：${tool} · ` : '意图：'
+  if (desc) return `${prefix}${desc}`
+  const command = typeof display.command === 'string' ? display.command.trim() : ''
+  if (command) {
+    return `${prefix}${command.length > 80 ? `${command.slice(0, 79)}…` : command}`
+  }
+  const keys = Object.keys(display).filter(key => key !== 'tool')
+  return keys.length ? `${prefix}使用参数 ${keys.join('、')}` : ''
+})
 const expired = computed(() => props.interaction.expires_at && props.interaction.expires_at * 1000 <= now.value)
 const disabled = computed(() => !props.canControl || !props.online || expired.value || props.interaction.submitting || props.interaction.resolved || !props.interaction.nonce)
 const testcaseSpec = computed<TaskSpec | null>(() => {

@@ -348,3 +348,25 @@ def _task_cancel_handler(
     from .task_tools import cancel_task_safe
 
     return cancel_task_safe(arguments, context)
+
+
+def _platform_kb_list_handler(
+    arguments: Mapping[str, object],
+    sandbox_dir: str | None = None,
+    context: object | None = None,
+) -> object:
+    """platform.kb.list handler：只读列出知识库与文档数（不读正文）。"""
+    from .platform_read_tools import list_knowledge_bases
+
+    return list_knowledge_bases(arguments, context)
+
+
+def _platform_task_list_handler(
+    arguments: Mapping[str, object],
+    sandbox_dir: str | None = None,
+    context: object | None = None,
+) -> object:
+    """platform.task.list handler：只读列出最近任务状态（不含报告正文）。"""
+    from .platform_read_tools import list_tasks
+
+    return list_tasks(arguments, context)
