@@ -170,6 +170,8 @@ class LightRAGEngine:
             max_parallel_insert=self.config.max_parallel_insert,
             # LightRAG 内部默认 240s，会先于 openai client 的 timeout 触发失败。
             default_llm_timeout=int(self.config.llm_timeout_s),
+            # 输出语言：默认 English 会把中文实体翻译成英文，图谱因此中英混杂。
+            addon_params={"language": self.config.output_language},
         )
         await rag.initialize_storages()
         self._rag = rag

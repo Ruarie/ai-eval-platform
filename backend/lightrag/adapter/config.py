@@ -54,6 +54,8 @@ class EngineConfig:
     llm_api_key: str
     llm_model: str
     llm_timeout_s: float
+    # 抽取与摘要的输出语言：LightRAG 默认 English，会把中文实体翻译成英文。
+    output_language: str
     embedding_base_url: str
     embedding_api_key: str
     embedding_model: str
@@ -115,6 +117,7 @@ def load_config() -> EngineConfig:
         # 单次抽取（实体+关系 JSON）在真实网关上可能跑到 300s 以上；LightRAG 的
         # 内部 default_llm_timeout 默认 240s，会先于本值触发超时，所以必须同时传。
         llm_timeout_s=_env_float("LIGHTRAG_LLM_TIMEOUT_SECONDS", 600.0),
+        output_language=_env_str("LIGHTRAG_OUTPUT_LANGUAGE", "Chinese"),
         embedding_base_url=embedding_base_url.rstrip("/"),
         embedding_api_key=embedding_api_key,
         embedding_model=_env_str("LIGHTRAG_EMBEDDING_MODEL", "BAAI/bge-m3"),
