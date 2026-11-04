@@ -687,7 +687,9 @@ def _register_bash_tool(registry: ToolRegistry) -> None:
     registry.register(
         ToolDef(
             name="bash",
-            description="在受控沙箱容器内执行 shell 命令（工作区可写、受资源限制；网络按权限档位）",
+            description=("在受控沙箱容器内执行 shell 命令（工作区可写、受资源限制；网络按权限档位）。"
+                "仅用于用户明确要求的命令执行；不要用它探索工作区目录或查询平台数据，"
+                "无法从工具拿到的信息直接说明情况。"),
             parameters_schema={
                 "type": "object",
                 "additionalProperties": False,
