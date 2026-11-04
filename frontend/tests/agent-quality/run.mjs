@@ -54,19 +54,34 @@ async function ask(page, question) {
   await composer.fill(question)
   await page.locator('.loop-send').click()
 
-  // 完成信号：先等流式占位「正在响应」出现，再等它消失。
-  // 运行信息面板里的 token 速度会保留上一轮结果，不能用它判断本轮结束。
-  await page
-    .waitForFunction(() => document.body.innerText.includes('正在响应'), { timeout: 15000 })
-    .catch(() => {})
-  await page.waitForFunction(
-    () => {
-      const text = document.body.innerText
-      return !text.includes('正在响应') && !text.includes('等待交互参数')
-    },
-    { timeout: ANSWER_TIMEOUT_MS },
-  )
-  await page.waitForTimeout(1500)
+  // 完成判定：消息区出现本轮问题后，连续两轮（4s）文本不再变化、且不处于
+  // 生成/等待确认状态才算结束。多步工具调用之间会有短暂空档，只看瞬时状态
+  // 会把「思考中」当成「已结束」，抓到空回答。
+  const readLog = () =>
+    page.evaluate(() => {
+      const node = document.querySelector('[role="log"]')
+      return node ? node.innerText : document.body.innerText
+    })
+  let lastText = ''
+  let stable = 0
+  const deadline = Date.now() + ANSWER_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(2000)
+    const current = await readLog()
+    const busy = current.includes('正在响应') || current.includes('等待交互参数')
+    if (busy || !current.includes(question)) {
+      stable = 0
+      lastText = current
+      continue
+    }
+    if (current === lastText) {
+      stable += 1
+      if (stable >= 2) break
+    } else {
+      stable = 0
+      lastText = current
+    }
+  }
 
   const log = await page.evaluate(() => {
     const node = document.querySelector('[role="log"]')

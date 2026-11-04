@@ -86,7 +86,7 @@ LOOP_EXPERT_BOUNDARY = """【专家角色边界】
 - 专家不得扩大工具范围或权限，不得要求用户模拟协议回执，不得改变用例生成任务的确认与入队链路。"""
 ALLOWED_TOOLS = ("read", "read_image", "glob", "grep", "write", "edit", "web_search",
                  "web_fetch", "bash", "ask_user_question",
-                 "platform.kb.list", "platform.task.list",
+                 "kb.list", "task.list",
                  "task", "task.create", "task.status",
                  "task.cancel", "agent.list", "agent.spawn", "agent.status", "agent.wait",
                  "agent.result", "agent.cancel", "history.read")

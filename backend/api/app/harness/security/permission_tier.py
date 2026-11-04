@@ -25,6 +25,8 @@ _ALWAYS_AUTO = frozenset(
         "read", "read_image", "glob", "grep", "history.read",
         "ask_user_question", "task.create", "task.status", "task.cancel", "task",
         "agent.list", "agent.spawn", "agent.status", "agent.wait", "agent.result", "agent.cancel",
+        # 平台只读查询：纯 SELECT、无副作用，不需要每次弹确认卡。
+        "kb.list", "task.list",
     }
 )
 

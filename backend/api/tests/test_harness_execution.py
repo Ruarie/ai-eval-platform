@@ -108,8 +108,8 @@ def test_default_registry_includes_bash() -> None:
         "task.create",
         "task.status",
         "task.cancel",
-        "platform.kb.list",
-        "platform.task.list",
+        "kb.list",
+        "task.list",
     }
 
 

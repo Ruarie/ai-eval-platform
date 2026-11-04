@@ -1242,7 +1242,7 @@ def _register_platform_task_tools(registry: ToolRegistry) -> None:
     )
     registry.register(
         ToolDef(
-            name="platform.kb.list",
+            name="kb.list",
             description=(
                 "列出知识库及每个库的文档数（与 /kb 页面同源）。"
                 "适用：用户问「我有几个知识库」「某库有多少篇文档」。"
@@ -1261,6 +1261,7 @@ def _register_platform_task_tools(registry: ToolRegistry) -> None:
                 },
             },
             permission="platform.kb.read",
+            permission_policy=ToolPermissionPolicy(workspace="read"),
             output_schema={
                 "type": "object",
                 "properties": {
@@ -1282,7 +1283,7 @@ def _register_platform_task_tools(registry: ToolRegistry) -> None:
     )
     registry.register(
         ToolDef(
-            name="platform.task.list",
+            name="task.list",
             description=(
                 "列出最近的平台任务与状态（可按 kind 过滤）。"
                 "适用：用户问「我有哪些任务」「最近的用例生成任务」。"
@@ -1306,6 +1307,7 @@ def _register_platform_task_tools(registry: ToolRegistry) -> None:
                 },
             },
             permission="platform.task.read",
+            permission_policy=ToolPermissionPolicy(workspace="read"),
             output_schema={
                 "type": "object",
                 "properties": {

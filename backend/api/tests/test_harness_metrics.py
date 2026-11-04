@@ -381,4 +381,4 @@ def test_build_default_registry_includes_native_task_plan_and_mcp_task_bridge() 
     assert len(registry.names()) == 20
     assert {"TaskCreate", "TaskGet", "TaskUpdate", "TaskList", "ask_user_question"} <= set(registry.names())
     # 平台只读查询工具：让模型查知识库/任务时不必用 bash 探索工作区。
-    assert {"platform.kb.list", "platform.task.list"} <= set(registry.names())
+    assert {"kb.list", "task.list"} <= set(registry.names())
