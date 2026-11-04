@@ -146,18 +146,23 @@ const error = ref('')
 const selectedId = ref('')
 
 async function load() {
-  if (!props.kbId) return
+  const kbId = props.kbId
+  if (!kbId) return
   loading.value = true
   error.value = ''
   selectedId.value = ''
   try {
     // 默认取 100 个实体：更多节点会让环形布局过密，图例与标签失去可读性。
-    graph.value = await api.kb.getGraph(props.kbId, 100)
+    const data = await api.kb.getGraph(kbId, 100)
+    // 请求期间切换了知识库：丢弃旧响应，避免把上一个库的图写到当前库上。
+    if (kbId !== props.kbId) return
+    graph.value = data
   } catch (err) {
+    if (kbId !== props.kbId) return
     graph.value = null
     error.value = err instanceof Error ? err.message : '图谱读取失败，请稍后重试'
   } finally {
-    loading.value = false
+    if (kbId === props.kbId) loading.value = false
   }
 }
 
@@ -289,6 +294,16 @@ function resetView() {
   viewBox.value = { x: 0, y: 0, w: CANVAS_WIDTH, h: CANVAS_HEIGHT }
 }
 
+/** 限制平移范围：允许看到画布外一圈，但不能把内容整个拖出视野。 */
+function clampViewBox(next: { x: number; y: number; w: number; h: number }) {
+  return {
+    w: next.w,
+    h: next.h,
+    x: Math.min(CANVAS_WIDTH - next.w / 2, Math.max(-next.w / 2, next.x)),
+    y: Math.min(CANVAS_HEIGHT - next.h / 2, Math.max(-next.h / 2, next.y)),
+  }
+}
+
 function onWheel(event: WheelEvent) {
   const rect = (event.currentTarget as SVGSVGElement).getBoundingClientRect()
   const factor = event.deltaY > 0 ? 1.12 : 0.89
@@ -296,12 +311,12 @@ function onWheel(event: WheelEvent) {
   const nextH = (nextW * CANVAS_HEIGHT) / CANVAS_WIDTH
   const ratioX = (event.clientX - rect.left) / rect.width
   const ratioY = (event.clientY - rect.top) / rect.height
-  viewBox.value = {
+  viewBox.value = clampViewBox({
     x: viewBox.value.x + (viewBox.value.w - nextW) * ratioX,
     y: viewBox.value.y + (viewBox.value.h - nextH) * ratioY,
     w: nextW,
     h: nextH,
-  }
+  })
 }
 
 function onPointerDown(event: PointerEvent) {
@@ -322,11 +337,11 @@ function onPointerMove(event: PointerEvent) {
   if (Math.abs(event.clientX - dragOrigin.x) + Math.abs(event.clientY - dragOrigin.y) > 3) {
     moved = true
   }
-  viewBox.value = {
+  viewBox.value = clampViewBox({
     ...viewBox.value,
     x: dragOrigin.vx - ((event.clientX - dragOrigin.x) * viewBox.value.w) / rect.width,
     y: dragOrigin.vy - ((event.clientY - dragOrigin.y) * viewBox.value.h) / rect.height,
-  }
+  })
 }
 
 function onPointerUp() {

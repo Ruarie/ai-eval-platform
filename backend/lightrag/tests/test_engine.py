@@ -246,6 +246,39 @@ def test_missing_record_while_queued_stays_indexing():
     asyncio.run(case())
 
 
+def test_duplicate_index_request_is_idempotent():
+    """同一 doc_id 重复受理直接返回 indexing，不再排第二个 ainsert。"""
+
+    async def case() -> None:
+        engine = _engine()
+        rag = FakeRag(delay=0.2)
+        engine._rag = rag
+        first = await engine.index_document("kb-1", "doc-a", "a.txt", "正文")
+        second = await engine.index_document("kb-1", "doc-a", "a.txt", "正文")
+        assert first == second == {"doc_id": "doc-a", "status": "indexing"}
+        await asyncio.sleep(0.4)
+        assert rag.inserted == ["doc-a"]
+
+    asyncio.run(case())
+
+
+def test_query_does_not_widen_when_hits_are_enough():
+    """召回条数达到一半即视为正常，不触发整轮重查（否则每次检索成本翻倍）。"""
+
+    async def case() -> None:
+        engine = _engine()
+        rag = FakeRag()
+        rag.query_payloads = [
+            {"data": {"chunks": [{"chunk_id": "c1", "file_path": "kb-1__doc-a__a.txt", "content": "内容"}]}}
+        ]
+        engine._rag = rag
+        result = await engine.query("q", "naive", 3, "kb-1")
+        assert len(rag.query_calls) == 1
+        assert len(result["contexts"]) == 1
+
+    asyncio.run(case())
+
+
 def test_query_attaches_similarity():
     """检索结果用同一 embedding 模型补算余弦分数，前端不再只显示占位符。"""
 

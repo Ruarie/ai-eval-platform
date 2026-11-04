@@ -255,10 +255,15 @@ class LightRAGEngine:
         rag = self._require_rag()
         if not (text or "").strip():
             raise EngineUnavailable("文档正文为空，无法建索引")
+        # 同一 doc_id 重复受理直接返回 indexing：已经在队列里再建任务会让两个
+        # ainsert 串行写同一份文档，后一个还会被内容哈希判重而报错。
+        if doc_id in self._queued:
+            logger.info("文档已在索引队列中，忽略重复受理 doc_id=%s", doc_id)
+            return {"doc_id": doc_id, "status": "indexing"}
         # 排队文档的正文驻留内存，必须设上限；超限让平台落 failed 后由用户重试，
         # 而不是把容器推到 OOM。
         limit = max(1, self.config.max_queue_documents)
-        if doc_id not in self._queued and len(self._queued) >= limit:
+        if len(self._queued) >= limit:
             raise EngineBusy(f"索引队列已满（{limit}），请稍后重试")
 
         file_source = build_file_source(kb_id, doc_id, filename)
@@ -355,6 +360,8 @@ class LightRAGEngine:
                 continue
             record = records.get(doc_id) if isinstance(records, dict) else None
             if record is None:
+                # 引擎没有记录（内容重复被合并 / 已删除）：清掉观察窗口，避免残留。
+                self._stale_since.pop(doc_id, None)
                 result[doc_id] = STATUS_INDEXING if doc_id in self._queued else STATUS_FAILED
                 continue
             engine_status = getattr(record, "status", None)
@@ -395,9 +402,11 @@ class LightRAGEngine:
             chunk_top_k=window,
         )
         contexts = await self._retrieve(rag, query, param, kb_id, top_k, mode)
-        # 过滤后不足 K：多库共享同一向量库/图谱时，目标库的切块容易被其它库挤出
-        # 候选窗口，扩大窗口重取一次（引擎侧 LLM 关键词结果有缓存，代价可控）。
-        if kb_id and len(contexts) < max(1, int(top_k or 1)) and window < 200:
+        # 过滤后明显不足（低于一半）：多库共享同一向量库/图谱时，目标库的切块
+        # 容易被其它库挤出候选窗口。只在召回明显偏少时扩窗，否则「少 1 条」也会
+        # 触发一次完整重查（关键词抽取 + 向量检索），检索成本翻倍。
+        needed = max(1, int(top_k or 1) // 2)
+        if kb_id and len(contexts) < needed and window < 200:
             param.chunk_top_k = min(max(window * 3, 60), 200)
             wider = await self._retrieve(rag, query, param, kb_id, top_k, mode)
             # 扩窗结果更少时保留首次结果：重取不应让已有召回倒退。

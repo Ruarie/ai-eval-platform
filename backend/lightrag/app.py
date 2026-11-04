@@ -92,6 +92,14 @@ class QueryRequest(BaseModel):
     # 指定知识库时按文档来源前缀过滤；留空表示全部知识库（仅调试用）。
     kb_id: str = ""
 
+    @field_validator("query")
+    @classmethod
+    def _reject_blank(cls, value: str) -> str:
+        """纯空白检索词属于请求错误：引擎每次检索会先做一轮关键词抽取。"""
+        if not value.strip():
+            raise ValueError("检索词不能为空")
+        return value
+
 
 class GraphRequest(BaseModel):
     """知识图谱请求（只读）；``limit`` 为返回节点上限。"""
