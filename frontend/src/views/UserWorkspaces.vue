@@ -20,8 +20,18 @@
           </span>
         </div>
 
-        <!-- 存储容量水位指示 -->
-        <div v-if="currentWorkspace?.folder" class="storage-meter">
+        <!-- 远程工作区：显示连接目标，容量与本地目录无关 -->
+        <div v-if="isRemoteWorkspace && currentWorkspace" class="storage-meter">
+          <div class="meter-info">
+            <span class="meter-title">远程目录:</span>
+            <span class="mono meter-value">
+              {{ currentWorkspace.ssh_user }}@{{ currentWorkspace.ssh_host }}:{{ currentWorkspace.remote_root }}
+            </span>
+            <span class="meter-count">（SFTP 读写 · 白名单主机）</span>
+          </div>
+        </div>
+        <!-- 存储容量水位指示（仅本地工作区） -->
+        <div v-else-if="currentWorkspace?.folder" class="storage-meter">
           <div class="meter-info">
             <span class="meter-title">容量用量:</span>
             <span class="mono meter-value">{{ formatBytes(currentWorkspace.folder.total_bytes) }}<template v-if="currentWorkspace.quota_bytes != null"> / {{ currentWorkspace.quota_bytes > 0 ? formatBytes(currentWorkspace.quota_bytes) : '不限' }}</template></span>
@@ -95,6 +105,7 @@
               </svg>
             </button>
             <button
+              v-if="!isRemoteWorkspace"
               class="icon-btn"
               title="上传文件 (支持音视频/图片/文档，可拖拽放入)"
               :disabled="!currentWorkspace || currentWorkspace.deleted || uploading"
@@ -429,6 +440,39 @@
             @keyup.enter="submitCreateWorkspace"
           />
         </div>
+        <div class="form-group">
+          <label>工作区类型</label>
+          <select v-model="newWsKind" class="input modal-input">
+            <option value="local">本地目录（平台沙箱）</option>
+            <option value="ssh">远程 SSH 目录</option>
+          </select>
+        </div>
+        <template v-if="newWsKind === 'ssh'">
+          <p class="modal-subtitle" style="margin: 4px 0 10px">
+            远程工作区通过 SFTP 读写、可执行单条命令；私钥放在服务器 workdir，
+            平台只按文件名引用。主机必须在 WORKSPACE_SSH_ALLOWED_HOSTS 白名单内。
+          </p>
+          <div class="form-group">
+            <label>主机</label>
+            <input v-model="newWsHost" class="input modal-input" placeholder="例如：build-01 或 10.0.0.8" />
+          </div>
+          <div class="form-group">
+            <label>端口</label>
+            <input v-model.number="newWsPort" type="number" class="input modal-input" placeholder="22" />
+          </div>
+          <div class="form-group">
+            <label>登录用户</label>
+            <input v-model="newWsUser" class="input modal-input" placeholder="例如：deploy" />
+          </div>
+          <div class="form-group">
+            <label>私钥文件名</label>
+            <input v-model="newWsKeyName" class="input modal-input" placeholder="例如：id_ed25519_build" />
+          </div>
+          <div class="form-group">
+            <label>远程根目录</label>
+            <input v-model="newWsRoot" class="input modal-input" placeholder="/srv/workspace（可填 / 但权限更大）" />
+          </div>
+        </template>
         <div class="modal-actions">
           <button class="btn" :disabled="busy" @click="showCreateWsModal = false">取消</button>
           <button class="btn btn-primary" :disabled="busy || !newWsName.trim()" @click="submitCreateWorkspace">
@@ -545,6 +589,13 @@ const isDraggingOver = ref(false)
 // 工作区弹窗
 const showCreateWsModal = ref(false)
 const newWsName = ref('')
+// 远程 SSH 工作区：私钥只按文件名引用，真实私钥在服务器 WORKSPACE_SSH_KEY_DIR。
+const newWsKind = ref<'local' | 'ssh'>('local')
+const newWsHost = ref('')
+const newWsPort = ref(22)
+const newWsUser = ref('')
+const newWsKeyName = ref('')
+const newWsRoot = ref('/srv/workspace')
 const showRenameWsModal = ref(false)
 const renameWsValue = ref('')
 const wsToRename = ref<UserWorkspace | null>(null)
@@ -583,6 +634,9 @@ let treeRequestId = 0
 const currentWorkspace = computed(() => {
   return items.value.find((w) => w.id === selectedWorkspaceId.value) || items.value[0] || null
 })
+
+/** 远程工作区：命令走 SFTP/SSH，本地专属操作（上传/新建）不展示。 */
+const isRemoteWorkspace = computed(() => currentWorkspace.value?.kind === 'ssh')
 
 const storagePercent = computed(() => {
   const bytes = currentWorkspace.value?.folder?.total_bytes ?? 0
@@ -1102,11 +1156,35 @@ function openCreateModal(): void {
 async function submitCreateWorkspace(): Promise<void> {
   const name = newWsName.value.trim()
   if (!name) return
+  const options =
+    newWsKind.value === 'ssh'
+      ? {
+          kind: 'ssh' as const,
+          ssh_host: newWsHost.value.trim(),
+          ssh_port: newWsPort.value || 22,
+          ssh_user: newWsUser.value.trim(),
+          ssh_key_name: newWsKeyName.value.trim(),
+          remote_root: newWsRoot.value.trim() || '/',
+        }
+      : { kind: 'local' as const }
+  if (
+    options.kind === 'ssh' &&
+    (!options.ssh_host || !options.ssh_user || !options.ssh_key_name)
+  ) {
+    message.warning('远程工作区需要填写主机、登录用户与私钥文件名')
+    return
+  }
   busy.value = true
   try {
-    const created = await api.workspaces.create(name)
+    const created = await api.workspaces.create(name, options)
     message.success('工作区已创建')
     showCreateWsModal.value = false
+    newWsKind.value = 'local'
+    newWsHost.value = ''
+    newWsPort.value = 22
+    newWsUser.value = ''
+    newWsKeyName.value = ''
+    newWsRoot.value = '/srv/workspace'
     await loadWorkspaces(created.id)
   } catch (e) {
     message.error(e instanceof Error ? e.message : '创建工作区失败')

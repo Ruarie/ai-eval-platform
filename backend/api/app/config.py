@@ -92,6 +92,15 @@ class Settings(BaseSettings):
     # 两者 ≤0 表示关闭。熔断判定优先于每目录配额（全局末防线，M-R3-4）。
     workspace_quota_bytes: int = 1024 * 1024 * 1024
     sandbox_volume_watermark_bytes: int = 512 * 1024 * 1024
+    # ─── 远程（SSH）工作区 ──────────────────────────────────────────
+    # 私钥目录：宿主机的 secrets 只读挂载点，平台只按文件名引用，绝不落库。
+    workspace_ssh_key_dir: str = "/run/secrets/workspace-ssh"
+    # 主机白名单：逗号分隔的小写主机名/IP；为空时远程工作区整体停用（fail-closed），
+    # 避免平台被当成任意主机跳板。
+    workspace_ssh_allowed_hosts: str = ""
+    # 连接与命令超时：连接失败要快速失败，命令超时防止远程进程挂死。
+    workspace_ssh_connect_timeout_s: int = 10
+    workspace_ssh_command_timeout_s: int = 60
     # P3：检查点引擎。默认 memory（每回合独立 thread_id）；postgres 需单独评审
     # 多副本粘性路由后再开，禁止把 Observation 全文写入检查点。
     agent_checkpointer: str = "memory"

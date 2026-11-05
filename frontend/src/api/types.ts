@@ -1278,6 +1278,13 @@ export interface UserWorkspace {
   deleted: boolean
   /** 服务端实际字节配额；非正值表示不限，缺省表示旧后端尚未提供。 */
   quota_bytes?: number
+  /** local：平台目录；ssh：远程主机目录（SFTP 读写 + 单条命令执行）。 */
+  kind?: 'local' | 'ssh'
+  ssh_host?: string | null
+  ssh_port?: number | null
+  ssh_user?: string | null
+  ssh_key_name?: string | null
+  remote_root?: string | null
   folder: WorkspaceFolder | null
 }
 

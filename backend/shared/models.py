@@ -108,6 +108,7 @@ class Workspace(Base):
 
     __tablename__ = "workspaces"
     __table_args__ = (
+        CheckConstraint("kind IN ('local', 'ssh')", name="ck_workspaces_kind"),
         Index(
             "uq_workspaces_owner_name_active",
             "owner_id",
@@ -125,6 +126,16 @@ class Workspace(Base):
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+    # ─── 远程（SSH）工作区 ──────────────────────────────────────────
+    # local：沿用 data/workspaces/<id> 本地目录；ssh：通过 SFTP/SSH 访问远程主机目录。
+    kind = Column(String(16), nullable=False, default="local", server_default="local")
+    ssh_host = Column(String(200), nullable=True)
+    ssh_port = Column(Integer, nullable=True)
+    ssh_user = Column(String(100), nullable=True)
+    # 私钥文件名（相对 WORKSPACE_SSH_KEY_DIR），平台不保存私钥内容本身。
+    ssh_key_name = Column(String(200), nullable=True)
+    # 远程根目录：允许绝对路径，但文件操作仍拒绝 .. 穿越与私钥目录。
+    remote_root = Column(String(500), nullable=True)
 
 
 class Session(Base):

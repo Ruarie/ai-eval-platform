@@ -6,7 +6,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.56 |
+| 文档版本 | V1.57 |
 | 本轮审查日期 | 2026-11-03（知识库只读知识图谱视图，F-RAG-07 交付） |
 | 文档状态 | V1.31 已实现三类准备专家与受控草稿；V1.30 的完整计划/报告连接仍待实现，后台恢复与专家通讯仍待 P2/P3 |
 | 撰写日期 | 2026-08-17 |
@@ -1249,3 +1249,22 @@ Excel 同一批次内的重复用例编号按最后一条更新，不重复创�
 - `backend/shared/kb.py`、`backend/api/app/routers/kb.py`、`schemas.py`：新增 `GET /api/kb/{id}/graph`。
 - `frontend/src/components/drawers/KbGraphDrawer.vue`、`views/Kb.vue`、`api/http.ts`、`api/types.ts`、`layouts/MainLayout.vue`：图谱抽屉、力导向绘制与知识库菜单入口。
 - 对应适配层与平台侧契约测试：覆盖按库过滤、截断、引擎不可用与空态。
+
+## V1.57 工作区支持远程 SSH 目录（2026-11-05）
+
+「我的工作区」从"平台本地目录"扩展为"本地目录 / 远程 SSH 目录"两种来源：
+
+- **创建时选择类型**：本地（沿用 `data/workspaces/<id>`）或远程（填写主机、端口、登录用户、私钥文件名、远程根目录）；
+- **私钥不落平台**：私钥文件放在服务器 `WORKSPACE_SSH_KEY_DIR`（只读挂载），平台只按文件名引用，界面不回显、日志不打印；
+- **主机白名单 fail-closed**：`WORKSPACE_SSH_ALLOWED_HOSTS` 为空时远程工作区整体停用，避免平台被当成任意主机跳板；
+- **文件操作同构**：远程工作区支持目录树、读取、写回、删除（SFTP）；上传、新建文件/文件夹、重命名、原文件下载本轮不支持，页面按类型隐藏入口；
+- **命令执行**：远程工作区可执行单条非交互命令（`POST /api/workspaces/{id}/exec`），输出与退出码回显、超时 600s、每次执行写审计；
+- **路径边界**：远程根目录可填任意绝对路径（含 `/`），但所有文件操作规范化后必须落在该根内，拒绝 `..` 与越界绝对路径。
+
+### 修改代码文件与作用清单
+
+- `backend/shared/models.py`、`backend/api/migrations/versions/9c1f4b7d2e30_工作区支持远程ssh.py`：工作区表增量 `kind/ssh_host/ssh_port/ssh_user/ssh_key_name/remote_root`。
+- `backend/api/app/remote_workspace.py`（新增）：SSH/SFTP 访问、路径边界、命令执行、白名单与私钥引用校验。
+- `backend/api/app/routers/user_workspaces.py`：创建分支、文件端点分派、`POST /{id}/exec`、本地专属操作拒绝远程。
+- `backend/api/app/config.py`、`docker-compose.yml`、`.env.example`：私钥目录、白名单与超时配置。
+- `frontend/src/views/UserWorkspaces.vue`、`api/http.ts`、`api/types.ts`：新建弹窗的类型与 SSH 字段、远程目录标记、远程隐藏上传入口。

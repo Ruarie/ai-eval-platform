@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.20 ｜ 审查日期：2026-11-05（工作区支持远程 SSH：工作区表增量 `kind/ssh_host/ssh_port/ssh_user/ssh_key_name/remote_root`（迁移 `9c1f4b7d2e30`，接在 `b5e2d7c94a10` 后）；新增 `backend/api/app/remote_workspace.py`（paramiko）——私钥**只按文件名**引用（`WORKSPACE_SSH_KEY_DIR` 只读挂载、不入库不回显）、主机白名单 `WORKSPACE_SSH_ALLOWED_HOSTS` 为空即整体停用（fail-closed）、路径以 `remote_root` 为边界拒绝 `..`/越界、命令执行只跑非交互单条并带超时与 20000 字符输出上限。端点：`POST /api/workspaces` 支持 `kind=ssh`（创建即做连通性探测），`GET /files`、`/files/tree`、`/files/content`、`PUT /files/content`、`DELETE /files` 按类型分派 SFTP，新增 `POST /{id}/exec`（审计 `workspace_remote_exec`）；`upload`、建目录/文件、`rename`、`files/raw` 对远程返回 `VALIDATION`。前端新建弹窗支持类型与 SSH 字段、远程显示连接目标并隐藏上传入口。实测：容器内 sshd + 私钥联调通过（create 201 → list/write/read/exec 全成功，exec `pwd`=/config、`cat hello.txt` 回显正确）；工作区与远程契约测试 24 项通过；前端 eslint 0 error + build 通过。生产 `WORKSPACE_SSH_ALLOWED_HOSTS` 默认空 = 功能关闭，需显式配置后启用。）
+
 > 版本：V2.19 ｜ 审查日期：2026-11-05（用例页滚动修复：`.cases-workbench` 原先写死 `height: calc(100vh - var(--topbar-h) - 20px)`，而外层 `.content` 有 24px padding，工作台比可用高度多出约 28px；同时 `.nordic-layout` 未约束 grid 行高，行被内容撑开导致 `.table-container` 的 `height:100%` 失效、`overflow:auto` 不生效——表格溢出到工作台外被 `overflow:hidden` 裁掉，长列表既看不到底部也无法滚动（用户反馈 `/cases?task_id=…` 无法下拉）。改为 `height:100%` + `grid-template-rows: minmax(0,1fr)`，实测表格 scrollHeight 1696 / clientHeight 439，可滚到 1257 见分页条；新增 e2e 回归（40 条用例断言容器可滚且能滚到底）。）
 
 > 版本：V2.18 ｜ 审查日期：2026-11-04（只读工具与巡检收尾Ⅱ：① `task.list` 复用 `task.status` 的口径返回 `case_set_id` 与 `report_id`，模型可直接给 `/cases?set_id=...`，少一轮工具调用；实测 10 条任务里 testcase 成功项的用例集 ID 正确（`b78a6f40` 等）；② `agent-quality-check.sh` 对比 `history.tsv` 末两行，通过率下降 >10pp 时写 `alerts.log`；题库复跑 10/10。）

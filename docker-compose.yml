@@ -55,6 +55,11 @@ services:
       KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:-}
       # 协议档 URL、模型 ID、API Key 的宿主机环境文件；API 加锁刷新，Worker 只读。
       PROFILE_ENV_FILE: ${PROFILE_ENV_FILE:-/run/config/.env}
+      # 远程（SSH）工作区：私钥目录只读挂载，主机白名单为空时整体停用（fail-closed）。
+      WORKSPACE_SSH_KEY_DIR: ${WORKSPACE_SSH_KEY_DIR:-/run/secrets/workspace-ssh}
+      WORKSPACE_SSH_ALLOWED_HOSTS: ${WORKSPACE_SSH_ALLOWED_HOSTS:-}
+      WORKSPACE_SSH_CONNECT_TIMEOUT_S: ${WORKSPACE_SSH_CONNECT_TIMEOUT_S:-10}
+      WORKSPACE_SSH_COMMAND_TIMEOUT_S: ${WORKSPACE_SSH_COMMAND_TIMEOUT_S:-60}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-720}
       WS_TICKET_EXPIRE_MINUTES: ${WS_TICKET_EXPIRE_MINUTES:-5}
       DATA_DIR: /data
@@ -134,6 +139,8 @@ services:
     volumes:
       - ./data:/data
       - ./.env:/run/config/.env
+      # 远程工作区私钥（只读）；目录为空等于没有可用凭据，远程工作区自然不可用。
+      - ./data/workspace-ssh-keys:/run/secrets/workspace-ssh:ro
       # 外部白名单基目录（与 runner 同路径，供 read/write/edit 解析绝对路径）。
       - ${EXTERNAL_BASE_DIR:-/srv/agent-external}:${EXTERNAL_BASE_DIR:-/srv/agent-external}:rw
     # API 同时连接默认业务网与仅供沙箱调用的内网；runner 不暴露到业务网。

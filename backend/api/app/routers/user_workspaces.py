@@ -24,6 +24,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from .. import remote_workspace
 from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user
@@ -52,9 +53,25 @@ router = APIRouter(prefix="/api/workspaces", tags=["user-workspaces"])
 
 
 class _NameBody(BaseModel):
-    """工作区创建/改名请求（name 每属主活跃唯一）。"""
+    """工作区创建/改名请求（name 每属主活跃唯一）。
+
+    创建时可选 ``kind=ssh`` 打开远程工作区；改名只读取 ``name``。
+    """
 
     name: str = Field(min_length=1, max_length=255)
+    kind: str = Field(default="local", max_length=16)
+    ssh_host: str | None = Field(default=None, max_length=200)
+    ssh_port: int | None = Field(default=None, ge=1, le=65535)
+    ssh_user: str | None = Field(default=None, max_length=100)
+    ssh_key_name: str | None = Field(default=None, max_length=200)
+    remote_root: str | None = Field(default=None, max_length=500)
+
+
+class _ExecBody(BaseModel):
+    """远程命令执行请求（仅 ssh 工作区）。"""
+
+    command: str = Field(min_length=1, max_length=4000)
+    timeout_s: int = Field(default=60, ge=1, le=600)
 
 
 class _FileBody(BaseModel):
@@ -105,14 +122,32 @@ def _owned_workspace(
     return row
 
 
+def _is_ssh(row: Workspace) -> bool:
+    """工作区是否为远程 SSH 类型（旧行没有该列值时按 local 处理）。"""
+    return getattr(row, "kind", "local") == "ssh"
+
+
+def _require_local(row: Workspace, action: str) -> None:
+    """本地专属操作遇到远程工作区时明确拒绝，绝不回落到本地空目录。"""
+    if _is_ssh(row):
+        raise AppError(ErrorCode.VALIDATION, f"远程工作区暂不支持{action}")
+
+
 def _workspace_item(row: Workspace) -> dict[str, Any]:
-    """投影工作区元数据、实际配置配额与目录用量。"""
-    directory = workspace_dir_for(row.id)
-    summary = folder_summary(directory)
+    """投影工作区元数据、实际配置配额与目录用量（远程库不统计本地目录）。"""
+    remote = _is_ssh(row)
+    summary = {"files": 0, "bytes": 0} if remote else folder_summary(workspace_dir_for(row.id))
     return {
         "id": row.id,
         "name": row.name,
         "owner_id": row.owner_id,
+        "kind": "ssh" if remote else "local",
+        # 旧行/测试夹具可能没有这些列，用 getattr 兜底，避免投影直接炸。
+        "ssh_host": getattr(row, "ssh_host", None),
+        "ssh_port": getattr(row, "ssh_port", None),
+        "ssh_user": getattr(row, "ssh_user", None),
+        "ssh_key_name": getattr(row, "ssh_key_name", None),
+        "remote_root": getattr(row, "remote_root", None),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "deleted": row.deleted_at is not None,
@@ -161,6 +196,12 @@ def create_workspace(
     )
     if duplicate:
         raise AppError(ErrorCode.VALIDATION, "已存在同名工作区")
+    kind = (body.kind or "local").strip().lower()
+    if kind not in {"local", "ssh"}:
+        raise AppError(ErrorCode.VALIDATION, "工作区类型无效")
+    if kind == "ssh":
+        return _create_remote_workspace(db, request, user, name, body)
+
     row = Workspace(owner_id=user.id, name=name)
     directory = ""
     try:
@@ -178,6 +219,51 @@ def create_workspace(
     except OSError as exc:
         db.rollback()
         raise AppError(ErrorCode.INTERNAL, "工作区目录创建失败") from exc
+    return _workspace_item(row)
+
+
+def _create_remote_workspace(
+    db: Session, request: Request, user: User, name: str, body: _NameBody
+) -> dict[str, Any]:
+    """创建 SSH 工作区：先校验白名单与私钥可用性，再落库（不建本地目录）。"""
+    host = (body.ssh_host or "").strip()
+    ssh_user = (body.ssh_user or "").strip()
+    key_name = (body.ssh_key_name or "").strip()
+    root = (body.remote_root or "").strip() or "/"
+    if not host or not ssh_user or not key_name:
+        raise AppError(ErrorCode.VALIDATION, "远程工作区需要填写主机、用户与私钥文件名")
+
+    row = Workspace(
+        owner_id=user.id,
+        name=name,
+        kind="ssh",
+        ssh_host=host,
+        ssh_port=body.ssh_port or 22,
+        ssh_user=ssh_user,
+        ssh_key_name=key_name,
+        remote_root=root,
+    )
+    try:
+        # 创建时就验证白名单、私钥与远程目录，避免建出一个永远连不上的工作区。
+        remote_workspace.probe(row)
+    except remote_workspace.RemoteWorkspaceError as exc:
+        raise AppError(ErrorCode.VALIDATION, str(exc)) from exc
+    except remote_workspace.RemotePathError as exc:
+        raise AppError(ErrorCode.VALIDATION, f"远程目录不可用：{exc}") from exc
+
+    try:
+        db.add(row)
+        db.flush()
+        write_audit(
+            db, request, user,
+            action="workspace_create",
+            target_type="workspace", target_id=row.id,
+            detail={"kind": "ssh", "host": host},
+        )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise AppError(ErrorCode.VALIDATION, "已存在同名工作区") from None
     return _workspace_item(row)
 
 
@@ -309,6 +395,14 @@ def list_files(
 ):
     """一层目录列表 + 当前相对路径（目录进入式浏览，防穿越）。"""
     row = _owned_workspace(db, user, workspace_id)
+    if _is_ssh(row):
+        entries = remote_workspace.list_dir(row, path)
+        return {
+            "workspace_id": workspace_id,
+            "path": path,
+            "entries": entries,
+            "total": len(entries),
+        }
     directory = workspace_dir_for(row.id)
     entries = list_dir_level(directory, path)
     return {
@@ -329,6 +423,7 @@ def create_folder(
 ):
     """在工作区相对路径下新建单段文件夹（父目录须已存在）。"""
     row = _owned_workspace(db, user, workspace_id)
+    _require_local(row, "新建文件夹")
     directory = workspace_dir_for(row.id)
     parent = resolve_scope_dir(directory, body.path)
     target = create_child_dir(parent, body.name.strip() or body.name)
@@ -354,6 +449,8 @@ def get_tree(
 ):
     """获取工作区目录树结构。"""
     row = _owned_workspace(db, user, workspace_id)
+    if _is_ssh(row):
+        return {"workspace_id": workspace_id, "tree": remote_workspace.tree(row, max_depth)}
     directory = workspace_dir_for(row.id)
     tree = get_file_tree(directory, max_depth=max_depth)
     return {"workspace_id": workspace_id, "tree": tree}
@@ -368,6 +465,11 @@ def get_file_content(
 ):
     """获取单文件文本内容与元信息。超大或二进制文件安全标记。"""
     row = _owned_workspace(db, user, workspace_id)
+    if _is_ssh(row):
+        try:
+            return {"workspace_id": workspace_id, **remote_workspace.read_file(row, path)}
+        except remote_workspace.RemotePathError as exc:
+            raise AppError(ErrorCode.VALIDATION, str(exc)) from exc
     directory = workspace_dir_for(row.id)
     result = read_workspace_file(directory, path)
     return {"workspace_id": workspace_id, **result}
@@ -383,6 +485,19 @@ def update_file_content(
 ):
     """写回/保存文件内容。"""
     row = _owned_workspace(db, user, workspace_id)
+    if _is_ssh(row):
+        try:
+            res = remote_workspace.write_text(row, body.path, body.content)
+        except remote_workspace.RemotePathError as exc:
+            raise AppError(ErrorCode.VALIDATION, str(exc)) from exc
+        write_audit(
+            db, request, user,
+            action="workspace_file_update",
+            target_type="workspace", target_id=workspace_id,
+            detail={"path": res["path"], "size": res["size"], "kind": "ssh"},
+        )
+        db.commit()
+        return {"ok": True, "workspace_id": workspace_id, **res}
     directory = workspace_dir_for(row.id)
     res = write_workspace_file(directory, body.path, body.content)
     write_audit(
@@ -407,6 +522,7 @@ def create_file(
 ):
     """在指定相对路径下新建单文件。"""
     row = _owned_workspace(db, user, workspace_id)
+    _require_local(row, "新建文件")
     directory = workspace_dir_for(row.id)
     res = create_workspace_file(directory, body.path, body.name.strip(), body.content)
     write_audit(
@@ -431,6 +547,7 @@ def rename_item(
 ):
     """重命名工作区内的文件或目录。"""
     row = _owned_workspace(db, user, workspace_id)
+    _require_local(row, "重命名")
     directory = workspace_dir_for(row.id)
     res = rename_workspace_path(directory, body.path, body.new_name.strip())
     write_audit(
@@ -455,6 +572,19 @@ def delete_item(
 ):
     """删除工作区内的文件或目录（拒绝删除工作区根）。"""
     row = _owned_workspace(db, user, workspace_id)
+    if _is_ssh(row):
+        try:
+            remote_workspace.delete(row, path)
+        except remote_workspace.RemotePathError as exc:
+            raise AppError(ErrorCode.VALIDATION, str(exc)) from exc
+        write_audit(
+            db, request, user,
+            action="workspace_file_delete",
+            target_type="workspace", target_id=workspace_id,
+            detail={"path": path, "kind": "ssh"},
+        )
+        db.commit()
+        return {"ok": True, "workspace_id": workspace_id}
     directory = workspace_dir_for(row.id)
     res = delete_workspace_path(directory, path)
     write_audit(
@@ -499,6 +629,7 @@ def get_raw_file(
 ):
     """以原始二进制/文件流方式返回文件（供图片/音视频预览或文件下载）。"""
     row = _owned_workspace(db, user, workspace_id)
+    _require_local(row, "原文件下载")
     directory = workspace_dir_for(row.id)
     abs_path = resolve_scope_file(directory, path, must_exist=True)
 
@@ -529,6 +660,7 @@ def upload_file(
 ):
     """在线程池中分块保存上传文件，工作区行锁保护上传配额核验与替换。"""
     row = _owned_workspace(db, user, workspace_id, lock=True)
+    _require_local(row, "上传")
     directory = workspace_dir_for(row.id)
 
     raw_filename = file.filename or "uploaded_file"
@@ -563,3 +695,37 @@ def upload_file(
     )
     db.commit()
     return {"ok": True, "workspace_id": workspace_id, **res}
+
+
+@router.post("/{workspace_id}/exec")
+def exec_in_remote(
+    workspace_id: str,
+    body: _ExecBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """在远程工作区执行单条命令（仅 ssh 工作区，写审计）。
+
+    与本地 ``bash`` 的区别：不经过 runner 沙箱，直接在该主机的 ``remote_root``
+    下执行；因此只对显式配置过的白名单主机开放。
+    """
+    row = _owned_workspace(db, user, workspace_id)
+    if not _is_ssh(row):
+        raise AppError(ErrorCode.VALIDATION, "仅远程工作区支持命令执行")
+    try:
+        result = remote_workspace.exec_command(row, body.command, body.timeout_s)
+    except remote_workspace.RemoteWorkspaceError as exc:
+        raise AppError(ErrorCode.UPSTREAM, str(exc)) from exc
+    write_audit(
+        db, request, user,
+        action="workspace_remote_exec",
+        target_type="workspace", target_id=workspace_id,
+        detail={
+            "command": body.command[:200],
+            "exit_code": result["exit_code"],
+            "host": result["host"],
+        },
+    )
+    db.commit()
+    return {"workspace_id": workspace_id, **result}

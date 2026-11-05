@@ -1505,8 +1505,33 @@ export const api = {
       } while (items.length < total)
       return { items, total }
     },
-    async create(name: string): Promise<UserWorkspace> {
-      const { data } = await http.post('/api/workspaces', { name })
+    async create(
+      name: string,
+      options?: {
+        kind?: 'local' | 'ssh'
+        ssh_host?: string
+        ssh_port?: number
+        ssh_user?: string
+        ssh_key_name?: string
+        remote_root?: string
+      },
+    ): Promise<UserWorkspace> {
+      const { data } = await http.post('/api/workspaces', { name, ...options })
+      return data
+    },
+    /** 远程工作区执行单条命令（仅 kind=ssh）。 */
+    async execRemote(id: string, command: string, timeoutS = 60): Promise<{
+      exit_code: number
+      stdout: string
+      stderr: string
+      truncated: boolean
+      host: string
+      root: string
+    }> {
+      const { data } = await http.post(`/api/workspaces/${id}/exec`, {
+        command,
+        timeout_s: timeoutS,
+      })
       return data
     },
     async rename(id: string, name: string): Promise<UserWorkspace> {

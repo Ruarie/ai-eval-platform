@@ -19,3 +19,5 @@ anthropic==0.122.0
 # Streamable HTTP 媒体 MCP 客户端；固定版本避免 SDK 依赖静默漂移。
 mcp==1.29.0
 trafilatura==2.2.0
+# 远程 SSH 工作区：纯 Python 客户端（内置 cryptography，无需系统 ssh）
+paramiko==3.5.1

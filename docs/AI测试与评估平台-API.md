@@ -6,7 +6,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.47 |
+| 文档版本 | V2.48 |
 | 本轮审查日期 | 2026-11-02（知识库接入真实 LightRAG：异步建索引状态收敛、删除顺序与降级口径；不新增路径与字段） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.55（功能唯一权威） |
@@ -20,6 +20,8 @@
 | 适用范围 | V1.0：浏览器 `web/` ↔ `api`；全域 REST + WS 接口规范 |
 
 > V2.46（2026-11-02）：知识库接入真实 LightRAG 引擎（§3.9）。**不新增平台 REST/WS 路径与字段**，仅明确既有语义：上传响应与文档列表的 `status` 由引擎异步建索引决定（`indexing | indexed | failed`），`indexing` 会在列表查询时向 LightRAG 回读并收敛；`DELETE` 文档/知识库改为「先删引擎索引、再删库内记录」，引擎已配置但删除失败返回 `UPSTREAM`；Playground 的 `similarity` 允许为 `null`（LightRAG 只给排序不给分数），前端显示占位符而不伪造 0；检索降级口径收紧为「仅不可达/服务端错误才回退本地关键词」，引擎可用但召回为空仍记 `lightrag`。删除与状态回读在服务端按批执行（删除 ≤50/批、状态 ≤200/批），对调用方仍是一次请求；`indexing`/`failed` 文档的删除不强制引擎成功，避免引擎不可用时无法清理。适配服务内部契约（`/documents/index`、`/documents/status`、`/documents/delete`、`/query`）属容器内网，不属于本契约范围，见《AI测试与评估平台-LightRAG接入技术方案.md》。
+
+> V2.48（2026-11-05）：用户工作区支持**远程 SSH 目录**（§3.10）。`POST /api/workspaces` 增量可选 `kind`（`local` 缺省 / `ssh`）与 `ssh_host/ssh_port/ssh_user/ssh_key_name/remote_root`；私钥只按**文件名**引用（服务端 `WORKSPACE_SSH_KEY_DIR` 只读挂载），不入库、不回显；主机必须命中 `WORKSPACE_SSH_ALLOWED_HOSTS` 白名单，白名单为空时远程工作区整体停用（fail-closed）；创建时做连通性探测，失败 `VALIDATION`。新增 `POST /api/workspaces/{id}/exec` 在远程 `remote_root` 下执行单条非交互命令（输出上限 20000 字符、超时 600s、写审计 `workspace_remote_exec`）。远程工作区支持目录列表/树/读/写/删除；`upload`、`files`（建目录/文件）、`rename`、`files/raw` 本轮返回 `VALIDATION`。工作区对象增量返回 `kind/ssh_*` 字段。
 
 > V2.47（2026-11-03）：知识库新增只读知识图谱视图（§3.9）。**新增一个 GET 路径** `GET /api/kb/{id}/graph`，其余路径与字段不变。图谱来自 LightRAG 索引阶段抽取的实体与关系，服务端按文档来源前缀 `{kb_id}__` 过滤，`limit` 1–500（默认 200）为节点上限；`truncated` 标明是否被截断；`external_chat` 库返回 `VALIDATION`，引擎不可用返回 `UPSTREAM`，空数组表示当前库尚未抽出实体，不得用示例数据填充。只读，无写接口。
 
@@ -1721,9 +1723,23 @@ Prometheus 内置可观测性指标端点（内网 HTTP GET），输出前缀为
 
 `quota_bytes` 为服务端实际 `workspace_quota_bytes` 配置（默认 1GiB；≤0 表示不限制），创建与改名返回的工作区对象同样携带。旧后端缺此字段时前端仅显示已用容量，不推测上限。
 
-#### `POST /api/workspaces` body `{name}`
+#### `POST /api/workspaces` body `{name, kind?, ssh_*}``
 
-新建工作区（表 + 数据目录原子创建）；`name` 每属主**活跃**唯一（部分唯一索引；软删同名行不占名——复活语义随 F3 的 legacy 导入）。
+新建工作区；`name` 每属主**活跃**唯一（部分唯一索引；软删同名行不占名——复活语义随 F3 的 legacy 导入）。
+
+`kind` 缺省 `local`（表 + `data/workspaces/<id>` 目录原子创建）。`kind="ssh"` 创建远程工作区，需同时传：
+
+| 字段 | 说明 |
+| --- | --- |
+| `ssh_host` | 主机名或 IP，必须命中服务端 `WORKSPACE_SSH_ALLOWED_HOSTS` 白名单（为空时整体停用，`VALIDATION`） |
+| `ssh_port` | 端口，缺省 22 |
+| `ssh_user` | 登录用户 |
+| `ssh_key_name` | 私钥**文件名**（位于服务端 `WORKSPACE_SSH_KEY_DIR`，平台不保存私钥内容、不回显） |
+| `remote_root` | 远程根目录，绝对路径（允许 `/`） |
+
+创建时会做一次连通性探测（连接 + 列根目录），失败返回 `VALIDATION`，不留下连不上的工作区。响应对象增量 `kind/ssh_host/ssh_port/ssh_user/ssh_key_name/remote_root`（私钥内容永不返回）。
+
+**远程工作区的行为约定**：目录列表/目录树/读取/写回/删除与本地同构（SFTP）；`POST /files/upload`、`POST /files`、`POST /files/file`、`PATCH /files/rename`、`GET /files/raw` 对远程工作区返回 `VALIDATION`（本期不支持）；路径解析以 `remote_root` 为边界，拒绝 `..` 穿越与越界绝对路径。
 
 #### `PUT /api/workspaces/{id}` body `{name}`
 
@@ -1750,6 +1766,10 @@ Prometheus 内置可观测性指标端点（内网 HTTP GET），输出前缀为
   - 当 `download=true` 时，`Content-Disposition` 为 `attachment; filename="..."`，强制触发浏览器下载。
   - 原始文件响应附带 `Content-Security-Policy: sandbox` 与 `X-Content-Type-Options: nosniff`，隔离 HTML/SVG 文档脚本及平台同源权限；`GET /api/files/{id}/content` 的用户附件响应同样隔离。媒体仍支持 Range，不改变文件字节。
 - 权限：仅工作区属主；非属主 → 401/403；文件不存在 → 404；路径越界/符号链接 → 400 `VALIDATION`。
+
+#### `POST /api/workspaces/{id}/exec` body `{command, timeout_s?}`
+
+在**远程**工作区的 `remote_root` 下执行单条非交互命令（`kind=local` → `VALIDATION`）。响应 `{exit_code, stdout, stderr, truncated, host, root}`；`timeout_s` 缺省 60、上限 600；输出超过 20000 字符截断并置 `truncated=true`。连接失败/主机不在白名单 → `UPSTREAM`；每次执行写审计 `workspace_remote_exec`（含命令前 200 字符与退出码）。
 
 #### `POST /api/workspaces/{id}/files/upload`（`multipart/form-data`）
 
