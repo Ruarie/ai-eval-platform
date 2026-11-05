@@ -459,6 +459,11 @@ done
 if [ "${#DEPLOY_SERVICES[@]}" -eq 0 ]; then
     echo "==> [3/4] 无需滚动更新业务服务"
 else
+    # HTTPS 自签证书：容器只读挂载，证书必须在宿主机先生成（缺失时自动补）。
+    if [ -f "$APP_DIR/deploy/https/nginx.conf" ] && [ ! -f "$APP_DIR/data/https/server.crt" ]; then
+        bash "$APP_DIR/deploy/gen-selfsigned.sh" \
+            || echo "警告：自签证书生成失败，HTTPS 入口可能不可用"
+    fi
     UP_ARGS=(--no-build --remove-orphans)
     if [ -z "$IMAGE_PREFIX" ] && [ "${#BUILD_SERVICES[@]}" -gt 0 ]; then
         # 本地构建路径（手动部署回退）：镜像名固定不变（ai-eval-platform-api 等），

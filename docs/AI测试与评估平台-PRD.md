@@ -1275,14 +1275,14 @@ Excel 同一批次内的重复用例编号按最后一条更新，不重复创�
 生产入口是内网 IP，无法使用 Let's Encrypt（公网无法回连校验），且宿主机 443 已被其它应用占用。新增 `https` 服务提供加密入口：
 
 - **地址**：`https://<HTTPS_HOST>:8443`，反代到 `web:80`（web 内再按路径转发 `/api`、`/ws`）；
-- **证书**：容器启动时用 openssl 生成自签证书（CN/SAN 取 `HTTPS_HOST`），落在 `./data/https`，重建容器不换证书；
+- **证书**：宿主机执行 `deploy/gen-selfsigned.sh` 生成自签证书（CN/SAN 取 `HTTPS_HOST`），落在 `./data/https`，容器只读挂载；`deploy.sh` 在更新前检测缺失并自动补；
 - **WebSocket**：透传 `Upgrade`/`Connection`，`/ws/agent/v2` 可正常握手；
 - **浏览器提示**：自签证书未受信任，首次访问会出现"连接不是私密连接"，选择继续即可；要消除提示，把 `data/https/server.crt` 导入客户端"受信任的根证书颁发机构"；
 - **不再暴露明文**：密码认证的 SSH 凭据只在 TLS 链路上传输。
 
 ### 修改代码文件与作用清单
 
-- `docker-compose.yml`：新增 `https` 服务（`8443:443`，挂载 `./data/https`）。
-- `deploy/https/{Dockerfile,nginx.conf,entrypoint-cert.sh}`：nginx 反代与自签证书生成。
+- `docker-compose.yml`：新增 `https` 服务（`nginx:1.27-alpine`，`8443:443`，只读挂载配置与 `./data/https`）。
+- `deploy/https/nginx.conf`、`deploy/gen-selfsigned.sh`：nginx 反代配置与宿主机自签证书生成（镜像用公共 `nginx:1.27-alpine`，无需自建）。
 - `deploy/plan_services.py`：把 `https` 纳入构建/部署服务列表。
 - `.env.example`：`HTTPS_PORT` / `HTTPS_HOST`。

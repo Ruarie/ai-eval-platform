@@ -106,7 +106,11 @@ class PlanServicesTest(unittest.TestCase):
         self.change("deploy/deploy.sh")
         result = self.result()
         self.assertEqual(result["build_services"], [])
-        self.assertEqual(result["deploy_services"], result["all_services"])
+        # 全量应用配置时，除构建服务外还要拉起纯配置服务（如 https 反代）。
+        self.assertEqual(
+            result["deploy_services"],
+            sorted(set(result["all_services"]) | set(result["config_services"])),
+        )
 
     def test_compose_build_inputs_fall_back_to_full_build(self) -> None:
         """Compose 可改变任意构建参数，未解析的依赖保守全量处理。"""
