@@ -6,7 +6,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.58 |
+| 文档版本 | V1.59 |
 | 本轮审查日期 | 2026-11-03（知识库只读知识图谱视图，F-RAG-07 交付） |
 | 文档状态 | V1.31 已实现三类准备专家与受控草稿；V1.30 的完整计划/报告连接仍待实现，后台恢复与专家通讯仍待 P2/P3 |
 | 撰写日期 | 2026-08-17 |
@@ -1286,3 +1286,18 @@ Excel 同一批次内的重复用例编号按最后一条更新，不重复创�
 - `deploy/https/nginx.conf`、`deploy/gen-selfsigned.sh`：nginx 反代配置与宿主机自签证书生成（镜像用公共 `nginx:1.27-alpine`，无需自建）。
 - `deploy/plan_services.py`：把 `https` 纳入构建/部署服务列表。
 - `.env.example`：`HTTPS_PORT` / `HTTPS_HOST`。
+
+## V1.59 远程工作区目录浏览（2026-11-05）
+
+创建远程工作区时，「远程根目录」不再只能手输绝对路径：
+
+- 点「浏览」连接目标主机后逐层列出**目录**（不列文件），支持「上级目录」导航；
+- 「选择当前目录」把当前路径回填到远程根目录；
+- 密码认证时可为浏览临时填入密码（只在本次请求内使用，不保存、不写审计明细）；私钥认证沿用服务端预置私钥；
+- 连接或认证失败直接在弹窗内提示原因（缺密码、私钥不对、主机不可达）。
+
+### 修改代码文件与作用清单
+
+- `backend/api/app/remote_workspace.py`：`temporary_workspace`（未落库的临时连接对象，根目录固定 `/`）与 `browse_dirs`（只列目录 + 父路径）。
+- `backend/api/app/routers/user_workspaces.py`：新增 `POST /api/workspaces/ssh/browse`，校验认证方式与凭证后代理到 SSH 层。
+- `frontend/src/api/http.ts`、`views/UserWorkspaces.vue`：`browseSshDirs` 与创建弹窗的「浏览」入口、目录选择弹窗与回填。

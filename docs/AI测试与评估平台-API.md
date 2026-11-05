@@ -6,7 +6,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.50 |
+| 文档版本 | V2.51 |
 | 本轮审查日期 | 2026-11-02（知识库接入真实 LightRAG：异步建索引状态收敛、删除顺序与降级口径；不新增路径与字段） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.55（功能唯一权威） |
@@ -20,6 +20,8 @@
 | 适用范围 | V1.0：浏览器 `web/` ↔ `api`；全域 REST + WS 接口规范 |
 
 > V2.46（2026-11-02）：知识库接入真实 LightRAG 引擎（§3.9）。**不新增平台 REST/WS 路径与字段**，仅明确既有语义：上传响应与文档列表的 `status` 由引擎异步建索引决定（`indexing | indexed | failed`），`indexing` 会在列表查询时向 LightRAG 回读并收敛；`DELETE` 文档/知识库改为「先删引擎索引、再删库内记录」，引擎已配置但删除失败返回 `UPSTREAM`；Playground 的 `similarity` 允许为 `null`（LightRAG 只给排序不给分数），前端显示占位符而不伪造 0；检索降级口径收紧为「仅不可达/服务端错误才回退本地关键词」，引擎可用但召回为空仍记 `lightrag`。删除与状态回读在服务端按批执行（删除 ≤50/批、状态 ≤200/批），对调用方仍是一次请求；`indexing`/`failed` 文档的删除不强制引擎成功，避免引擎不可用时无法清理。适配服务内部契约（`/documents/index`、`/documents/status`、`/documents/delete`、`/query`）属容器内网，不属于本契约范围，见《AI测试与评估平台-LightRAG接入技术方案.md》。
+
+> V2.51（2026-11-05）：新增 `POST /api/workspaces/ssh/browse`（§3.10）——创建远程工作区前浏览目标主机目录并点选 `remote_root`，只列子目录、返回当前与父路径；密码认证的密码只在本次请求内使用（不入库、不写审计、不落日志）。
 
 > V2.50（2026-11-05）：远程工作区支持**密码认证且密码不落库**（§3.10）：`POST /api/workspaces` 增量 `auth_type`（`key_file` 默认 / `password`），password 模式不要求 `ssh_key_name`、创建时跳过连通性探测；文件与命令请求通过请求头 `X-Workspace-SSH-Password: base64(密码)` 临时提供密码，缺失 `400`、认证失败 `502`；密码不入库、不写日志、不缓存，前端存 `sessionStorage`。
 
@@ -1726,6 +1728,19 @@ Prometheus 内置可观测性指标端点（内网 HTTP GET），输出前缀为
 列出当前用户工作区（默认仅活跃行）。响应 `{items:[{id,name,owner_id,created_at,updated_at,deleted,quota_bytes,folder:{file_count,total_bytes,updated_at}|null}],total}`。`offset` 默认 0；`limit` 默认 100、上限 200；按 `updated_at DESC, id ASC` 稳定排序，`total` 为属主/注销筛选后的总数，只统计当前页目录。前端选择器逐页读取完整目录。
 
 `quota_bytes` 为服务端实际 `workspace_quota_bytes` 配置（默认 1GiB；≤0 表示不限制），创建与改名返回的工作区对象同样携带。旧后端缺此字段时前端仅显示已用容量，不推测上限。
+
+#### `POST /api/workspaces/ssh/browse` body `{host, port?, user, auth_type?, key_name?, path?, password?}`
+
+创建远程工作区前浏览目标主机目录，用于挑选 `remote_root`。只返回**子目录**（不列文件）：
+
+```json
+{ "host": "build-01", "path": "/home/deploy", "parent": "/home",
+  "entries": [ { "name": "project", "path": "/home/deploy/project" } ] }
+```
+
+- `path` 缺省 `/`；浏览阶段以 `/` 为界、不限制深度（真正落库的 `remote_root` 由用户选定）；
+- `auth_type=password` 时需在同一请求里带 `password`，**只在本次请求内使用**：不写审计、不落日志、不入库；
+- 缺少凭证 → `VALIDATION`(400)，连接或认证失败 → `UPSTREAM`(502)。
 
 #### `POST /api/workspaces` body `{name, kind?, ssh_*}``
 
