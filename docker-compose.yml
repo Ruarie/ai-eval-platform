@@ -55,7 +55,7 @@ services:
       KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:-}
       # 协议档 URL、模型 ID、API Key 的宿主机环境文件；API 加锁刷新，Worker 只读。
       PROFILE_ENV_FILE: ${PROFILE_ENV_FILE:-/run/config/.env}
-      # 远程（SSH）工作区：私钥目录只读挂载，主机白名单为空时整体停用（fail-closed）。
+      # 远程（SSH）工作区：私钥目录只读挂载；白名单留空表示不限制目标主机（凭据决定边界）。
       WORKSPACE_SSH_KEY_DIR: ${WORKSPACE_SSH_KEY_DIR:-/run/secrets/workspace-ssh}
       WORKSPACE_SSH_ALLOWED_HOSTS: ${WORKSPACE_SSH_ALLOWED_HOSTS:-}
       WORKSPACE_SSH_CONNECT_TIMEOUT_S: ${WORKSPACE_SSH_CONNECT_TIMEOUT_S:-10}

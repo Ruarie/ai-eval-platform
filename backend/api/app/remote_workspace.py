@@ -5,8 +5,9 @@
 - **凭据不入库**：私钥放在宿主机 ``WORKSPACE_SSH_KEY_DIR``（默认
   ``/run/secrets/workspace-ssh``，只读挂载），数据库只存文件名；平台不回显、
   不打印、不拼接私钥内容。
-- **主机白名单 fail-closed**：``WORKSPACE_SSH_ALLOWED_HOSTS`` 为空时拒绝一切
-  远程工作区，避免平台被当成任意主机跳板。
+- **凭据即边界**：能否连上某台主机，最终由"该主机 authorized_keys 里有没有对应
+  公钥"决定，平台默认不限制目标主机；``WORKSPACE_SSH_ALLOWED_HOSTS`` 非空时作为
+  **可选收紧**（只允许列出主机），便于把平台锁在几台固定机器上。
 - **路径边界**：工作区配置 ``remote_root``（允许填任意绝对路径，包括 ``/``），
   但所有文件操作规范化后必须落在该根目录内，拒绝 ``..`` 穿越与符号链接逃逸。
 - **命令执行**：只跑非交互单条命令，带超时与输出上限；调用方（路由）负责
@@ -78,12 +79,9 @@ def target_for(workspace: Any) -> SshTarget:
         raise RemoteWorkspaceError("工作区不是远程类型")
     if not host or not user or not key_name:
         raise RemoteWorkspaceError("远程工作区缺少 host/user/key 配置")
+    # 白名单非空才收紧；为空表示"凭据决定边界"，任意目标主机都会尝试连接。
     allowed = _allowed_hosts()
-    if not allowed:
-        raise RemoteWorkspaceError(
-            "未配置 WORKSPACE_SSH_ALLOWED_HOSTS，远程工作区已停用"
-        )
-    if host.lower() not in allowed:
+    if allowed and host.lower() not in allowed:
         raise RemoteWorkspaceError(f"主机不在白名单内：{host}")
     if not root.startswith("/"):
         raise RemoteWorkspaceError("remote_root 必须是绝对路径")

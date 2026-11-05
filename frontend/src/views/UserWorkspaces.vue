@@ -450,7 +450,8 @@
         <template v-if="newWsKind === 'ssh'">
           <p class="modal-subtitle" style="margin: 4px 0 10px">
             远程工作区通过 SFTP 读写、可执行单条命令；私钥放在服务器 workdir，
-            平台只按文件名引用。主机必须在 WORKSPACE_SSH_ALLOWED_HOSTS 白名单内。
+            平台只按文件名引用。能否连上由目标机是否接受该公钥决定；服务端若配置了
+            WORKSPACE_SSH_ALLOWED_HOSTS，则只允许其中的主机。
           </p>
           <div class="form-group">
             <label>主机</label>

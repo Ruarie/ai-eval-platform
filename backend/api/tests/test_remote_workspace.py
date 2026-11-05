@@ -23,12 +23,13 @@ def _row(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**base)
 
 
-def test_target_rejects_when_allowlist_empty(monkeypatch):
-    """白名单为空时整条远程通道关闭（避免平台变成任意主机跳板）。"""
+def test_target_allows_any_host_when_allowlist_empty(monkeypatch):
+    """白名单留空表示不限制目标主机：能否连上由目标机是否接受该私钥决定。"""
     monkeypatch.setattr(rw.settings, "workspace_ssh_allowed_hosts", "")
 
-    with pytest.raises(rw.RemoteWorkspaceError, match="未配置"):
-        rw.target_for(_row())
+    target = rw.target_for(_row(ssh_host="203.0.113.20"))
+
+    assert target.host == "203.0.113.20"
 
 
 def test_target_rejects_host_outside_allowlist(monkeypatch):

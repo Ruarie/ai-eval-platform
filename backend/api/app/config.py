@@ -95,8 +95,8 @@ class Settings(BaseSettings):
     # ─── 远程（SSH）工作区 ──────────────────────────────────────────
     # 私钥目录：宿主机的 secrets 只读挂载点，平台只按文件名引用，绝不落库。
     workspace_ssh_key_dir: str = "/run/secrets/workspace-ssh"
-    # 主机白名单：逗号分隔的小写主机名/IP；为空时远程工作区整体停用（fail-closed），
-    # 避免平台被当成任意主机跳板。
+    # 主机白名单：逗号分隔的小写主机名/IP。留空表示不限制目标主机——能否连上由
+    # 私钥是否被目标机 authorized_keys 接受决定；填了则只允许这些主机（可选收紧）。
     workspace_ssh_allowed_hosts: str = ""
     # 连接与命令超时：连接失败要快速失败，命令超时防止远程进程挂死。
     # 主机指纹文件（known_hosts）。存在时严格校验；缺失时退化为 AutoAdd 并告警，
