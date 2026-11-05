@@ -289,6 +289,24 @@ services:
     ports:
       - "${WEB_PORT:-80}:80"
 
+  # HTTPS 反向代理（自签证书）：https://<host>:8443 -> web 的 nginx。
+  # 443 已被其它应用占用，默认映射 8443，可用 HTTPS_PORT 覆盖。
+  https:
+    build:
+      context: ./deploy/https
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${HTTPS_PORT:-8443}:443"
+    environment:
+      # 写进自签证书的 CN/SAN；应与浏览器访问的地址一致（IP 或域名）。
+      HTTPS_HOST: ${HTTPS_HOST:-127.0.0.1}
+    volumes:
+      # 证书持久化：重建容器不换证书，避免客户端每次重新信任。
+      - ./data/https:/etc/nginx/certs
+    depends_on:
+      - web
+
   lightrag:
     image: ${LIGHTRAG_IMAGE:-ai-eval-platform-lightrag}
     # 真实引擎要加载向量库、图存储与 pandas，建索引期间内存明显高于旧 stub；

@@ -6,7 +6,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.57 |
+| 文档版本 | V1.58 |
 | 本轮审查日期 | 2026-11-03（知识库只读知识图谱视图，F-RAG-07 交付） |
 | 文档状态 | V1.31 已实现三类准备专家与受控草稿；V1.30 的完整计划/报告连接仍待实现，后台恢复与专家通讯仍待 P2/P3 |
 | 撰写日期 | 2026-08-17 |
@@ -1269,3 +1269,20 @@ Excel 同一批次内的重复用例编号按最后一条更新，不重复创�
 - `backend/api/app/routers/user_workspaces.py`：创建分支、文件端点分派、`POST /{id}/exec`、本地专属操作拒绝远程。
 - `backend/api/app/config.py`、`docker-compose.yml`、`.env.example`：私钥目录、白名单与超时配置。
 - `frontend/src/views/UserWorkspaces.vue`、`api/http.ts`、`api/types.ts`：新建弹窗的类型与 SSH 字段、远程目录标记、远程隐藏上传入口。
+
+## V1.58 HTTPS 入口（自签证书，2026-11-05）
+
+生产入口是内网 IP，无法使用 Let's Encrypt（公网无法回连校验），且宿主机 443 已被其它应用占用。新增 `https` 服务提供加密入口：
+
+- **地址**：`https://<HTTPS_HOST>:8443`，反代到 `web:80`（web 内再按路径转发 `/api`、`/ws`）；
+- **证书**：容器启动时用 openssl 生成自签证书（CN/SAN 取 `HTTPS_HOST`），落在 `./data/https`，重建容器不换证书；
+- **WebSocket**：透传 `Upgrade`/`Connection`，`/ws/agent/v2` 可正常握手；
+- **浏览器提示**：自签证书未受信任，首次访问会出现"连接不是私密连接"，选择继续即可；要消除提示，把 `data/https/server.crt` 导入客户端"受信任的根证书颁发机构"；
+- **不再暴露明文**：密码认证的 SSH 凭据只在 TLS 链路上传输。
+
+### 修改代码文件与作用清单
+
+- `docker-compose.yml`：新增 `https` 服务（`8443:443`，挂载 `./data/https`）。
+- `deploy/https/{Dockerfile,nginx.conf,entrypoint-cert.sh}`：nginx 反代与自签证书生成。
+- `deploy/plan_services.py`：把 `https` 纳入构建/部署服务列表。
+- `.env.example`：`HTTPS_PORT` / `HTTPS_HOST`。

@@ -28,6 +28,8 @@ def definitions(root: Path) -> dict[str, dict[str, str]]:
             name: {"context": f"backend/{name}", "dockerfile": f"backend/{name}/Dockerfile"}
             for name in ("lightrag", "stress")
         },
+        # HTTPS 反代用官方镜像 + 自定义 Caddyfile，走同样的构建/部署通道。
+        "https": {"context": "deploy/https", "dockerfile": "deploy/https/Dockerfile"},
     }
     for dockerfile in sorted((root / "backend").glob("*_mcp/Dockerfile")):
         name = dockerfile.parent.name.removesuffix("_mcp").replace("_", "-") + "-mcp"
