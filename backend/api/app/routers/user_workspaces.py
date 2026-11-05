@@ -24,7 +24,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import remote_workspace
+from .. import remote_workspace, workspace_exec_approval
 from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user
@@ -697,24 +697,78 @@ def upload_file(
     return {"ok": True, "workspace_id": workspace_id, **res}
 
 
-@router.post("/{workspace_id}/exec")
-def exec_in_remote(
+@router.post("/{workspace_id}/exec", status_code=202)
+def request_remote_exec(
     workspace_id: str,
     body: _ExecBody,
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """在远程工作区执行单条命令（仅 ssh 工作区，写审计）。
+    """登记一条待确认的远程命令（不执行）。
 
-    与本地 ``bash`` 的区别：不经过 runner 沙箱，直接在该主机的 ``remote_root``
-    下执行；因此只对显式配置过的白名单主机开放。
+    远程 `exec` 等价于在该主机上开一个 shell：必须让用户先看到「主机 + 根目录 +
+    完整命令」再确认，避免一次误调用就把命令下发到生产机。
     """
     row = _owned_workspace(db, user, workspace_id)
     if not _is_ssh(row):
         raise AppError(ErrorCode.VALIDATION, "仅远程工作区支持命令执行")
     try:
-        result = remote_workspace.exec_command(row, body.command, body.timeout_s)
+        target = remote_workspace.target_for(row)
+    except remote_workspace.RemoteWorkspaceError as exc:
+        raise AppError(ErrorCode.VALIDATION, str(exc)) from exc
+
+    pending = workspace_exec_approval.create(
+        workspace_id=workspace_id,
+        user_id=user.id,
+        command=body.command,
+        timeout_s=body.timeout_s,
+        host=target.host,
+        root=target.root,
+    )
+    write_audit(
+        db, request, user,
+        action="workspace_remote_exec_request",
+        target_type="workspace", target_id=workspace_id,
+        detail={
+            "approval_id": pending.approval_id,
+            "command": body.command[:200],
+            "host": target.host,
+        },
+    )
+    db.commit()
+    return {
+        "approval_id": pending.approval_id,
+        "status": "pending",
+        "expires_in_s": pending.expires_in_s,
+        "preview": {
+            "host": target.host,
+            "root": target.root,
+            "command": body.command,
+            "timeout_s": body.timeout_s,
+        },
+    }
+
+
+@router.post("/{workspace_id}/exec/{approval_id}/confirm")
+def confirm_remote_exec(
+    workspace_id: str,
+    approval_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """确认并执行待审批命令；一条命令只能被执行一次。"""
+    pending = workspace_exec_approval.pop(
+        approval_id, workspace_id=workspace_id, user_id=user.id
+    )
+    if pending is None:
+        raise AppError(ErrorCode.VALIDATION, "待确认命令不存在、已执行或已过期")
+    row = _owned_workspace(db, user, workspace_id)
+    if not _is_ssh(row):
+        raise AppError(ErrorCode.VALIDATION, "仅远程工作区支持命令执行")
+    try:
+        result = remote_workspace.exec_command(row, pending.command, pending.timeout_s)
     except remote_workspace.RemoteWorkspaceError as exc:
         raise AppError(ErrorCode.UPSTREAM, str(exc)) from exc
     write_audit(
@@ -722,10 +776,35 @@ def exec_in_remote(
         action="workspace_remote_exec",
         target_type="workspace", target_id=workspace_id,
         detail={
-            "command": body.command[:200],
+            "approval_id": approval_id,
+            "command": pending.command[:200],
             "exit_code": result["exit_code"],
             "host": result["host"],
         },
     )
     db.commit()
-    return {"workspace_id": workspace_id, **result}
+    return {"approval_id": approval_id, "workspace_id": workspace_id, **result}
+
+
+@router.post("/{workspace_id}/exec/{approval_id}/reject")
+def reject_remote_exec(
+    workspace_id: str,
+    approval_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """拒绝待确认命令（不执行，写审计）。"""
+    pending = workspace_exec_approval.pop(
+        approval_id, workspace_id=workspace_id, user_id=user.id
+    )
+    if pending is None:
+        raise AppError(ErrorCode.VALIDATION, "待确认命令不存在、已执行或已过期")
+    write_audit(
+        db, request, user,
+        action="workspace_remote_exec_reject",
+        target_type="workspace", target_id=workspace_id,
+        detail={"approval_id": approval_id, "command": pending.command[:200]},
+    )
+    db.commit()
+    return {"approval_id": approval_id, "status": "rejected"}

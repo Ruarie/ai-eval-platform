@@ -1519,19 +1519,46 @@ export const api = {
       const { data } = await http.post('/api/workspaces', { name, ...options })
       return data
     },
-    /** 远程工作区执行单条命令（仅 kind=ssh）。 */
-    async execRemote(id: string, command: string, timeoutS = 60): Promise<{
+    /** 远程命令第一步：登记待确认请求（不执行，返回审批单与预览）。 */
+    async requestRemoteExec(
+      id: string,
+      command: string,
+      timeoutS = 60,
+    ): Promise<{
+      approval_id: string
+      status: 'pending'
+      expires_in_s: number
+      preview: { host: string; root: string; command: string; timeout_s: number }
+    }> {
+      const { data } = await http.post(`/api/workspaces/${id}/exec`, {
+        command,
+        timeout_s: timeoutS,
+      })
+      return data
+    },
+    /** 远程命令第二步：确认后真正执行（一条命令只能执行一次）。 */
+    async confirmRemoteExec(
+      id: string,
+      approvalId: string,
+    ): Promise<{
+      approval_id: string
       exit_code: number
       stdout: string
       stderr: string
       truncated: boolean
       host: string
       root: string
+      timeout?: boolean
     }> {
-      const { data } = await http.post(`/api/workspaces/${id}/exec`, {
-        command,
-        timeout_s: timeoutS,
-      })
+      const { data } = await http.post(`/api/workspaces/${id}/exec/${approvalId}/confirm`)
+      return data
+    },
+    /** 远程命令：拒绝执行。 */
+    async rejectRemoteExec(
+      id: string,
+      approvalId: string,
+    ): Promise<{ approval_id: string; status: string }> {
+      const { data } = await http.post(`/api/workspaces/${id}/exec/${approvalId}/reject`)
       return data
     },
     async rename(id: string, name: string): Promise<UserWorkspace> {

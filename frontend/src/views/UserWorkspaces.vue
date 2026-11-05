@@ -124,6 +124,15 @@
               multiple
               @change="handleFileInputChange"
             />
+            <button
+              v-if="isRemoteWorkspace"
+              class="icon-btn"
+              title="在远程执行命令（提交后需确认）"
+              :disabled="!currentWorkspace || currentWorkspace.deleted"
+              @click="openExecModal"
+            >
+              ⌘
+            </button>
             <button class="icon-btn" title="刷新文件树" :disabled="treeLoading" @click="loadTree">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="23 4 23 10 17 10" />
@@ -483,6 +492,62 @@
       </div>
     </div>
 
+    <!-- 弹窗 3：远程命令（两阶段：请求 → 确认） -->
+    <div v-if="showExecModal" class="modal-backdrop" @click.self="closeExecModal">
+      <div class="modal-card">
+        <h3 class="modal-title">远程命令</h3>
+        <p v-if="!execPending && !execResult" class="exec-hint">
+          命令将在 {{ currentWorkspace?.ssh_user }}@{{ currentWorkspace?.ssh_host }}:{{ currentWorkspace?.remote_root }}
+          下执行；提交后需要再确认一次，确认前不会下发。
+        </p>
+        <template v-if="!execPending && !execResult">
+          <div class="form-group">
+            <label>命令</label>
+            <textarea
+              v-model="execCommand"
+              class="input modal-input"
+              rows="4"
+              placeholder="例如：git status && ls -la"
+            ></textarea>
+          </div>
+        </template>
+        <template v-else-if="execPending">
+          <div class="exec-preview">
+            <p><b>目标</b>：{{ execPending.preview.host }} · {{ execPending.preview.root }}</p>
+            <p><b>命令</b>：</p>
+            <pre class="exec-code">{{ execPending.preview.command }}</pre>
+            <p class="small tertiary">
+              确认后立即执行，{{ execPending.expires_in_s }} 秒内有效，且只能执行一次。
+            </p>
+          </div>
+        </template>
+        <template v-else-if="execResult">
+          <p class="small">
+            退出码：{{ execResult.exit_code }}
+            <span v-if="execResult.timeout">（超时中断）</span>
+            <span v-else-if="execResult.truncated">（输出已截断）</span>
+          </p>
+          <pre class="exec-code">{{ execResult.stdout || execResult.stderr || '（无输出）' }}</pre>
+        </template>
+        <div class="modal-actions">
+          <button class="btn" @click="closeExecModal">关闭</button>
+          <template v-if="!execPending && !execResult">
+            <button
+              class="btn btn-primary"
+              :disabled="execBusy || !execCommand.trim()"
+              @click="requestExec"
+            >
+              请求执行
+            </button>
+          </template>
+          <template v-else-if="execPending">
+            <button class="btn" :disabled="execBusy" @click="rejectExec">取消</button>
+            <button class="btn btn-primary" :disabled="execBusy" @click="confirmExec">确认执行</button>
+          </template>
+        </div>
+      </div>
+    </div>
+
     <!-- 弹窗 2：重命名工作区 -->
     <div v-if="showRenameWsModal" class="modal-backdrop" @click.self="showRenameWsModal = false">
       <div class="modal-card">
@@ -638,6 +703,74 @@ const currentWorkspace = computed(() => {
 
 /** 远程工作区：命令走 SFTP/SSH，本地专属操作（上传/新建）不展示。 */
 const isRemoteWorkspace = computed(() => currentWorkspace.value?.kind === 'ssh')
+
+// ─── 远程命令：先登记审批单，用户确认后才真正执行 ───
+const showExecModal = ref(false)
+const execCommand = ref('')
+const execBusy = ref(false)
+const execPending = ref<{
+  approval_id: string
+  expires_in_s: number
+  preview: { host: string; root: string; command: string; timeout_s: number }
+} | null>(null)
+const execResult = ref<{
+  exit_code: number
+  stdout: string
+  stderr: string
+  truncated: boolean
+  timeout?: boolean
+} | null>(null)
+
+function openExecModal(): void {
+  showExecModal.value = true
+  execCommand.value = ''
+  execPending.value = null
+  execResult.value = null
+}
+
+function closeExecModal(): void {
+  showExecModal.value = false
+  execPending.value = null
+  execResult.value = null
+}
+
+async function requestExec(): Promise<void> {
+  const ws = currentWorkspace.value
+  const command = execCommand.value.trim()
+  if (!ws || !command) return
+  execBusy.value = true
+  try {
+    execPending.value = await api.workspaces.requestRemoteExec(ws.id, command)
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '提交失败')
+  } finally {
+    execBusy.value = false
+  }
+}
+
+async function confirmExec(): Promise<void> {
+  const ws = currentWorkspace.value
+  const pending = execPending.value
+  if (!ws || !pending) return
+  execBusy.value = true
+  try {
+    execResult.value = await api.workspaces.confirmRemoteExec(ws.id, pending.approval_id)
+    execPending.value = null
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '执行失败')
+  } finally {
+    execBusy.value = false
+  }
+}
+
+async function rejectExec(): Promise<void> {
+  const ws = currentWorkspace.value
+  const pending = execPending.value
+  if (ws && pending) {
+    await api.workspaces.rejectRemoteExec(ws.id, pending.approval_id).catch(() => {})
+  }
+  execPending.value = null
+}
 
 const storagePercent = computed(() => {
   const bytes = currentWorkspace.value?.folder?.total_bytes ?? 0
@@ -2123,6 +2256,30 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary, #4b5563);
+}
+
+.exec-hint {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  line-height: 1.6;
+  margin: 6px 0 10px;
+}
+
+.exec-preview p {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.exec-code {
+  max-height: 260px;
+  overflow: auto;
+  background: rgba(15, 23, 42, 0.05);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .modal-input {

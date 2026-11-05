@@ -6,7 +6,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.48 |
+| 文档版本 | V2.49 |
 | 本轮审查日期 | 2026-11-02（知识库接入真实 LightRAG：异步建索引状态收敛、删除顺序与降级口径；不新增路径与字段） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.55（功能唯一权威） |
@@ -20,6 +20,8 @@
 | 适用范围 | V1.0：浏览器 `web/` ↔ `api`；全域 REST + WS 接口规范 |
 
 > V2.46（2026-11-02）：知识库接入真实 LightRAG 引擎（§3.9）。**不新增平台 REST/WS 路径与字段**，仅明确既有语义：上传响应与文档列表的 `status` 由引擎异步建索引决定（`indexing | indexed | failed`），`indexing` 会在列表查询时向 LightRAG 回读并收敛；`DELETE` 文档/知识库改为「先删引擎索引、再删库内记录」，引擎已配置但删除失败返回 `UPSTREAM`；Playground 的 `similarity` 允许为 `null`（LightRAG 只给排序不给分数），前端显示占位符而不伪造 0；检索降级口径收紧为「仅不可达/服务端错误才回退本地关键词」，引擎可用但召回为空仍记 `lightrag`。删除与状态回读在服务端按批执行（删除 ≤50/批、状态 ≤200/批），对调用方仍是一次请求；`indexing`/`failed` 文档的删除不强制引擎成功，避免引擎不可用时无法清理。适配服务内部契约（`/documents/index`、`/documents/status`、`/documents/delete`、`/query`）属容器内网，不属于本契约范围，见《AI测试与评估平台-LightRAG接入技术方案.md》。
+
+> V2.49（2026-11-05）：远程工作区命令执行改为**两阶段审批**（§3.10）：`POST /api/workspaces/{id}/exec` 只登记待确认请求并返回 `202` + `approval_id` + 预览（host/root/命令/有效期），不执行；新增 `POST /{id}/exec/{approval_id}/confirm`（校验归属与有效期后执行，一条命令只能执行一次）与 `POST /{id}/exec/{approval_id}/reject`。审批单在服务端保存 300 秒，按工作区 + 用户双匹配，重启即失效。
 
 > V2.48（2026-11-05）：用户工作区支持**远程 SSH 目录**（§3.10）。`POST /api/workspaces` 增量可选 `kind`（`local` 缺省 / `ssh`）与 `ssh_host/ssh_port/ssh_user/ssh_key_name/remote_root`；私钥只按**文件名**引用（服务端 `WORKSPACE_SSH_KEY_DIR` 只读挂载），不入库、不回显；默认不限制目标主机——能否连上由「目标机 `authorized_keys` 是否接受该私钥」决定；`WORKSPACE_SSH_ALLOWED_HOSTS` 非空时作为可选收紧（只允许列出的主机）；创建时做连通性探测，失败 `VALIDATION`。新增 `POST /api/workspaces/{id}/exec` 在远程 `remote_root` 下执行单条非交互命令（输出上限 20000 字符、超时 600s、写审计 `workspace_remote_exec`）。远程工作区支持目录列表/树/读/写/删除；`upload`、`files`（建目录/文件）、`rename`、`files/raw` 本轮返回 `VALIDATION`。工作区对象增量返回 `kind/ssh_*` 字段。
 
@@ -1767,9 +1769,28 @@ Prometheus 内置可观测性指标端点（内网 HTTP GET），输出前缀为
   - 原始文件响应附带 `Content-Security-Policy: sandbox` 与 `X-Content-Type-Options: nosniff`，隔离 HTML/SVG 文档脚本及平台同源权限；`GET /api/files/{id}/content` 的用户附件响应同样隔离。媒体仍支持 Range，不改变文件字节。
 - 权限：仅工作区属主；非属主 → 401/403；文件不存在 → 404；路径越界/符号链接 → 400 `VALIDATION`。
 
-#### `POST /api/workspaces/{id}/exec` body `{command, timeout_s?}`
+#### `POST /api/workspaces/{id}/exec` body `{command, timeout_s?}` → **202**
 
-在**远程**工作区的 `remote_root` 下执行单条非交互命令（`kind=local` → `VALIDATION`）。响应 `{exit_code, stdout, stderr, truncated, host, root}`；`timeout_s` 缺省 60、上限 600；输出超过 20000 字符截断并置 `truncated=true`。连接失败/主机不在白名单 → `UPSTREAM`；每次执行写审计 `workspace_remote_exec`（含命令前 200 字符与退出码）。
+登记一条待确认的远程命令，**不执行**。`kind=local` → `VALIDATION`。响应：
+
+```json
+{
+  "approval_id": "6a6ec0…",
+  "status": "pending",
+  "expires_in_s": 299,
+  "preview": { "host": "build-01", "root": "/srv/app", "command": "ls -la", "timeout_s": 60 }
+}
+```
+
+审批单在服务端进程内保存 300 秒，按 `workspace_id` + `user_id` 双匹配；重启后全部失效（等价于全部拒绝）。写审计 `workspace_remote_exec_request`。
+
+#### `POST /api/workspaces/{id}/exec/{approval_id}/confirm`
+
+确认并执行，**一条命令只能执行一次**。响应 `{approval_id, workspace_id, exit_code, stdout, stderr, truncated, host, root, timeout?}`；`timeout_s` 缺省 60、上限 600；输出超过 20000 字符截断并置 `truncated=true`；命令超时返回 `exit_code=-1` 且 `timeout=true`。连接失败 → `UPSTREAM`；审批单不存在/已消费/已过期/归属不符 → `VALIDATION`。写审计 `workspace_remote_exec`。
+
+#### `POST /api/workspaces/{id}/exec/{approval_id}/reject`
+
+拒绝待确认命令（不执行）。响应 `{approval_id, status: "rejected"}`，写审计 `workspace_remote_exec_reject`。
 
 #### `POST /api/workspaces/{id}/files/upload`（`multipart/form-data`）
 
