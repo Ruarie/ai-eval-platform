@@ -70,6 +70,21 @@ class _NameBody(BaseModel):
     remote_root: str | None = Field(default=None, max_length=500)
 
 
+class _SshBrowseBody(BaseModel):
+    """创建远程工作区前的目录浏览请求（连接参数尚未落库）。
+
+    ``password`` 只在本次请求内使用：不写审计、不落日志、不进数据库。
+    """
+
+    host: str = Field(min_length=1, max_length=200)
+    port: int = Field(default=22, ge=1, le=65535)
+    user: str = Field(min_length=1, max_length=100)
+    auth_type: str = Field(default="key_file", max_length=16)
+    key_name: str | None = Field(default=None, max_length=200)
+    path: str = Field(default="/", max_length=1000)
+    password: str | None = Field(default=None, max_length=512)
+
+
 class _ExecBody(BaseModel):
     """远程命令执行请求（仅 ssh 工作区）。"""
 
@@ -206,6 +221,38 @@ def list_workspaces(
     total = query.count()
     rows = query.order_by(Workspace.updated_at.desc(), Workspace.id.asc()).offset(offset).limit(limit).all()
     return {"items": [_workspace_item(row) for row in rows], "total": total}
+
+
+@router.post("/ssh/browse")
+def browse_ssh_directories(
+    body: _SshBrowseBody,
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """列出远程主机上的子目录，供创建远程工作区时挑选 ``remote_root``。
+
+    只列目录不列文件；浏览阶段以 `/` 为界、不限制深度；连接参数是尚未落库的
+    临时值，密码只在本次请求内使用（不写审计、不落日志）。
+    """
+    auth_type = (body.auth_type or "key_file").strip().lower()
+    if auth_type not in {"key_file", "password"}:
+        raise AppError(ErrorCode.VALIDATION, "认证方式无效")
+    if auth_type == "key_file" and not (body.key_name or "").strip():
+        raise AppError(ErrorCode.VALIDATION, "私钥认证需要填写私钥文件名")
+    if auth_type == "password" and not (body.password or ""):
+        raise AppError(ErrorCode.VALIDATION, "密码认证需要先填入 SSH 密码")
+
+    workspace = remote_workspace.temporary_workspace(
+        host=body.host.strip(),
+        port=body.port,
+        user=body.user.strip(),
+        auth_type=auth_type,
+        key_name=(body.key_name or "").strip() or None,
+    )
+    result = _remote_call(
+        remote_workspace.browse_dirs, workspace, body.path or "/", body.password or ""
+    )
+    return {"host": body.host.strip(), **result}
 
 
 @router.post("", status_code=201)

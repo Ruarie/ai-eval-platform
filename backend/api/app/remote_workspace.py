@@ -219,6 +219,40 @@ def list_dir(workspace: Any, path: str, password: str = "") -> list[dict]:
         return _list_entries(sftp, remote)
 
 
+def temporary_workspace(
+    *, host: str, port: int, user: str, auth_type: str, key_name: str | None
+) -> Any:
+    """构造一个未入库的临时工作区对象，用于"创建前浏览目录"。
+
+    ``remote_root`` 固定为 ``/``：浏览阶段需要能看全盘来挑选目标目录，
+    真正落库的根目录由用户在页面上选定。
+    """
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        kind="ssh",
+        ssh_host=host,
+        ssh_port=port,
+        ssh_user=user,
+        auth_type=auth_type,
+        ssh_key_name=key_name,
+        remote_root="/",
+    )
+
+
+def browse_dirs(workspace: Any, path: str = "/", password: str = "") -> dict:
+    """列出一层目录供用户挑选：只返回子目录，附当前路径与父路径。"""
+    resolved = _normalize(workspace, path)
+    entries = list_dir(workspace, resolved, password)
+    dirs = [
+        {"name": entry["name"], "path": posixpath.join(resolved, entry["name"])}
+        for entry in entries
+        if entry["kind"] == "dir"
+    ]
+    parent = None if resolved == "/" else (posixpath.dirname(resolved) or "/")
+    return {"path": resolved, "parent": parent, "entries": dirs}
+
+
 def probe(workspace: Any, password: str = "") -> dict:
     """轻量连通性探测：能连上并列出根目录才算配置有效。"""
     entries = list_dir(workspace, ".")

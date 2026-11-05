@@ -1536,6 +1536,33 @@ export const api = {
       const { data } = await http.post('/api/workspaces', { name, ...options })
       return data
     },
+    /** 浏览远程主机目录（创建远程工作区时挑选 remote_root，只列目录）。 */
+    async browseSshDirs(params: {
+      host: string
+      user: string
+      port?: number
+      auth_type?: 'key_file' | 'password'
+      key_name?: string
+      path?: string
+      /** 仅本次请求使用，不落库、不写日志。 */
+      password?: string
+    }): Promise<{
+      host: string
+      path: string
+      parent: string | null
+      entries: Array<{ name: string; path: string }>
+    }> {
+      const { data } = await http.post('/api/workspaces/ssh/browse', {
+        host: params.host,
+        user: params.user,
+        port: params.port ?? 22,
+        auth_type: params.auth_type ?? 'key_file',
+        key_name: params.key_name,
+        path: params.path ?? '/',
+        password: params.password,
+      })
+      return data
+    },
     /** 远程命令第一步：登记待确认请求（不执行，返回审批单与预览）。 */
     async requestRemoteExec(
       id: string,

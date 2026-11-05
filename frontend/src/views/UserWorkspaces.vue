@@ -472,6 +472,15 @@
               <option value="password">密码（每次连接临时输入，不落库）</option>
             </select>
           </div>
+          <div v-if="newWsAuth === 'password'" class="form-group">
+            <label>连接密码（仅用于浏览目录，不保存）</label>
+            <input
+              v-model="browsePassword"
+              type="password"
+              class="input modal-input"
+              placeholder="输入该账号密码后可浏览远程目录"
+            />
+          </div>
           <p class="modal-subtitle" style="margin: 4px 0 10px">
             远程工作区通过 SFTP 读写、可执行单条命令；私钥放在服务器 workdir，
             平台只按文件名引用。能否连上由目标机是否接受该公钥决定；服务端若配置了
@@ -499,7 +508,24 @@
           </p>
           <div class="form-group">
             <label>远程根目录</label>
-            <input v-model="newWsRoot" class="input modal-input" placeholder="/srv/workspace（可填 / 但权限更大）" />
+            <div class="row" style="gap: 8px; align-items: center">
+              <input
+                v-model="newWsRoot"
+                class="input modal-input"
+                placeholder="/srv/workspace（可填 / 但权限更大）"
+              />
+              <button
+                type="button"
+                class="btn btn-secondary"
+                :disabled="browseLoading"
+                @click="browseTo(newWsRoot || '/')"
+              >
+                {{ browseLoading ? '连接中…' : '浏览' }}
+              </button>
+            </div>
+            <p class="exec-hint" style="margin: 6px 0 0">
+              点「浏览」连接服务器后逐层选择目录，选中的路径会回填到这里。
+            </p>
           </div>
         </template>
         <div class="modal-actions">
@@ -507,6 +533,43 @@
           <button class="btn btn-primary" :disabled="busy || !newWsName.trim()" @click="submitCreateWorkspace">
             立即创建
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 弹窗 5：选择远程目录 -->
+    <div v-if="showBrowseModal" class="modal-backdrop" @click.self="showBrowseModal = false">
+      <div class="modal-card">
+        <h3 class="modal-title">选择远程目录</h3>
+        <p class="exec-hint">
+          {{ newWsHost }} · 当前路径：<span class="mono">{{ browsePath }}</span>
+        </p>
+        <p v-if="browseError" class="exec-hint" style="color: #b4544e">{{ browseError }}</p>
+        <div class="browse-list">
+          <button
+            v-if="browseParent"
+            type="button"
+            class="browse-row"
+            @click="browseTo(browseParent)"
+          >
+            ⬆ 上级目录
+          </button>
+          <button
+            v-for="dir in browseEntries"
+            :key="dir.path"
+            type="button"
+            class="browse-row"
+            @click="browseTo(dir.path)"
+          >
+            📁 {{ dir.name }}
+          </button>
+          <p v-if="!browseEntries.length && !browseError" class="exec-hint" style="padding: 10px">
+            该目录下没有子目录
+          </p>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" @click="showBrowseModal = false">取消</button>
+          <button class="btn btn-primary" @click="chooseBrowseDir">选择当前目录</button>
         </div>
       </div>
     </div>
@@ -714,6 +777,14 @@ const newWsAuth = ref<'key_file' | 'password'>('key_file')
 const showSshPwdModal = ref(false)
 const sshPwdInput = ref('')
 const sshPwdSet = ref(false)
+// 目录浏览：创建远程工作区时挑选 remote_root；browsePassword 仅用于本次连接。
+const showBrowseModal = ref(false)
+const browseLoading = ref(false)
+const browseError = ref('')
+const browsePath = ref('/')
+const browseParent = ref<string | null>(null)
+const browseEntries = ref<Array<{ name: string; path: string }>>([])
+const browsePassword = ref('')
 const showRenameWsModal = ref(false)
 const renameWsValue = ref('')
 const wsToRename = ref<UserWorkspace | null>(null)
@@ -1382,6 +1453,52 @@ function confirmDeletePath(node: UserWorkspaceTreeNode): void {
 function openCreateModal(): void {
   newWsName.value = ''
   showCreateWsModal.value = true
+}
+
+async function browseTo(path: string): Promise<void> {
+  const host = newWsHost.value.trim()
+  const sshUser = newWsUser.value.trim()
+  if (!host || !sshUser) {
+    message.warning('请先填写主机与登录用户')
+    return
+  }
+  if (newWsAuth.value === 'key_file' && !newWsKeyName.value.trim()) {
+    message.warning('私钥认证需要填写私钥文件名')
+    return
+  }
+  if (newWsAuth.value === 'password' && !browsePassword.value) {
+    message.warning('请先填写 SSH 密码（仅用于浏览目录，不会保存）')
+    return
+  }
+  browseLoading.value = true
+  browseError.value = ''
+  try {
+    const data = await api.workspaces.browseSshDirs({
+      host,
+      user: sshUser,
+      port: newWsPort.value || 22,
+      auth_type: newWsAuth.value,
+      key_name: newWsAuth.value === 'key_file' ? newWsKeyName.value.trim() : undefined,
+      path,
+      password: newWsAuth.value === 'password' ? browsePassword.value : undefined,
+    })
+    browsePath.value = data.path
+    browseParent.value = data.parent
+    browseEntries.value = data.entries
+    showBrowseModal.value = true
+  } catch (err) {
+    browseError.value = err instanceof Error ? err.message : '无法浏览该主机目录'
+    browseEntries.value = []
+    showBrowseModal.value = true
+  } finally {
+    browseLoading.value = false
+  }
+}
+
+function chooseBrowseDir(): void {
+  newWsRoot.value = browsePath.value
+  showBrowseModal.value = false
+  message.success(`已选择远程目录：${browsePath.value}`)
 }
 
 async function submitCreateWorkspace(): Promise<void> {
@@ -2355,6 +2472,31 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary, #4b5563);
+}
+
+.browse-list {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  margin: 6px 0 10px;
+}
+
+.browse-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  cursor: pointer;
+  font-size: 13px;
+  color: inherit;
+}
+
+.browse-row:hover {
+  background: rgba(15, 23, 42, 0.05);
 }
 
 .exec-hint {
