@@ -28,9 +28,11 @@ def definitions(root: Path) -> dict[str, dict[str, str]]:
             name: {"context": f"backend/{name}", "dockerfile": f"backend/{name}/Dockerfile"}
             for name in ("lightrag", "stress")
         },
-        # HTTPS 反代用官方镜像 + 自定义 Caddyfile，走同样的构建/部署通道。
-        "https": {"context": "deploy/https", "dockerfile": "deploy/https/Dockerfile"},
     }
+    # HTTPS 反代：用官方 nginx 镜像 + 自签脚本，走同样的构建/部署通道。
+    # 按文件存在性发现，避免单测夹具（临时目录，只放后端 Dockerfile）被这条打挂。
+    if (root / "deploy/https/Dockerfile").exists():
+        result["https"] = {"context": "deploy/https", "dockerfile": "deploy/https/Dockerfile"}
     for dockerfile in sorted((root / "backend").glob("*_mcp/Dockerfile")):
         name = dockerfile.parent.name.removesuffix("_mcp").replace("_", "-") + "-mcp"
         result[name] = {"context": "backend", "dockerfile": dockerfile.relative_to(root).as_posix()}
