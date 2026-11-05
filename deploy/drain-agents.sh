@@ -89,13 +89,36 @@ drain_agent_turns() {
     fi
     [ "$running" = "true" ] || return 1
     # 仅模块明确缺失时进入首次升级；导入故障或 Docker 失败不能当成旧版本放行。
-    timeout 15 docker exec "$api_container" python -c 'import pathlib, runpy, sys; path = pathlib.Path("app/agent/deploy_guard.py"); namespace = runpy.run_path(str(path)) if path.is_file() else sys.exit(3); assert callable(namespace["turn_admission"])' >/dev/null 2>&1 || guard_status=$?
+    #
+    # 容器刚重建时 python 首次导入 app.*（配置 + 连库）可能超过 15s，单次探测会把
+    # 「正在启动」误判成「没有准入能力」，历史上导致部署在这里反复失败。改为
+    # 有上限地重试：容器仍在起时多等几轮，真正缺模块（exit 3）立即放行。
+    local guard_status=0 attempt
+    for attempt in 1 2 3 4 5 6; do
+        guard_status=0
+        timeout 20 docker exec "$api_container" python -c 'import pathlib, runpy, sys; path = pathlib.Path("app/agent/deploy_guard.py"); namespace = runpy.run_path(str(path)) if path.is_file() else sys.exit(3); assert callable(namespace["turn_admission"])' >/dev/null 2>&1 || guard_status=$?
+        if [ "$guard_status" = 0 ] || [ "$guard_status" = 3 ]; then
+            break
+        fi
+        if [ "$attempt" -lt 6 ]; then
+            echo "==> API 准入检查未就绪（第 $attempt 次，状态 $guard_status），5 秒后重试"
+            sleep 5
+        fi
+    done
     if [ "$guard_status" != 0 ] && [ "$guard_status" != 3 ]; then
         echo "错误：无法确认 API 部署准入能力，未更新容器" >&2
         return 1
     fi
-    # 锁路径必须与运行中 API 配置一致，不能仅根据默认挂载猜测。
-    if ! docker exec "$api_container" python -c 'from app.config import settings; assert settings.data_dir == "/data"' >/dev/null 2>&1; then
+    # 锁路径必须与运行中 API 配置一致，不能仅根据默认挂载猜测（同样容忍启动期）。
+    local data_dir_ok=1
+    for attempt in 1 2 3 4 5 6; do
+        if docker exec "$api_container" python -c 'from app.config import settings; assert settings.data_dir == "/data"' >/dev/null 2>&1; then
+            data_dir_ok=0
+            break
+        fi
+        [ "$attempt" -lt 6 ] && sleep 5
+    done
+    if [ "$data_dir_ok" != 0 ]; then
         echo "错误：API 数据目录不符合 /data 部署契约，无法协调回合准入" >&2
         return 1
     fi
