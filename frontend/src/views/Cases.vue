@@ -2574,7 +2574,9 @@ onUnmounted(() => {
 <style scoped>
 /* ─── 用例集工作台核心布局 ─── */
 .cases-workbench {
-  height: calc(100vh - var(--topbar-h) - 20px);
+  /* 用父级可用高度而不是 100vh：外层 .content 有 padding，写死 vh 会把工作台
+     撑出可视区，导致表格底部被裁掉且无法滚动。 */
+  height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -2587,6 +2589,9 @@ onUnmounted(() => {
 .nordic-layout {
   display: grid;
   grid-template-columns: var(--tree-w, 280px) minmax(0, 1fr);
+  /* 不约束行高时 grid 行会被内容撑开，子级的 height:100% 失效，
+     表格因此溢出到工作台外被 overflow:hidden 裁掉。 */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   min-width: 0;
   background: var(--bg-main);

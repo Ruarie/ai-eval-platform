@@ -786,3 +786,30 @@ test('旧保存请求不含本批候选时保留审核列表，重试后才清�
   expect(ctx.saves[1].cases).toHaveLength(2)
   await expect(page.locator('.data-row')).toHaveCount(2)
 })
+
+test('用例表格在工作台内部滚动，长列表不会被裁掉', async ({ page }) => {
+  const ctx = await setup(page)
+  // 造 40 条用例：内容高度必须超过一屏，否则测不出「被裁剪」的问题。
+  ctx.rows.a = Array.from({ length: 40 }, (_, index) => ({
+    ...row(`row-${index}`, `用例 ${index + 1}`),
+    code: `TC-${String(index + 1).padStart(3, '0')}`,
+  }))
+  await page.goto('/cases')
+  await expect(page.locator('.table-container')).toBeVisible()
+
+  const before = await page.evaluate(() => {
+    const el = document.querySelector('.table-container')
+    return el ? { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, scrollTop: el.scrollTop } : null
+  })
+  expect(before).not.toBeNull()
+  // 关键断言：容器自身可滚动（此前 grid 行被内容撑开，表格溢出到工作台外被裁掉）。
+  expect(before!.scrollHeight).toBeGreaterThan(before!.clientHeight)
+
+  await page.evaluate(() => {
+    const el = document.querySelector('.table-container')
+    if (el) el.scrollTop = el.scrollHeight
+  })
+  await page.waitForTimeout(300)
+  const scrolled = await page.evaluate(() => document.querySelector('.table-container')?.scrollTop ?? 0)
+  expect(scrolled).toBeGreaterThan(0)
+})
