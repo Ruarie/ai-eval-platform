@@ -56,6 +56,7 @@ class SshTarget:
     user: str
     key_name: str
     root: str
+    auth_type: str = "key_file"
 
 
 def _key_dir() -> str:
@@ -72,20 +73,27 @@ def target_for(workspace: Any) -> SshTarget:
     host = str(getattr(workspace, "ssh_host", "") or "").strip()
     user = str(getattr(workspace, "ssh_user", "") or "").strip()
     key_name = str(getattr(workspace, "ssh_key_name", "") or "").strip()
+    auth_type = str(getattr(workspace, "auth_type", "key_file") or "key_file").strip().lower()
     root = str(getattr(workspace, "remote_root", "") or "").strip() or "/"
     port = int(getattr(workspace, "ssh_port", 0) or 22)
 
     if getattr(workspace, "kind", "local") != "ssh":
         raise RemoteWorkspaceError("工作区不是远程类型")
-    if not host or not user or not key_name:
-        raise RemoteWorkspaceError("远程工作区缺少 host/user/key 配置")
+    if not host or not user:
+        raise RemoteWorkspaceError("远程工作区缺少 host/user 配置")
+    if auth_type not in {"key_file", "password"}:
+        raise RemoteWorkspaceError(f"不支持的认证方式：{auth_type}")
+    if auth_type == "key_file" and not key_name:
+        raise RemoteWorkspaceError("私钥认证需要指定私钥文件名")
     # 白名单非空才收紧；为空表示"凭据决定边界"，任意目标主机都会尝试连接。
     allowed = _allowed_hosts()
     if allowed and host.lower() not in allowed:
         raise RemoteWorkspaceError(f"主机不在白名单内：{host}")
     if not root.startswith("/"):
         raise RemoteWorkspaceError("remote_root 必须是绝对路径")
-    return SshTarget(host=host, port=port, user=user, key_name=key_name, root=root)
+    return SshTarget(
+        host=host, port=port, user=user, key_name=key_name, root=root, auth_type=auth_type
+    )
 
 
 def _load_private_key(key_name: str) -> paramiko.PKey:
@@ -107,7 +115,7 @@ def _load_private_key(key_name: str) -> paramiko.PKey:
 
 
 @contextmanager
-def _connect(workspace: Any) -> Iterator[paramiko.SSHClient]:
+def _connect(workspace: Any, password: str = "") -> Iterator[paramiko.SSHClient]:
     target = target_for(workspace)
     client = paramiko.SSHClient()
     # 有 known_hosts 就严格校验指纹（防中间人）；没有则退化为 AutoAdd 并告警，
@@ -119,12 +127,19 @@ def _connect(workspace: Any) -> Iterator[paramiko.SSHClient]:
     else:
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         logger.warning("未配置 known_hosts，跳过主机指纹校验 host=%s", target.host)
+    if target.auth_type == "password" and not password:
+        raise RemoteWorkspaceError("该工作区使用密码认证，请在页面输入 SSH 密码后重试")
+    credentials = (
+        {"password": password}
+        if target.auth_type == "password"
+        else {"pkey": _load_private_key(target.key_name)}
+    )
     try:
         client.connect(
             hostname=target.host,
             port=target.port,
             username=target.user,
-            pkey=_load_private_key(target.key_name),
+            **credentials,
             timeout=settings.workspace_ssh_connect_timeout_s,
             banner_timeout=settings.workspace_ssh_connect_timeout_s,
             auth_timeout=settings.workspace_ssh_connect_timeout_s,
@@ -167,8 +182,8 @@ def _entry_type(mode: int) -> str:
 
 
 @contextmanager
-def _sftp(workspace: Any) -> Iterator[paramiko.SFTPClient]:
-    with _connect(workspace) as client:
+def _sftp(workspace: Any, password: str = "") -> Iterator[paramiko.SFTPClient]:
+    with _connect(workspace, password) as client:
         sftp = client.open_sftp()
         try:
             yield sftp
@@ -197,20 +212,20 @@ def _list_entries(sftp: paramiko.SFTPClient, remote: str) -> list[dict]:
     return entries
 
 
-def list_dir(workspace: Any, path: str) -> list[dict]:
+def list_dir(workspace: Any, path: str, password: str = "") -> list[dict]:
     """列出一层目录内容；字段与本地实现同构（name/kind/size/updated_at）。"""
     remote = _normalize(workspace, path)
-    with _sftp(workspace) as sftp:
+    with _sftp(workspace, password) as sftp:
         return _list_entries(sftp, remote)
 
 
-def probe(workspace: Any) -> dict:
+def probe(workspace: Any, password: str = "") -> dict:
     """轻量连通性探测：能连上并列出根目录才算配置有效。"""
     entries = list_dir(workspace, ".")
     return {"ok": True, "entries": len(entries)}
 
 
-def tree(workspace: Any, max_depth: int = 2) -> list[dict]:
+def tree(workspace: Any, max_depth: int = 2, password: str = "") -> list[dict]:
     """递归目录树；全程复用一条 SFTP 连接，超过 ``MAX_TREE_ENTRIES`` 截断并标记。"""
     root = _normalize(workspace, ".")
     depth_limit = max(1, min(int(max_depth or 2), 8))
@@ -238,7 +253,7 @@ def tree(workspace: Any, max_depth: int = 2) -> list[dict]:
             if item["kind"] == "dir" and depth < depth_limit:
                 walk(sftp, node["path"], depth + 1, node["children"])
 
-    with _sftp(workspace) as sftp:
+    with _sftp(workspace, password) as sftp:
         walk(sftp, root, 1, nodes)
     if truncated:
         nodes.append(
@@ -247,10 +262,10 @@ def tree(workspace: Any, max_depth: int = 2) -> list[dict]:
     return nodes
 
 
-def read_file(workspace: Any, path: str) -> dict:
+def read_file(workspace: Any, path: str, password: str = "") -> dict:
     """读取单文件文本；返回结构与本地 ``read_workspace_file`` 一致。"""
     remote = _normalize(workspace, path)
-    with _sftp(workspace) as sftp:
+    with _sftp(workspace, password) as sftp:
         attrs = sftp.stat(remote)
         if stat_module.S_ISDIR(attrs.st_mode or 0):
             raise RemotePathError("目标是目录，不能按文本读取")
@@ -300,21 +315,21 @@ def _relative(workspace: Any, remote: str) -> str:
     return remote[len(root):].lstrip("/") if remote.startswith(root) else remote
 
 
-def write_text(workspace: Any, path: str, content: str) -> dict:
+def write_text(workspace: Any, path: str, content: str, password: str = "") -> dict:
     remote = _normalize(workspace, path)
     payload = (content or "").encode("utf-8")
     if len(payload) > MAX_TEXT_BYTES:
         raise RemotePathError("内容超过 2MB，请改用上传")
-    with _sftp(workspace) as sftp:
+    with _sftp(workspace, password) as sftp:
         _ensure_parent(sftp, remote)
         with sftp.open(remote, "wb") as handle:
             handle.write(payload)
     return {"path": _relative(workspace, remote), "size": len(payload)}
 
 
-def create_entry(workspace: Any, path: str, is_dir: bool) -> None:
+def create_entry(workspace: Any, path: str, is_dir: bool, password: str = "") -> None:
     remote = _normalize(workspace, path)
-    with _sftp(workspace) as sftp:
+    with _sftp(workspace, password) as sftp:
         if is_dir:
             sftp.mkdir(remote)
         else:
@@ -323,19 +338,19 @@ def create_entry(workspace: Any, path: str, is_dir: bool) -> None:
                 pass
 
 
-def rename(workspace: Any, source: str, target: str) -> None:
+def rename(workspace: Any, source: str, target: str, password: str = "") -> None:
     src = _normalize(workspace, source)
     dst = _normalize(workspace, target)
-    with _sftp(workspace) as sftp:
+    with _sftp(workspace, password) as sftp:
         sftp.rename(src, dst)
 
 
-def delete(workspace: Any, path: str) -> None:
+def delete(workspace: Any, path: str, password: str = "") -> None:
     remote = _normalize(workspace, path)
     target = target_for(workspace)
     if remote == posixpath.normpath(target.root):
         raise RemotePathError("不能删除工作区根目录")
-    with _sftp(workspace) as sftp:
+    with _sftp(workspace, password) as sftp:
         attrs = sftp.stat(remote)
         if stat_module.S_ISDIR(attrs.st_mode or 0):
             _remove_tree(sftp, remote)
@@ -343,24 +358,24 @@ def delete(workspace: Any, path: str) -> None:
             sftp.remove(remote)
 
 
-def upload(workspace: Any, path: str, filename: str, stream, size: int | None = None) -> dict:
+def upload(workspace: Any, path: str, filename: str, stream, size: int | None = None, password: str = "") -> dict:
     """上传到目录 ``path`` 下；``filename`` 由调用方清洗。"""
     remote_dir = _normalize(workspace, path)
     remote = posixpath.join(remote_dir, filename)
     _normalize(workspace, remote)
-    with _sftp(workspace) as sftp:
+    with _sftp(workspace, password) as sftp:
         _ensure_parent(sftp, remote)
         sftp.putfo(stream, remote, file_size=size)
         attrs = sftp.stat(remote)
     return {"name": filename, "path": remote, "size": int(attrs.st_size or 0)}
 
 
-def exec_command(workspace: Any, command: str, timeout_s: int = 60) -> dict:
+def exec_command(workspace: Any, command: str, timeout_s: int = 60, password: str = "") -> dict:
     """在远程执行单条非交互命令；输出超出上限时截断并标记。"""
     target = target_for(workspace)
     limit = max(1, min(int(timeout_s or 60), 600))
     max_chars = 20000
-    with _connect(workspace) as client:
+    with _connect(workspace, password) as client:
         # 远程根目录可能含引号/空格，必须 shell 转义后再拼 cd。
         stdin, stdout, stderr = client.exec_command(
             f"cd {shlex.quote(target.root)} && {command}", timeout=limit, get_pty=False

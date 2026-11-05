@@ -125,6 +125,14 @@
               @change="handleFileInputChange"
             />
             <button
+              v-if="needsSshPassword"
+              class="icon-btn"
+              :title="sshPwdSet ? 'SSH 密码已设置（点击修改）' : '设置 SSH 密码（仅本会话）'"
+              @click="openSshPwdModal"
+            >
+              {{ sshPwdSet ? '🔓' : '🔑' }}
+            </button>
+            <button
               v-if="isRemoteWorkspace"
               class="icon-btn"
               title="在远程执行命令（提交后需确认）"
@@ -457,6 +465,13 @@
           </select>
         </div>
         <template v-if="newWsKind === 'ssh'">
+          <div class="form-group">
+            <label>认证方式</label>
+            <select v-model="newWsAuth" class="input modal-input">
+              <option value="key_file">私钥文件（服务端预置）</option>
+              <option value="password">密码（每次连接临时输入，不落库）</option>
+            </select>
+          </div>
           <p class="modal-subtitle" style="margin: 4px 0 10px">
             远程工作区通过 SFTP 读写、可执行单条命令；私钥放在服务器 workdir，
             平台只按文件名引用。能否连上由目标机是否接受该公钥决定；服务端若配置了
@@ -474,10 +489,14 @@
             <label>登录用户</label>
             <input v-model="newWsUser" class="input modal-input" placeholder="例如：deploy" />
           </div>
-          <div class="form-group">
+          <div v-if="newWsAuth === 'key_file'" class="form-group">
             <label>私钥文件名</label>
             <input v-model="newWsKeyName" class="input modal-input" placeholder="例如：id_ed25519_build" />
           </div>
+          <p v-else class="exec-hint">
+            选择密码后，创建时不做连通性探测；首次打开工作区时在页面填入 SSH 密码即可，
+            密码只保存在当前标签页，关闭即失效。
+          </p>
           <div class="form-group">
             <label>远程根目录</label>
             <input v-model="newWsRoot" class="input modal-input" placeholder="/srv/workspace（可填 / 但权限更大）" />
@@ -487,6 +506,34 @@
           <button class="btn" :disabled="busy" @click="showCreateWsModal = false">取消</button>
           <button class="btn btn-primary" :disabled="busy || !newWsName.trim()" @click="submitCreateWorkspace">
             立即创建
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 弹窗 4：SSH 密码（只存 sessionStorage，服务端不落库） -->
+    <div v-if="showSshPwdModal" class="modal-backdrop" @click.self="showSshPwdModal = false">
+      <div class="modal-card">
+        <h3 class="modal-title">SSH 密码</h3>
+        <p class="exec-hint">
+          {{ currentWorkspace?.ssh_user }}@{{ currentWorkspace?.ssh_host }} ·
+          密码只保存在当前标签页（sessionStorage），关闭页面即失效；服务端不存储、不写日志。
+        </p>
+        <div class="form-group">
+          <label>密码</label>
+          <input
+            v-model="sshPwdInput"
+            type="password"
+            class="input modal-input"
+            placeholder="输入目标机该账号的密码"
+            @keyup.enter="saveSshPwd"
+          />
+        </div>
+        <div class="modal-actions">
+          <button class="btn" @click="showSshPwdModal = false">取消</button>
+          <button v-if="sshPwdSet" class="btn" @click="clearSshPwd">清除已保存密码</button>
+          <button class="btn btn-primary" :disabled="!sshPwdInput" @click="saveSshPwd">
+            保存到本次会话
           </button>
         </div>
       </div>
@@ -619,7 +666,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useDialog, useMessage } from 'naive-ui'
 import { api } from '../api/http'
 import type {
@@ -662,6 +709,11 @@ const newWsPort = ref(22)
 const newWsUser = ref('')
 const newWsKeyName = ref('')
 const newWsRoot = ref('/srv/workspace')
+// password 认证：密码只在本次会话内存活（sessionStorage），服务端不落库。
+const newWsAuth = ref<'key_file' | 'password'>('key_file')
+const showSshPwdModal = ref(false)
+const sshPwdInput = ref('')
+const sshPwdSet = ref(false)
 const showRenameWsModal = ref(false)
 const renameWsValue = ref('')
 const wsToRename = ref<UserWorkspace | null>(null)
@@ -703,6 +755,51 @@ const currentWorkspace = computed(() => {
 
 /** 远程工作区：命令走 SFTP/SSH，本地专属操作（上传/新建）不展示。 */
 const isRemoteWorkspace = computed(() => currentWorkspace.value?.kind === 'ssh')
+
+/** 当前工作区是否走"临时密码"认证（密码在 sessionStorage，不落库）。 */
+const needsSshPassword = computed(
+  () => isRemoteWorkspace.value && currentWorkspace.value?.auth_type === 'password',
+)
+
+function sshPwdKey(id: string): string {
+  return `ae_ws_ssh_pwd:${id}`
+}
+
+function refreshSshPwdState(): void {
+  const ws = currentWorkspace.value
+  sshPwdSet.value = Boolean(ws && window.sessionStorage.getItem(sshPwdKey(ws.id)))
+}
+
+watch(needsSshPassword, refreshSshPwdState, { immediate: true })
+watch(currentWorkspace, refreshSshPwdState)
+
+function openSshPwdModal(): void {
+  sshPwdInput.value = ''
+  showSshPwdModal.value = true
+}
+
+function saveSshPwd(): void {
+  const ws = currentWorkspace.value
+  const password = sshPwdInput.value
+  if (!ws || !password) return
+  // base64 传输（请求头只允许可见 ASCII），存 sessionStorage；关闭标签即失效。
+  window.sessionStorage.setItem(sshPwdKey(ws.id), window.btoa(unescape(encodeURIComponent(password))))
+  sshPwdSet.value = true
+  sshPwdInput.value = ''
+  showSshPwdModal.value = false
+  message.success('SSH 密码已保存到本次会话（关闭页面即失效）')
+  // 立刻用新密码拉一次目录树：密码错了能当场发现，而不是等用户点文件才报错。
+  void loadTree()
+}
+
+function clearSshPwd(): void {
+  const ws = currentWorkspace.value
+  if (!ws) return
+  window.sessionStorage.removeItem(sshPwdKey(ws.id))
+  sshPwdSet.value = false
+  showSshPwdModal.value = false
+  message.success('已清除本会话保存的 SSH 密码')
+}
 
 // ─── 远程命令：先登记审批单，用户确认后才真正执行 ───
 const showExecModal = ref(false)
@@ -1294,18 +1391,20 @@ async function submitCreateWorkspace(): Promise<void> {
     newWsKind.value === 'ssh'
       ? {
           kind: 'ssh' as const,
+          auth_type: newWsAuth.value,
           ssh_host: newWsHost.value.trim(),
           ssh_port: newWsPort.value || 22,
           ssh_user: newWsUser.value.trim(),
-          ssh_key_name: newWsKeyName.value.trim(),
+          ssh_key_name: newWsAuth.value === 'key_file' ? newWsKeyName.value.trim() : '',
           remote_root: newWsRoot.value.trim() || '/',
         }
       : { kind: 'local' as const }
-  if (
-    options.kind === 'ssh' &&
-    (!options.ssh_host || !options.ssh_user || !options.ssh_key_name)
-  ) {
-    message.warning('远程工作区需要填写主机、登录用户与私钥文件名')
+  if (options.kind === 'ssh' && (!options.ssh_host || !options.ssh_user)) {
+    message.warning('远程工作区需要填写主机与登录用户')
+    return
+  }
+  if (options.kind === 'ssh' && options.auth_type === 'key_file' && !options.ssh_key_name) {
+    message.warning('私钥认证需要填写私钥文件名')
     return
   }
   busy.value = true

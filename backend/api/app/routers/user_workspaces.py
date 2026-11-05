@@ -11,13 +11,14 @@
 
 from __future__ import annotations
 
+import base64
 import mimetypes
 import os
 import shutil
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import update
@@ -60,6 +61,8 @@ class _NameBody(BaseModel):
 
     name: str = Field(min_length=1, max_length=255)
     kind: str = Field(default="local", max_length=16)
+    # key_file：用服务端预置私钥；password：连接时由页面临时提供密码（不落库）。
+    auth_type: str = Field(default="key_file", max_length=16)
     ssh_host: str | None = Field(default=None, max_length=200)
     ssh_port: int | None = Field(default=None, ge=1, le=65535)
     ssh_user: str | None = Field(default=None, max_length=100)
@@ -122,6 +125,37 @@ def _owned_workspace(
     return row
 
 
+def _remote_app_error(exc: Exception) -> AppError:
+    """远程错误映射：需要用户补齐的（密码/私钥/白名单）→ 400，连接类 → 502。"""
+    message = str(exc)
+    fixable = ("输入 SSH 密码", "白名单", "私钥", "缺少", "不支持", "非法")
+    code = ErrorCode.VALIDATION if any(token in message for token in fixable) else ErrorCode.UPSTREAM
+    return AppError(code, message)
+
+
+def _remote_call(fn: Any, *args: Any) -> Any:
+    """统一的远程调用包装：把 SSH 层的两类异常映射成平台错误码。"""
+    try:
+        return fn(*args)
+    except remote_workspace.RemotePathError as exc:
+        raise AppError(ErrorCode.VALIDATION, str(exc)) from exc
+    except remote_workspace.RemoteWorkspaceError as exc:
+        raise _remote_app_error(exc) from exc
+
+
+def _ssh_password(encoded: str | None) -> str:
+    """解析请求头里的临时 SSH 密码（base64 传输，避免 header 非法字符）。
+
+    密码**不落库、不写日志**：只在本次请求内传给 remote_workspace。
+    """
+    if not encoded:
+        return ""
+    try:
+        return base64.b64decode(encoded.encode("ascii"), validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        raise AppError(ErrorCode.VALIDATION, "SSH 密码编码非法（需 base64）") from None
+
+
 def _is_ssh(row: Workspace) -> bool:
     """工作区是否为远程 SSH 类型（旧行没有该列值时按 local 处理）。"""
     return getattr(row, "kind", "local") == "ssh"
@@ -142,6 +176,7 @@ def _workspace_item(row: Workspace) -> dict[str, Any]:
         "name": row.name,
         "owner_id": row.owner_id,
         "kind": "ssh" if remote else "local",
+        "auth_type": getattr(row, "auth_type", None) or "key_file",
         # 旧行/测试夹具可能没有这些列，用 getattr 兜底，避免投影直接炸。
         "ssh_host": getattr(row, "ssh_host", None),
         "ssh_port": getattr(row, "ssh_port", None),
@@ -230,26 +265,33 @@ def _create_remote_workspace(
     ssh_user = (body.ssh_user or "").strip()
     key_name = (body.ssh_key_name or "").strip()
     root = (body.remote_root or "").strip() or "/"
-    if not host or not ssh_user or not key_name:
-        raise AppError(ErrorCode.VALIDATION, "远程工作区需要填写主机、用户与私钥文件名")
+    auth_type = (body.auth_type or "key_file").strip().lower()
+    if auth_type not in {"key_file", "password"}:
+        raise AppError(ErrorCode.VALIDATION, "认证方式无效")
+    if not host or not ssh_user:
+        raise AppError(ErrorCode.VALIDATION, "远程工作区需要填写主机与登录用户")
+    if auth_type == "key_file" and not key_name:
+        raise AppError(ErrorCode.VALIDATION, "私钥认证需要填写私钥文件名")
 
     row = Workspace(
         owner_id=user.id,
         name=name,
         kind="ssh",
+        auth_type=auth_type,
         ssh_host=host,
         ssh_port=body.ssh_port or 22,
         ssh_user=ssh_user,
-        ssh_key_name=key_name,
+        ssh_key_name=key_name or None,
         remote_root=root,
     )
-    try:
-        # 创建时就验证白名单、私钥与远程目录，避免建出一个永远连不上的工作区。
-        remote_workspace.probe(row)
-    except remote_workspace.RemoteWorkspaceError as exc:
-        raise AppError(ErrorCode.VALIDATION, str(exc)) from exc
-    except remote_workspace.RemotePathError as exc:
-        raise AppError(ErrorCode.VALIDATION, f"远程目录不可用：{exc}") from exc
+    if auth_type == "key_file":
+        try:
+            # 私钥模式创建时就能验证连通性；密码模式要等用户首次输入密码再验。
+            remote_workspace.probe(row)
+        except remote_workspace.RemoteWorkspaceError as exc:
+            raise AppError(ErrorCode.VALIDATION, str(exc)) from exc
+        except remote_workspace.RemotePathError as exc:
+            raise AppError(ErrorCode.VALIDATION, f"远程目录不可用：{exc}") from exc
 
     try:
         db.add(row)
@@ -391,12 +433,13 @@ def list_files(
     workspace_id: str,
     path: str = Query(default="", description="相对 scope（空=根）"),
     db: Session = Depends(get_db),
+    ssh_password: str | None = Header(default=None, alias="X-Workspace-SSH-Password"),
     user: User = Depends(get_current_user),
 ):
     """一层目录列表 + 当前相对路径（目录进入式浏览，防穿越）。"""
     row = _owned_workspace(db, user, workspace_id)
     if _is_ssh(row):
-        entries = remote_workspace.list_dir(row, path)
+        entries = _remote_call(remote_workspace.list_dir, row, path, _ssh_password(ssh_password))
         return {
             "workspace_id": workspace_id,
             "path": path,
@@ -445,12 +488,16 @@ def get_tree(
     workspace_id: str,
     max_depth: int = Query(default=4, ge=1, le=8),
     db: Session = Depends(get_db),
+    ssh_password: str | None = Header(default=None, alias="X-Workspace-SSH-Password"),
     user: User = Depends(get_current_user),
 ):
     """获取工作区目录树结构。"""
     row = _owned_workspace(db, user, workspace_id)
     if _is_ssh(row):
-        return {"workspace_id": workspace_id, "tree": remote_workspace.tree(row, max_depth)}
+        return {
+            "workspace_id": workspace_id,
+            "tree": _remote_call(remote_workspace.tree, row, max_depth, _ssh_password(ssh_password)),
+        }
     directory = workspace_dir_for(row.id)
     tree = get_file_tree(directory, max_depth=max_depth)
     return {"workspace_id": workspace_id, "tree": tree}
@@ -461,15 +508,16 @@ def get_file_content(
     workspace_id: str,
     path: str = Query(..., min_length=1, description="文件相对路径"),
     db: Session = Depends(get_db),
+    ssh_password: str | None = Header(default=None, alias="X-Workspace-SSH-Password"),
     user: User = Depends(get_current_user),
 ):
     """获取单文件文本内容与元信息。超大或二进制文件安全标记。"""
     row = _owned_workspace(db, user, workspace_id)
     if _is_ssh(row):
-        try:
-            return {"workspace_id": workspace_id, **remote_workspace.read_file(row, path)}
-        except remote_workspace.RemotePathError as exc:
-            raise AppError(ErrorCode.VALIDATION, str(exc)) from exc
+        return {
+            "workspace_id": workspace_id,
+            **_remote_call(remote_workspace.read_file, row, path, _ssh_password(ssh_password)),
+        }
     directory = workspace_dir_for(row.id)
     result = read_workspace_file(directory, path)
     return {"workspace_id": workspace_id, **result}
@@ -481,15 +529,16 @@ def update_file_content(
     body: _FileContentBody,
     request: Request,
     db: Session = Depends(get_db),
+    ssh_password: str | None = Header(default=None, alias="X-Workspace-SSH-Password"),
     user: User = Depends(get_current_user),
 ):
     """写回/保存文件内容。"""
     row = _owned_workspace(db, user, workspace_id)
     if _is_ssh(row):
-        try:
-            res = remote_workspace.write_text(row, body.path, body.content)
-        except remote_workspace.RemotePathError as exc:
-            raise AppError(ErrorCode.VALIDATION, str(exc)) from exc
+        res = _remote_call(
+            remote_workspace.write_text,
+            row, body.path, body.content, _ssh_password(ssh_password),
+        )
         write_audit(
             db, request, user,
             action="workspace_file_update",
@@ -568,15 +617,13 @@ def delete_item(
     path: str = Query(..., min_length=1, description="相对路径"),
     request: Request = None,
     db: Session = Depends(get_db),
+    ssh_password: str | None = Header(default=None, alias="X-Workspace-SSH-Password"),
     user: User = Depends(get_current_user),
 ):
     """删除工作区内的文件或目录（拒绝删除工作区根）。"""
     row = _owned_workspace(db, user, workspace_id)
     if _is_ssh(row):
-        try:
-            remote_workspace.delete(row, path)
-        except remote_workspace.RemotePathError as exc:
-            raise AppError(ErrorCode.VALIDATION, str(exc)) from exc
+        _remote_call(remote_workspace.delete, row, path, _ssh_password(ssh_password))
         write_audit(
             db, request, user,
             action="workspace_file_delete",
@@ -756,6 +803,7 @@ def confirm_remote_exec(
     approval_id: str,
     request: Request,
     db: Session = Depends(get_db),
+    ssh_password: str | None = Header(default=None, alias="X-Workspace-SSH-Password"),
     user: User = Depends(get_current_user),
 ):
     """确认并执行待审批命令；一条命令只能被执行一次。"""
@@ -767,10 +815,10 @@ def confirm_remote_exec(
     row = _owned_workspace(db, user, workspace_id)
     if not _is_ssh(row):
         raise AppError(ErrorCode.VALIDATION, "仅远程工作区支持命令执行")
-    try:
-        result = remote_workspace.exec_command(row, pending.command, pending.timeout_s)
-    except remote_workspace.RemoteWorkspaceError as exc:
-        raise AppError(ErrorCode.UPSTREAM, str(exc)) from exc
+    result = _remote_call(
+        remote_workspace.exec_command,
+        row, pending.command, pending.timeout_s, _ssh_password(ssh_password),
+    )
     write_audit(
         db, request, user,
         action="workspace_remote_exec",

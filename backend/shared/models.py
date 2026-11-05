@@ -132,6 +132,8 @@ class Workspace(Base):
     ssh_host = Column(String(200), nullable=True)
     ssh_port = Column(Integer, nullable=True)
     ssh_user = Column(String(100), nullable=True)
+    # 认证方式：key_file（服务端预置私钥，默认）/ password（连接时临时提供，不落库）。
+    auth_type = Column(String(16), nullable=False, default="key_file", server_default="key_file")
     # 私钥文件名（相对 WORKSPACE_SSH_KEY_DIR），平台不保存私钥内容本身。
     ssh_key_name = Column(String(200), nullable=True)
     # 远程根目录：允许绝对路径，但文件操作仍拒绝 .. 穿越与私钥目录。

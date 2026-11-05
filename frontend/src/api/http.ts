@@ -124,6 +124,22 @@ const http = axios.create({
   timeout: 30000,
 })
 
+// 远程工作区的 SSH 密码只存在 sessionStorage（关闭标签即失效），由拦截器按
+// 工作区 ID 附加到请求头；服务端不落库、不写日志。
+http.interceptors.request.use(config => {
+  try {
+    const url = config.url || ''
+    const matched = url.match(/\/api\/workspaces\/([^/?]+)/)
+    if (matched) {
+      const encoded = window.sessionStorage.getItem(`ae_ws_ssh_pwd:${matched[1]}`)
+      if (encoded) config.headers['X-Workspace-SSH-Password'] = encoded
+    }
+  } catch {
+    // 非浏览器环境或 sessionStorage 不可用时忽略
+  }
+  return config
+})
+
 // Mock 配置在当前页面生命周期内保持一致；刷新目录或重开编辑器不应丢失刚保存的内容。
 const mockExpertPrompts = new Map<string, AgentExpertPromptDocument>()
 let mockExpertPromptRevision = 0
@@ -1509,6 +1525,7 @@ export const api = {
       name: string,
       options?: {
         kind?: 'local' | 'ssh'
+        auth_type?: 'key_file' | 'password'
         ssh_host?: string
         ssh_port?: number
         ssh_user?: string

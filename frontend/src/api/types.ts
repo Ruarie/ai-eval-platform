@@ -1280,6 +1280,8 @@ export interface UserWorkspace {
   quota_bytes?: number
   /** local：平台目录；ssh：远程主机目录（SFTP 读写 + 单条命令执行）。 */
   kind?: 'local' | 'ssh'
+  /** key_file：服务端预置私钥；password：连接时由页面临时提供密码（不落库）。 */
+  auth_type?: 'key_file' | 'password'
   ssh_host?: string | null
   ssh_port?: number | null
   ssh_user?: string | null

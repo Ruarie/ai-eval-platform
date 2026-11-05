@@ -99,3 +99,35 @@ def test_key_dir_missing_is_reported(monkeypatch):
 def test_local_workspace_is_not_treated_as_ssh():
     with pytest.raises(rw.RemoteWorkspaceError, match="不是远程"):
         rw.target_for(_row(kind="local"))
+
+def test_password_mode_does_not_require_key_name(monkeypatch):
+    """密码认证不需要私钥文件名，但连接时必须临时提供密码。"""
+    monkeypatch.setattr(rw.settings, "workspace_ssh_allowed_hosts", "")
+
+    target = rw.target_for(_row(auth_type="password", ssh_key_name=None))
+
+    assert target.auth_type == "password"
+    assert target.key_name == ""
+
+
+def test_password_mode_requires_password_at_connect(monkeypatch):
+    """没有临时密码时直接报错，不会退化成无凭据连接。"""
+    monkeypatch.setattr(rw.settings, "workspace_ssh_allowed_hosts", "")
+
+    with pytest.raises(rw.RemoteWorkspaceError, match="输入 SSH 密码"):
+        with rw._connect(_row(auth_type="password"), password=""):
+            pass
+
+
+def test_unknown_auth_type_is_rejected(monkeypatch):
+    monkeypatch.setattr(rw.settings, "workspace_ssh_allowed_hosts", "")
+
+    with pytest.raises(rw.RemoteWorkspaceError, match="不支持的认证方式"):
+        rw.target_for(_row(auth_type="agent"))
+
+
+def test_key_mode_still_requires_key_name(monkeypatch):
+    monkeypatch.setattr(rw.settings, "workspace_ssh_allowed_hosts", "")
+
+    with pytest.raises(rw.RemoteWorkspaceError, match="私钥"):
+        rw.target_for(_row(auth_type="key_file", ssh_key_name=""))
