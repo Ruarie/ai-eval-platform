@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import logging
 import posixpath
+import shlex
 import stat as stat_module
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import paramiko
@@ -110,7 +112,15 @@ def _load_private_key(key_name: str) -> paramiko.PKey:
 def _connect(workspace: Any) -> Iterator[paramiko.SSHClient]:
     target = target_for(workspace)
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # 有 known_hosts 就严格校验指纹（防中间人）；没有则退化为 AutoAdd 并告警，
+    # 避免内网首次接入直接不可用，但公网主机应配置 known_hosts。
+    known_hosts = str(settings.workspace_ssh_known_hosts or "").strip()
+    if known_hosts and Path(known_hosts).is_file():
+        client.load_host_keys(known_hosts)
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    else:
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        logger.warning("未配置 known_hosts，跳过主机指纹校验 host=%s", target.host)
     try:
         client.connect(
             hostname=target.host,
@@ -168,27 +178,32 @@ def _sftp(workspace: Any) -> Iterator[paramiko.SFTPClient]:
             sftp.close()
 
 
+def _list_entries(sftp: paramiko.SFTPClient, remote: str) -> list[dict]:
+    """列一层目录（复用同一个 SFTP 连接；tree 递归时不再每次重连）。"""
+    entries = []
+    for attrs in sftp.listdir_attr(remote):
+        kind = _entry_type(attrs.st_mode or 0)
+        entries.append(
+            {
+                "name": attrs.filename,
+                "kind": kind,
+                "size": int(attrs.st_size or 0) if kind == "file" else 0,
+                "updated_at": (
+                    datetime.fromtimestamp(int(attrs.st_mtime or 0), UTC).isoformat()
+                    if attrs.st_mtime
+                    else None
+                ),
+            }
+        )
+    entries.sort(key=lambda item: (item["kind"] != "dir", item["name"].lower()))
+    return entries
+
+
 def list_dir(workspace: Any, path: str) -> list[dict]:
     """列出一层目录内容；字段与本地实现同构（name/kind/size/updated_at）。"""
     remote = _normalize(workspace, path)
     with _sftp(workspace) as sftp:
-        entries = []
-        for attrs in sftp.listdir_attr(remote):
-            kind = _entry_type(attrs.st_mode or 0)
-            entries.append(
-                {
-                    "name": attrs.filename,
-                    "kind": kind,
-                    "size": int(attrs.st_size or 0) if kind == "file" else 0,
-                    "updated_at": (
-                        datetime.fromtimestamp(int(attrs.st_mtime or 0), UTC).isoformat()
-                        if attrs.st_mtime
-                        else None
-                    ),
-                }
-            )
-    entries.sort(key=lambda item: (item["kind"] != "dir", item["name"].lower()))
-    return entries
+        return _list_entries(sftp, remote)
 
 
 def probe(workspace: Any) -> dict:
@@ -198,36 +213,39 @@ def probe(workspace: Any) -> dict:
 
 
 def tree(workspace: Any, max_depth: int = 2) -> list[dict]:
-    """递归目录树；超过 ``MAX_TREE_ENTRIES`` 截断并标记。"""
+    """递归目录树；全程复用一条 SFTP 连接，超过 ``MAX_TREE_ENTRIES`` 截断并标记。"""
     root = _normalize(workspace, ".")
     depth_limit = max(1, min(int(max_depth or 2), 8))
     nodes: list[dict] = []
     truncated = False
 
-    def walk(remote: str, depth: int) -> None:
+    def walk(sftp: paramiko.SFTPClient, remote: str, depth: int, sink: list[dict]) -> None:
         nonlocal truncated
-        for item in list_dir(workspace, remote):
+        if truncated:
+            return
+        for item in _list_entries(sftp, remote):
             if truncated:
                 return
             node = {
                 "name": item["name"],
                 "path": posixpath.join(remote, item["name"]),
-                "type": item["type"],
+                "type": item["kind"],
                 "size": item["size"],
+                "children": [],
             }
-            nodes.append(node)
+            sink.append(node)
             if len(nodes) >= MAX_TREE_ENTRIES:
                 truncated = True
                 return
-            if item["type"] == "dir" and depth < depth_limit:
-                node["children"] = []
-                before = len(nodes)
-                walk(node["path"], depth + 1)
-                node["children"] = nodes[before:]
+            if item["kind"] == "dir" and depth < depth_limit:
+                walk(sftp, node["path"], depth + 1, node["children"])
 
-    walk(root, 1)
+    with _sftp(workspace) as sftp:
+        walk(sftp, root, 1, nodes)
     if truncated:
-        nodes.append({"name": "(已截断)", "path": root, "type": "info", "size": 0})
+        nodes.append(
+            {"name": "(已截断)", "path": root, "type": "info", "size": 0, "children": []}
+        )
     return nodes
 
 
@@ -345,12 +363,29 @@ def exec_command(workspace: Any, command: str, timeout_s: int = 60) -> dict:
     limit = max(1, min(int(timeout_s or 60), 600))
     max_chars = 20000
     with _connect(workspace) as client:
+        # 远程根目录可能含引号/空格，必须 shell 转义后再拼 cd。
         stdin, stdout, stderr = client.exec_command(
-            f"cd {target.root!r} && {command}", timeout=limit, get_pty=False
+            f"cd {shlex.quote(target.root)} && {command}", timeout=limit, get_pty=False
         )
-        out = stdout.read().decode("utf-8", "replace")
-        err = stderr.read().decode("utf-8", "replace")
-        code = stdout.channel.recv_exit_status()
+        channel = stdout.channel
+        # exec_command 的 timeout 只管建通道；读输出要单独设超时，
+        # 否则命令挂住会把 api 的工作线程一直占着。
+        channel.settimeout(limit)
+        try:
+            out = stdout.read().decode("utf-8", "replace")
+            err = stderr.read().decode("utf-8", "replace")
+            code = channel.recv_exit_status()
+        except TimeoutError:
+            channel.close()
+            return {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": f"命令超过 {limit}s 未结束，已断开连接",
+                "truncated": False,
+                "host": target.host,
+                "root": target.root,
+                "timeout": True,
+            }
         stdin.close()
     truncated = len(out) > max_chars
     return {

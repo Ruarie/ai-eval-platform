@@ -99,6 +99,9 @@ class Settings(BaseSettings):
     # 避免平台被当成任意主机跳板。
     workspace_ssh_allowed_hosts: str = ""
     # 连接与命令超时：连接失败要快速失败，命令超时防止远程进程挂死。
+    # 主机指纹文件（known_hosts）。存在时严格校验；缺失时退化为 AutoAdd 并告警，
+    # 便于内网首次接入，但不适合对公网主机使用。
+    workspace_ssh_known_hosts: str = "/run/secrets/workspace-ssh/known_hosts"
     workspace_ssh_connect_timeout_s: int = 10
     workspace_ssh_command_timeout_s: int = 60
     # P3：检查点引擎。默认 memory（每回合独立 thread_id）；postgres 需单独评审
