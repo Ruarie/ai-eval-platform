@@ -204,6 +204,107 @@ def validate_strategy_weights(weights: dict[str, int] | None) -> dict[str, int]:
     return {key: weights.get(key, 0) for key in STRATEGY_NAMES}
 
 
+# 功能需求小节标题：按「4.1 岗位与能力模型」这种"主编号.次编号 + 空格"识别，
+# 不会把 4.3.1 这类子小节单独拆出去（否则一个模块会被切成七八段）。
+_FEATURE_HEAD = re.compile(r"^#{2,4}\s+4\.\d+\s+\S.*$", re.M)
+_NUMBERED_HEAD = re.compile(r"^#{2,4}\s+\d+\.\d+\s+\S.*$", re.M)
+_ANY_HEAD = re.compile(r"^#{2,4}\s+.+$", re.M)
+
+
+def _split_long(text: str, max_chars: int) -> list[str]:
+    """超长小节按行切块；单行本身超长（无换行）时按字符硬切。"""
+    if len(text) <= max_chars:
+        return [text]
+    blocks: list[str] = []
+    buffer: list[str] = []
+    size = 0
+    for raw_line in text.splitlines(keepends=True):
+        line = raw_line
+        while len(line) > max_chars:
+            if buffer:
+                blocks.append("".join(buffer))
+                buffer, size = [], 0
+            blocks.append(line[:max_chars])
+            line = line[max_chars:]
+        if size + len(line) > max_chars and buffer:
+            blocks.append("".join(buffer))
+            buffer, size = [], 0
+        buffer.append(line)
+        size += len(line)
+    if buffer:
+        blocks.append("".join(buffer))
+    return blocks
+
+
+def _merge_sections(sections: list[dict], max_chars: int, max_sections: int) -> list[dict]:
+    """段数过多时贪心合并相邻小节，保证批次数不失控、每段仍不超长。"""
+    while len(sections) > max_sections:
+        merged: list[dict] = []
+        index = 0
+        while index < len(sections):
+            current = sections[index]
+            if (
+                index + 1 < len(sections)
+                and len(current["text"]) + len(sections[index + 1]["text"]) <= max_chars
+            ):
+                merged.append(
+                    {
+                        # 合并后标题保留两段，避免"4.1"段里混着 4.2 的内容。
+                        "title": f"{current['title']} + {sections[index + 1]['title']}"[:60],
+                        "text": current["text"] + "\n" + sections[index + 1]["text"],
+                    }
+                )
+                index += 2
+            else:
+                merged.append(current)
+                index += 1
+        if len(merged) == len(sections):
+            break
+        sections = merged
+    return sections
+
+
+def split_sections(
+    source_text: str, max_chars: int = 4000, max_sections: int = 12
+) -> list[dict]:
+    """把需求文档切成若干"功能节"，供分批生成使用。
+
+    分批的原因：推理模型"一次产出几十条 JSON"时会无节制思考、把 max_tokens 烧光，
+    正文为空（实测 hy4 单模块 16K 预算输出 0 字符）。按节拆分后每批只产 6–10 条，
+    思考量可控，也不会撞上单次输出上限。
+
+    优先级：功能需求小节（``4.x`` / ``FR-xxx`` 标题）→ 任意 2–4 级标题 → 按长度切块。
+    段数超过 ``max_sections`` 时贪心合并相邻段，避免批次数过多。
+    """
+    text = (source_text or "").strip()
+    if not text:
+        return []
+
+    heads = [match.start() for match in _FEATURE_HEAD.finditer(text)]
+    if len(heads) < 2:
+        heads = [match.start() for match in _NUMBERED_HEAD.finditer(text)]
+    if len(heads) < 2:
+        heads = [match.start() for match in _ANY_HEAD.finditer(text)]
+    if len(heads) < 2:
+        return [
+            {"title": f"第 {index + 1} 段", "text": block}
+            for index, block in enumerate(_split_long(text, max_chars))
+        ]
+
+    sections: list[dict] = []
+    for index, start_at in enumerate(heads):
+        end_at = heads[index + 1] if index + 1 < len(heads) else len(text)
+        chunk = text[start_at:end_at].strip()
+        if not chunk:
+            continue
+        title = chunk.splitlines()[0].lstrip("#").strip()[:40] or f"第 {index + 1} 节"
+        parts = _split_long(chunk, max_chars)
+        for part_index, part in enumerate(parts):
+            suffix = f"（{part_index + 1}）" if part_index else ""
+            sections.append({"title": f"{title}{suffix}", "text": part})
+    return _merge_sections(sections, max_chars, max_sections)
+
+
 def build_prompts(
     source_text: str, target_count: int, weights: dict[str, int] | None = None
 ) -> tuple[str, str]:

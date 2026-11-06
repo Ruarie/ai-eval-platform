@@ -33,6 +33,7 @@ from shared.casegen import (
     generation_token_budget,
     parse_cases_with_stats,
     rebalance_with_stats,
+    split_sections,
     selfcheck,
     validate_strategy_weights,
 )
@@ -228,48 +229,110 @@ def run_testcase(task_id: str) -> None:
             logger.info("testcase task %s cancelled before LLM call, skip", task_id)
             return
 
-        system, user = build_prompts(source_text, max_count, weights=weights)
+        # ─── 分批生成：按需求分节，每次只产 6–10 条 ───
+        # 单次直出 40+ 条时，推理模型会把 max_tokens 全花在思考上、正文为空
+        # （实测 hy4 单模块 16K 预算输出 0 字符）。分批后每批输出小、思考可控，
+        # 也避免撞上单次输出上限。
+        sections = split_sections(source_text)
+        if len(sections) <= 1:
+            batches: list[tuple[str, str, int]] = [("全文", source_text, max_count)]
+        else:
+            per_section = min(10, max(6, -(-max_count // len(sections))))
+            batches = [(item["title"], item["text"], per_section) for item in sections]
 
-        def invoke(budget: int):
+        def invoke(system_prompt: str, user_prompt: str, budget: int):
             return call_protocol(
                 protocol=profile.protocol,
                 base_url=base_url,
                 full_url=read_profile_env(profile.id).full_url,
                 model=model,
                 api_key=api_key,
-                messages=[{"role": "user", "content": user}],
-                system=system,
+                messages=[{"role": "user", "content": user_prompt}],
+                system=system_prompt,
                 temperature=0.3,
                 max_tokens=budget,
                 anthropic_version=profile.anthropic_version,
                 timeout_s=LLM_TIMEOUT_S,
             )
 
-        budget = generation_token_budget(max_count)
-        try:
-            result = invoke(budget)
-            # 被 max_tokens 截断只会产出半截 JSON。与 api 侧同口径：先抬预算重试
-            # 一次，仍截断才报可操作的预算错误，而不是笼统的「无法解析」。
-            if getattr(result, "finish_reason", None) == "length" and budget < TRUNCATION_RETRY_CEILING:
-                budget = min(TRUNCATION_RETRY_CEILING, budget * 2)
-                db.add(TaskEvent(
-                    task_id=task.id, event="progress",
-                    message=f"模型输出被长度上限截断，已提升输出预算至 {budget} 后重试",
-                ))
-                db.commit()
-                result = invoke(budget)
-        except ProtocolCallError as exc:
-            _fail(db, task, exc.code, f"用例生成失败：{exc.message}")
-            return
-        if getattr(result, "finish_reason", None) == "length":
-            _fail(
-                db, task, "BUDGET_EXCEEDED",
-                f"模型输出被长度上限截断（max_tokens={budget}），请减少生成条数或拆分需求后重试",
+        collected: list[dict] = []
+        failed_batches: list[str] = []
+        truncated_batches = 0
+        total_batches = len(batches)
+        for index, (title, body, per_batch) in enumerate(batches, start=1):
+            if is_cancelled(db, task.id):
+                logger.info("testcase task %s cancelled during batched generation", task_id)
+                return
+            system, user = build_prompts(body, per_batch, weights=weights)
+            budget = generation_token_budget(per_batch)
+            try:
+                result = invoke(system, user, budget)
+                # 单批被截断时抬预算重试一次，仍截断则记为该批失败。
+                if (
+                    getattr(result, "finish_reason", None) == "length"
+                    and budget < TRUNCATION_RETRY_CEILING
+                ):
+                    budget = min(TRUNCATION_RETRY_CEILING, budget * 2)
+                    result = invoke(system, user, budget)
+            except ProtocolCallError as exc:
+                failed_batches.append(f"{title}({exc.code})")
+                logger.warning("testcase batch %s failed: %s", title, exc.code)
+                continue
+            batch_text = (result.text or "").strip()
+            if getattr(result, "finish_reason", None) == "length" or not batch_text:
+                if getattr(result, "finish_reason", None) == "length":
+                    truncated_batches += 1
+                failed_batches.append(title)
+                logger.warning(
+                    "testcase batch %s empty_or_truncated finish=%s",
+                    title, getattr(result, "finish_reason", None),
+                )
+                continue
+            try:
+                part, _ = parse_cases_with_stats(batch_text)
+            except (ValueError, json.JSONDecodeError):
+                failed_batches.append(title)
+                logger.warning("testcase batch %s unparsable", title)
+                continue
+            collected.extend(part)
+            push_ws(
+                task.session_id,
+                "progress",
+                {
+                    "percent": 20 + int(60 * index / total_batches),
+                    "done": len(collected),
+                    "total": max_count,
+                    "message": f"已生成 {len(collected)} 条（{index}/{total_batches} 批）",
+                },
+                task_id=task.id,
             )
+
+        if not collected:
+            # 全部批次都因长度上限失败时，给可操作的预算错误而不是笼统的上游失败。
+            if truncated_batches == total_batches:
+                _fail(
+                    db, task, "BUDGET_EXCEEDED",
+                    f"模型输出被长度上限截断（max_tokens={budget}），"
+                    "请减少生成条数或拆分需求后重试",
+                )
+            else:
+                _fail(
+                    db, task, "UPSTREAM",
+                    f"模型未产出可用用例（{len(failed_batches)}/{total_batches} 批失败），"
+                    "可减少条数或拆分需求后重试",
+                )
             return
-        if not (result.text or "").strip():
-            _fail(db, task, "UPSTREAM", "模型返回空内容，用例生成失败")
-            return
+        if failed_batches:
+            db.add(TaskEvent(
+                task_id=task.id, event="progress",
+                message=(
+                    f"分批生成：{total_batches - len(failed_batches)}/{total_batches} 批成功；"
+                    f"失败批次：{'、'.join(failed_batches[:5])}"
+                ),
+            ))
+            db.commit()
+        cases = collected
+        parse_stats = {"dropped_missing_name": 0, "dropped_non_object": 0}
 
         # ─── 解析与规模闸门 ───
         try:

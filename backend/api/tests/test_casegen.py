@@ -335,3 +335,28 @@ def test_mark_pending_complete_flags_missing_expected_or_steps():
     assert casegen.mark_pending_complete({"name": "a", "steps": "1. x", "expected": "ok"})["pending_complete"] is False
     assert casegen.mark_pending_complete({"name": "a", "steps": "1. x", "expected": "  "})["pending_complete"] is True
     assert casegen.mark_pending_complete({"name": "a", "expected": "ok"})["pending_complete"] is True
+
+def test_split_sections_uses_markdown_headings():
+    """按需求小节切分，供分批生成使用；每节要能独立成 prompt。"""
+    source = (
+        "## 4.1 岗位与能力模型\nFR-101 支持创建岗位\n"
+        "## 4.2 材料解析\nFR-201 支持上传 PDF\n"
+        "## 4.3 智能出题\nFR-301 生成蓝图\n"
+    )
+    sections = casegen.split_sections(source)
+    assert len(sections) == 3
+    assert "4.1" in sections[0]["title"]
+    assert "FR-101" in sections[0]["text"]
+    assert "FR-301" in sections[2]["text"]
+
+
+def test_split_sections_falls_back_to_length_blocks():
+    """没有标题结构时按长度切块，每块不超过上限，避免单批 prompt 失控。"""
+    source = "这是一段没有标题的需求描述。" * 800
+    sections = casegen.split_sections(source, max_chars=2000)
+    assert len(sections) >= 3
+    assert all(len(section["text"]) <= 2200 for section in sections)
+
+
+def test_split_sections_returns_empty_for_blank_source():
+    assert casegen.split_sections("   ") == []
