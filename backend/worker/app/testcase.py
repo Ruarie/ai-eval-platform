@@ -268,6 +268,11 @@ def run_testcase(task_id: str) -> None:
         # （实测 hy4 单模块 16K 预算输出 0 字符）。分批后每批输出小、思考可控，
         # 也避免撞上单次输出上限。
         sections = split_sections(source_text)
+        logger.info(
+            "testcase task %s split: sections=%d chars=%d titles=%s",
+            task_id, len(sections), len(source_text),
+            [item["title"][:16] for item in sections][:6],
+        )
         if len(sections) <= 1:
             batches: list[tuple[str, str, int]] = [("全文", source_text, max_count)]
         else:
@@ -323,12 +328,18 @@ def run_testcase(task_id: str) -> None:
                 )
                 continue
             try:
-                part, _ = parse_cases_with_stats(batch_text)
+                part, part_stats = parse_cases_with_stats(batch_text)
             except (ValueError, json.JSONDecodeError):
                 failed_batches.append(title)
                 logger.warning("testcase batch %s unparsable", title)
                 continue
+            if not part:
+                # 模型返回了合法 JSON 但内容全被丢弃：按失败计，避免"成功 9 批却只出 8 条"。
+                failed_batches.append(f"{title}(解析后为空 {part_stats})")
+                logger.warning("testcase batch %s parsed empty stats=%s", title, part_stats)
+                continue
             collected.extend(part)
+            logger.info("testcase batch %s -> %d cases", title, len(part))
             push_ws(
                 task.session_id,
                 "progress",
@@ -366,14 +377,15 @@ def run_testcase(task_id: str) -> None:
             ))
             db.commit()
         cases = collected
+        logger.info(
+            "testcase task %s batched total=%d failed=%d truncated=%d",
+            task_id, len(collected), len(failed_batches), truncated_batches,
+        )
         parse_stats = {"dropped_missing_name": 0, "dropped_non_object": 0}
 
-        # ─── 解析与规模闸门 ───
-        try:
-            cases, parse_stats = parse_cases_with_stats(result.text)
-        except (ValueError, json.JSONDecodeError) as exc:
-            _fail(db, task, "UPSTREAM", f"模型输出无法解析为用例：{exc}")
-            return
+        # ─── 去重与规模闸门 ───
+        # 注意：分批生成时每批已经解析并累计到 collected，这里**不能**再解析
+        # 最后一次模型响应，否则会把累计结果覆盖成最后一批的 8 条。
         # 先去重再判上限与裁剪：重复项属于灌水，不应让整单失败，也不该按配额
         # 挤掉真正不同的用例。
         cases, dropped_duplicate = dedupe_cases(cases)
