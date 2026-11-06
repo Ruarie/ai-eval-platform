@@ -360,3 +360,17 @@ def test_split_sections_falls_back_to_length_blocks():
 
 def test_split_sections_returns_empty_for_blank_source():
     assert casegen.split_sections("   ") == []
+
+def test_split_sections_stops_at_higher_level_heading():
+    """功能小节不能被后续更高级章节吞掉（否则技术方案会被当成需求生成用例）。"""
+    source = (
+        "### 4.1 岗位与能力模型\nFR-101 创建岗位\n"
+        "### 4.2 材料解析\nFR-201 上传 PDF\n"
+        "## 5. LangGraph 技术方案\nload_context 节点实现细节\n"
+    )
+    sections = casegen.split_sections(source)
+    titles = [s["title"] for s in sections]
+    assert len(sections) == 2
+    assert all("技术方案" not in s["text"] for s in sections)
+    assert "FR-201" in sections[1]["text"]
+    assert titles[1].startswith("4.2")

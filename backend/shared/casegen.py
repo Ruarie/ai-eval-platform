@@ -206,9 +206,9 @@ def validate_strategy_weights(weights: dict[str, int] | None) -> dict[str, int]:
 
 # 功能需求小节标题：按「4.1 岗位与能力模型」这种"主编号.次编号 + 空格"识别，
 # 不会把 4.3.1 这类子小节单独拆出去（否则一个模块会被切成七八段）。
-_FEATURE_HEAD = re.compile(r"^#{2,4}\s+4\.\d+\s+\S.*$", re.M)
-_NUMBERED_HEAD = re.compile(r"^#{2,4}\s+\d+\.\d+\s+\S.*$", re.M)
-_ANY_HEAD = re.compile(r"^#{2,4}\s+.+$", re.M)
+_FEATURE_HEAD = re.compile(r"^(#{2,4})\s+4\.\d+\s+\S.*$", re.M)
+_NUMBERED_HEAD = re.compile(r"^(#{2,4})\s+\d+\.\d+\s+\S.*$", re.M)
+_ANY_HEAD = re.compile(r"^(#{2,4})\s+.+$", re.M)
 
 
 def _split_long(text: str, max_chars: int) -> list[str]:
@@ -280,20 +280,28 @@ def split_sections(
     if not text:
         return []
 
-    heads = [match.start() for match in _FEATURE_HEAD.finditer(text)]
-    if len(heads) < 2:
-        heads = [match.start() for match in _NUMBERED_HEAD.finditer(text)]
-    if len(heads) < 2:
-        heads = [match.start() for match in _ANY_HEAD.finditer(text)]
-    if len(heads) < 2:
+    # 所有标题（含级别），用于判断一节在哪里结束。
+    all_heads = [(m.start(), len(m.group(1))) for m in _ANY_HEAD.finditer(text)]
+    picked = [(m.start(), len(m.group(1))) for m in _FEATURE_HEAD.finditer(text)]
+    if len(picked) < 2:
+        picked = [(m.start(), len(m.group(1))) for m in _NUMBERED_HEAD.finditer(text)]
+    if len(picked) < 2:
+        picked = list(all_heads)
+    if len(picked) < 2:
         return [
             {"title": f"第 {index + 1} 段", "text": block}
             for index, block in enumerate(_split_long(text, max_chars))
         ]
 
     sections: list[dict] = []
-    for index, start_at in enumerate(heads):
-        end_at = heads[index + 1] if index + 1 < len(heads) else len(text)
+    for index, (start_at, level) in enumerate(picked):
+        # 结束位置必须停在"同级或更高级"的下一个标题：否则 4.8 会把后面的
+        # 「5. LangGraph 技术方案」一起吞掉，生成出一堆技术实现类用例。
+        end_at = len(text)
+        for pos, head_level in all_heads:
+            if pos > start_at and head_level <= level:
+                end_at = pos
+                break
         chunk = text[start_at:end_at].strip()
         if not chunk:
             continue
