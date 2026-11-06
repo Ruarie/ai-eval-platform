@@ -152,6 +152,35 @@ def _to_case_items(case_set_id: str, cases: list[dict]) -> list[CaseItem]:
     return items
 
 
+def _pick_generation_profile(db: Session, profile_id: str | None):
+    """选生成用例用的协议档；返回 ``(profile, 是否发生了切换)``。
+
+    用例生成是"长结构化 JSON 输出"，effort 型思考模板（``reasoning_effort`` 只是
+    建议值、思考量由模型决定）会把 max_tokens 全烧在思考上、正文为空——实测 hy4
+    单模块 8K/16K 预算均输出 0 字符。因此优先选非 effort 模板的档位。
+    """
+    preferred = (
+        db.query(ProtocolProfile).filter(ProtocolProfile.id == profile_id).first()
+        if profile_id
+        else None
+    )
+
+    def risky(item: ProtocolProfile | None) -> bool:
+        return bool(item) and "effort" in str(getattr(item, "reasoning_template_id", "") or "").lower()
+
+    if preferred and not risky(preferred):
+        return preferred, False
+    safe = (
+        db.query(ProtocolProfile)
+        .filter(~ProtocolProfile.reasoning_template_id.ilike("%effort%"))
+        .order_by(ProtocolProfile.created_at)
+        .first()
+    )
+    if safe:
+        return safe, True
+    return preferred, False
+
+
 def run_testcase(task_id: str) -> None:
     """testcase 任务真实执行入口：生成用例集并转入 awaiting_case_confirm。"""
     db = SessionLocal()
@@ -207,11 +236,16 @@ def run_testcase(task_id: str) -> None:
         # ─── 解析 Agent 协议档并调用 LLM 生成（六策略配比） ───
         row = db.query(Setting).filter(Setting.key == "agent_profile_id").first()
         profile_id = row.value if row else None
-        profile = (
-            db.query(ProtocolProfile).filter(ProtocolProfile.id == profile_id).first()
-            if profile_id
-            else None
-        )
+        profile, profile_switched = _pick_generation_profile(db, profile_id)
+        if profile_switched:
+            db.add(TaskEvent(
+                task_id=task.id, event="progress",
+                message=(
+                    f"默认 Agent 协议档使用「思考强度」型模板（思考量不可控，容易把输出预算"
+                    f"全用于思考导致正文为空），本次生成改用「{profile.name}」"
+                ),
+            ))
+            db.commit()
         if not profile:
             _fail(db, task, "VALIDATION", "未配置 Agent 协议档或未填写 API Key，无法生成用例")
             return
