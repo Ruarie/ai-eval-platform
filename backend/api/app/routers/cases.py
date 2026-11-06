@@ -29,15 +29,18 @@ from openpyxl import Workbook
 from pydantic import ValidationError
 from shared.case_compare import compare_case_runs
 from shared.casegen import (
+    MAX_COUNT,
     STRATEGY_WEIGHTS,
     build_coverage_prompt,
     build_prompts,
+    build_review_prompt,
     clip_source,
     dedupe_cases,
     generation_token_budget,
     mark_pending_complete,
     parse_cases_with_stats,
     parse_coverage,
+    parse_review,
     rebalance_with_stats,
     selfcheck,
 )
@@ -69,6 +72,7 @@ from ..schemas import (
     CaseAiCompareIn,
     CaseAiFillIn,
     CaseAiGenerateIn,
+    CaseAiReviewIn,
     CaseCancelIn,
     CaseConfirmIn,
     CaseCoverageIn,
@@ -127,6 +131,9 @@ GENERATION_TIMEOUT_S = 280.0
 # 需求覆盖复审是独立轻量请求（输入是清单而非全量需求生成），预算单独一档。
 COVERAGE_TIMEOUT_S = 120.0
 COVERAGE_MAX_TOKENS = 2048
+# 评审要读整份用例（60+ 条的步骤与预期），预算与超时都比覆盖检查大一档。
+REVIEW_TIMEOUT_S = 150.0
+REVIEW_MAX_TOKENS = 4096
 
 _DEFAULT_STRATEGY_WEIGHTS = {
     "positive": 40,
@@ -909,6 +916,83 @@ def save_cases(
     db.commit()
     return {"items": [_case_to_item(case) for case in cases], "total": len(cases),
             "checks": case_set.checks, "revision": case_set.revision}
+
+
+@router.post("/{set_id}/ai-review")
+def ai_review_case_set(
+    set_id: str,
+    body: CaseAiReviewIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """对已落库的用例集做 AI 评审：覆盖/可执行/重复/分布四维打分 + 问题清单。
+
+    结果写入 ``case_sets.checks``（``kind="ai_review"``，覆盖旧评审、保留自检红字），
+    不改变用例内容与状态；confirmed 用例集是版本快照，仍允许评审（只读）。
+    """
+    case_set = db.query(CaseSet).filter(CaseSet.id == set_id).first()
+    if not case_set:
+        raise AppError(ErrorCode.NOT_FOUND, "用例集不存在")
+    items = (
+        db.query(CaseItem)
+        .filter(CaseItem.case_set_id == set_id)
+        .order_by(CaseItem.sort_order)
+        .all()
+    )
+    if not items:
+        raise AppError(ErrorCode.VALIDATION, "用例集为空，没有可评审的内容")
+
+    source_text = (body.source_text or "").strip()
+    doc_id = body.source_doc_id
+    if not source_text and not doc_id and case_set.task_id:
+        task = db.query(Task).filter(Task.id == case_set.task_id).first()
+        doc_id = ((task.config or {}).get("case_source") or {}).get("file_id") if task else None
+    if doc_id and not source_text:
+        try:
+            source_text = _read_stored_file_text(db, doc_id, user.id)
+        except Exception:  # noqa: BLE001 - 来源不可读时退化为纯用例评审
+            logger.warning("AI 评审读取来源文档失败 doc_id=%s", doc_id)
+    source_truncated = False
+    if source_text.strip():
+        source_text, source_truncated = clip_source(source_text)
+    else:
+        source_text = "（未提供需求文档：只评审用例自身的可执行性、重复与策略分布）"
+
+    cases = [
+        {
+            "module": item.module,
+            "name": item.name,
+            "strategy": item.strategy,
+            "steps": item.steps,
+            "expected": item.expected,
+        }
+        for item in items[:MAX_COUNT]
+    ]
+    system, user_prompt = build_review_prompt(source_text, cases)
+    result = call_agent_model(
+        db, system, user_prompt, temperature=0.1,
+        max_tokens=REVIEW_MAX_TOKENS, timeout_s=REVIEW_TIMEOUT_S,
+    )
+    try:
+        review = parse_review(result.text)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise AppError(ErrorCode.UPSTREAM, "评审输出无法解析，请重试") from exc
+
+    review.update(
+        {
+            "reviewed_at": utcnow().isoformat(),
+            "case_count": len(cases),
+            "source_truncated": source_truncated,
+        }
+    )
+    checks = [
+        check for check in (case_set.checks or [])
+        if not (isinstance(check, dict) and check.get("kind") == "ai_review")
+    ]
+    checks.append({"kind": "ai_review", **review})
+    case_set.checks = checks
+    db.commit()
+    return review
 
 
 @router.post("/{set_id}/confirm", response_model=CaseSetOut)

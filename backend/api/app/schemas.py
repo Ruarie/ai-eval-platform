@@ -906,6 +906,17 @@ class CoverageCaseIn(ApiModel):
     feature_point: str | None = Field(default=None, max_length=100)
 
 
+class CaseAiReviewIn(ApiModel):
+    """用例评审请求：来源文档可选。
+
+    不传时用用例集关联任务快照里的 case_source；都没有则退化为
+    "只看用例自身质量"（可执行性/重复/分布），覆盖度维度会标注无需求可对照。
+    """
+
+    source_doc_id: str | None = Field(default=None, max_length=64)
+    source_text: str | None = Field(default=None, max_length=1_000_000)
+
+
 class CaseCoverageIn(ApiModel):
     """需求覆盖自检请求：来源文档 + 已生成用例摘要，返回未被覆盖的需求点。"""
 

@@ -576,6 +576,104 @@ def build_coverage_prompt(
     return system, user
 
 
+REVIEW_MAX_ISSUES = 20
+_REVIEW_VERDICTS = ("pass", "needs_fix", "reject")
+_REVIEW_DIMENSIONS = ("coverage", "executability", "dedup", "distribution")
+
+
+def build_review_prompt(source_text: str, cases: list[dict]) -> tuple[str, str]:
+    """组装「用例评审」提示词：覆盖、可执行性、重复、分布四维打分并给问题清单。
+
+    与覆盖检查的区别：覆盖只回答"缺什么"，评审还要判断"写得好不好用"——
+    步骤是否可操作、预期能否判定、是否重复堆量、策略分布是否失衡。
+    """
+    lines = []
+    for index, case in enumerate(cases, start=1):
+        module = str(case.get("module") or "通用").strip()
+        name = str(case.get("name") or "").strip()
+        strategy = str(case.get("strategy") or "").strip()
+        steps = " ".join(str(case.get("steps") or "").split())[:120]
+        expected = " ".join(str(case.get("expected") or "").split())[:120]
+        lines.append(
+            f"{index}. [{module}] {name}（策略:{strategy or '未标注'}）"
+            f"\n   步骤：{steps or '（空）'}\n   预期：{expected or '（空）'}"
+        )
+    system = (
+        "你是资深测试评审专家，负责评审一份已生成的测试用例集。"
+        "从四个维度打分（0–100）并给出可执行的问题清单：\n"
+        "1. coverage 覆盖度：需求里明确的功能点、业务规则、异常分支是否有对应用例；\n"
+        "2. executability 可执行性：步骤是否可操作（含前置数据）、预期是否含可判定信号"
+        "（文案/状态码/字段值/数量/时序），是否出现「正常」「成功」这类无法判定的写法；\n"
+        "3. dedup 去重与冗余：是否存在同一规则换个说法的重复用例、为凑数的低价值用例；\n"
+        "4. distribution 策略分布：正向/反向/边界/等价类/状态迁移/场景是否失衡，"
+        "边界与异常是否明显偏少。\n"
+        "只针对给定的需求与用例判断，不要臆造需求中不存在的内容；措辞不同不算缺失。\n"
+        "问题清单最多 20 条，每条给出 case（对应用例名，覆盖缺口可写「（缺失）」）、"
+        "type（coverage/executability/dedup/distribution）、detail（≤120 字）、fix（≤120 字，可执行的改法）。\n"
+        "verdict 规则：总分 ≥80 为 pass，60–79 为 needs_fix，<60 为 reject。\n"
+        '只输出 JSON 对象：{"verdict":"pass|needs_fix|reject","score":0,'
+        '"dimensions":{"coverage":{"score":0,"note":"≤80字"},"executability":{"score":0,"note":"≤80字"},'
+        '"dedup":{"score":0,"note":"≤80字"},"distribution":{"score":0,"note":"≤80字"}},'
+        '"issues":[{"case":"…","type":"…","detail":"…","fix":"…"}],"summary":"≤200字"}，'
+        "不要输出解释文字或代码围栏。"
+    )
+    user = (
+        f"需求文档：\n{source_text}\n\n"
+        f"待评审用例（共 {len(cases)} 条）：\n" + "\n".join(lines)
+    )
+    return system, user
+
+
+def _review_score(value: object) -> int:
+    try:
+        score = int(float(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(100, score))
+
+
+def parse_review(text: str) -> dict:
+    """解析评审输出：补齐缺失维度、裁剪问题条数与字段长度，拒绝非对象。"""
+    cleaned = _strip_code_fence(text)
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("模型输出无法解析为评审 JSON")
+    data = json.loads(cleaned[start : end + 1])
+    if not isinstance(data, dict):
+        raise ValueError("评审输出不是 JSON 对象")
+    raw_dimensions = data.get("dimensions") if isinstance(data.get("dimensions"), dict) else {}
+    dimensions = {}
+    for key in _REVIEW_DIMENSIONS:
+        item = raw_dimensions.get(key) if isinstance(raw_dimensions.get(key), dict) else {}
+        dimensions[key] = {
+            "score": _review_score(item.get("score")),
+            "note": str(item.get("note") or "")[:80],
+        }
+    issues = []
+    for item in (data.get("issues") or [])[:REVIEW_MAX_ISSUES]:
+        if not isinstance(item, dict):
+            continue
+        issues.append(
+            {
+                "case": str(item.get("case") or "")[:60],
+                "type": str(item.get("type") or "coverage")[:20],
+                "detail": str(item.get("detail") or "")[:120],
+                "fix": str(item.get("fix") or "")[:120],
+            }
+        )
+    verdict = str(data.get("verdict") or "").strip().lower()
+    score = _review_score(data.get("score"))
+    if verdict not in _REVIEW_VERDICTS:
+        verdict = "pass" if score >= 80 else "needs_fix" if score >= 60 else "reject"
+    return {
+        "verdict": verdict,
+        "score": score,
+        "dimensions": dimensions,
+        "issues": issues,
+        "summary": str(data.get("summary") or "")[:200],
+    }
+
+
 def parse_coverage(text: str) -> dict:
     """解析覆盖检查输出；严格拒绝非对象/非数组，字段长度截断到上限。"""
     cleaned = _strip_code_fence(text)

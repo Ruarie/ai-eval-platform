@@ -156,6 +156,14 @@
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                     新增列
                   </button>
+                  <button
+                    v-if="currentSet"
+                    class="btn btn-secondary btn-md"
+                    aria-label="AI 评审当前用例集"
+                    @click="reviewOpen = true"
+                  >
+                    AI 评审
+                  </button>
                   <button class="btn btn-secondary btn-md" aria-label="打开 PRD 用例推导向导" @click="openAiGenDrawer">
                     PRD 推导向导
                   </button>
@@ -585,6 +593,12 @@
     </div>
 
     <ImportCasesExcelModal v-model:show="showImportExcel" :current-set="importCurrentSet" @imported="onCasesImported" />
+    <CaseReviewDrawer
+      v-model:show="reviewOpen"
+      :set-id="currentSet?.id || ''"
+      :set-name="currentSet?.name"
+      :case-count="cases.length"
+    />
 
     <!-- ─── 右侧滑出抽屉：PRD 用例推导向导 ─── -->
     <n-drawer v-model:show="aiGen.show" :width="drawerWidth" placement="right" :mask-closable="!aiGen.applying">
@@ -870,6 +884,7 @@ import { useMessage, useDialog, type DropdownOption } from 'naive-ui'
 import { api } from '../api/http'
 import type { CaseSet, TestCase, TestCaseInput, TestCaseCheck, CaseCompareResult, CaseCoverageResult, ColumnSchemaItem, Profile, TaskStatus } from '../api/types'
 import { escapeHtml, escapeRegex, renderIcon } from '../utils/render'
+import CaseReviewDrawer from '../components/drawers/CaseReviewDrawer.vue'
 import ImportCasesExcelModal from '../components/modals/ImportCasesExcelModal.vue'
 
 type CaseStrategy = '正向' | '反向' | '边界' | '状态迁移' | '场景' | '等价类'
@@ -932,6 +947,7 @@ const hasUnsavedChanges = ref(false)
 const showImportExcel = ref(false)
 const confirmingSet = ref(false)
 const filterStrategy = ref('')
+const reviewOpen = ref(false)
 const selectedCaseIds = ref<string[]>([])
 const editingCell = ref<{ row: ExtendedTestCase; field: string; original: string } | null>(null)
 const focusedCell = ref<{ rowIdx: number; field: string } | null>(null)

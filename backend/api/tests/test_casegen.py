@@ -5,7 +5,10 @@
 """
 
 import importlib.util
+import json
 from pathlib import Path
+
+import pytest
 
 # 共用用例生成纯函数路径：backend/shared/casegen.py
 _CASEGEN_PATH = Path(__file__).resolve().parents[2] / "shared" / "casegen.py"
@@ -390,3 +393,32 @@ def test_build_prompts_pins_module_when_given():
     # 不传时不追加约束，保持 api 侧单批次行为不变
     plain, _ = casegen.build_prompts("### 4.1 岗位\nFR-101 创建岗位", 6)
     assert "module 字段必须原样填" not in plain
+
+def test_build_review_prompt_includes_cases_and_dimensions():
+    """评审提示词要包含四维定义与实际用例内容。"""
+    system, user = casegen.build_review_prompt(
+        "需求：登录成功后跳转首页",
+        [{"module": "登录", "name": "登录成功跳转", "strategy": "正向",
+          "steps": "1. 输入账号\n2. 点击登录", "expected": "跳转首页"}],
+    )
+    assert "覆盖度" in system and "executability" in system and "distribution" in system
+    assert "登录成功跳转" in user and "跳转首页" in user
+
+
+def test_parse_review_normalizes_and_clamps():
+    """非法 verdict 按分数推断；缺维度补零；问题条数与分数都收敛到上限。"""
+    issues = [
+        {"case": f"c{i}", "type": "coverage", "detail": "d", "fix": "f"} for i in range(30)
+    ]
+    review = casegen.parse_review(
+        json.dumps({"verdict": "weird", "score": 999, "issues": issues})
+    )
+    assert review["verdict"] == "pass"
+    assert review["score"] == 100
+    assert len(review["issues"]) == casegen.REVIEW_MAX_ISSUES
+    assert review["dimensions"]["executability"] == {"score": 0, "note": ""}
+
+
+def test_parse_review_rejects_non_object():
+    with pytest.raises(ValueError):
+        casegen.parse_review("[1, 2, 3]")

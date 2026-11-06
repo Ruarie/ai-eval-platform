@@ -1021,6 +1021,42 @@ export const api = {
         comparison: data?.comparison || { winner: null, summary: '', scores: [], shared_points: [], only_a: [], only_b: [] },
       }
     },
+    /** 对已落库的用例集做 AI 评审：四维打分 + 问题清单，结果同时写入 checks。 */
+    async reviewSet(
+      id: string,
+      payload?: { source_doc_id?: string; source_text?: string },
+    ): Promise<{
+      verdict: 'pass' | 'needs_fix' | 'reject'
+      score: number
+      dimensions: Record<string, { score: number; note: string }>
+      issues: Array<{ case: string; type: string; detail: string; fix: string }>
+      summary: string
+      case_count: number
+      reviewed_at: string
+      source_truncated: boolean
+    }> {
+      if (getDataMode() === 'mock') {
+        return {
+          verdict: 'needs_fix',
+          score: 72,
+          dimensions: {
+            coverage: { score: 70, note: '示例模式：报告与运营模块覆盖偏少' },
+            executability: { score: 82, note: '多数预期可判定' },
+            dedup: { score: 88, note: '未发现明显重复' },
+            distribution: { score: 60, note: '边界用例偏少' },
+          },
+          issues: [
+            { case: '示例用例', type: 'distribution', detail: '示例模式：边界用例占比低于 20%', fix: '补充边界值用例' },
+          ],
+          summary: '示例模式返回的评审结果，不代表真实模型输出。',
+          case_count: 0,
+          reviewed_at: new Date().toISOString(),
+          source_truncated: false,
+        }
+      }
+      const { data } = await http.post(`/api/case-sets/${id}/ai-review`, payload || {}, { timeout: 180000 })
+      return data
+    },
     // 契约 POST /api/case-sets/ai-coverage：需求覆盖自检，独立请求，不改变候选内容。
     async checkCoverage(payload: {
       source_text: string
