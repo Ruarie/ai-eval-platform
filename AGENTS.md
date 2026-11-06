@@ -1,6 +1,10 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.26 ｜ 审查日期：2026-11-06（用例生成补齐逐条需求覆盖：评审任务 2f7b889d 的 46 条用例漏掉整个功能域（报告 FR-600、运营 FR-800）。根因是 `shared/casegen.requirement_rules` 只认「1. 」「- 」列表符号，PRD 表格里的 `| FR-xxx |` 行完全没进提示词，上限又只有 12 条。修复：① 新增 FR-/NFR-/BR- 编号行识别（表格行压成「编号 描述 优先级」），上限 12→80（该 PRD 有 62 条编号需求，60 会漏尾部模块）；② 提示词明确 P0 一条用例对一条、条数不足先砍 P1/P2，六类策略都要出现且边界+反向合计 ≥40%，expected 必须含可判定信号；③ 要求输出前逐模块自检补齐。实测同一份 PRD 现在抽出 80 条规则（62 条 FR，含此前漏掉的 FR-801/802/803）。门禁：api 2430 passed/89 skipped、worker 87 passed（1 例既有失败与本批无关）。）
+
+> 版本：V2.25 ｜ 审查日期：2026-11-06（修复推理模型把输出预算全用于思考：hy4 档出现「达到输出上限」且正文为空，事件显示 `reasoning_tokens=8192 / completion_tokens=8192 / content=""`。① `ws.py` 新增 `_output_budget`：effort 型思考模板预算 ≤16K 时翻倍、≥16K 保持原值（上限 131072），budget 型模板不变；② 前端 `max_tokens` 文案补「若正文为空多为思考占满预算」；③ 提示词加单轮最多 4 次工具调用、长文档优先定位片段；④ hy4 协议档 `max_output_tokens` 8192→32768、`context_window` 960000。）
+
 > 版本：V2.24 ｜ 审查日期：2026-11-05（远程工作区目录浏览：新增 `POST /api/workspaces/ssh/browse` —— 创建远程工作区前用尚未落库的临时连接参数列出一层子目录（不列文件），返回 `{path, parent, entries}`；浏览阶段以 `/` 为界不限深度，`remote_root` 由用户点选回填；`auth_type=password` 时密码随请求体传入，只在本次请求内使用（不入库、不写审计、不落日志）。前端创建弹窗「远程根目录」旁加「浏览」：目录列表 + 上级导航 + 「选择当前目录」回填；密码认证提供仅用于浏览的密码输入框。实测：browse `/` 返回 /app、/bin、/config…；browse `/config` 返回 path=/config、parent=/、子目录 .ssh/logs/ssh_host_keys/sshd；无密码 400。门禁：api 2428 passed/89 skipped、e2e 130 passed、前端 lint 0 error + build 通过。）
 
 > 版本：V2.23 ｜ 审查日期：2026-11-05（HTTPS 入口：新增 `https` 服务（公共镜像 `nginx:1.27-alpine` + 宿主 `deploy/gen-selfsigned.sh` 生成自签证书、容器只读挂载；不为几行配置单独发镜像，避免部署机 `--no-build` 时缺镜像），映射 `8443:443` 反代 `web:80`，透传 `Upgrade`/`Connection` 支持 `/ws/agent/v2`，长请求 600s、上传上限 200MB；证书落 `./data/https` 重建不换；`deploy/plan_services.py` 纳入服务列表；`HTTPS_HOST` 写进证书 CN/SAN。生产是内网 IP + 443 被占用，故用自签 + 8443；浏览器首次访问需手动信任，导入 `data/https/server.crt` 可消除告警。曾试 Caddy 内置 CA：容器内绑定宿主 IP 导致监听失败，改 `bind 0.0.0.0` 后 curl/Chrome 仍 TLS `internal error`（仅 openssl 可通），改用 nginx。实测：8443 下 `/api/health` 200、`/login` 200、`/api/kb` 401、浏览器登录跳 `/agent`、发消息建立 `wss://…/ws/agent/v2` 且无报错。）
