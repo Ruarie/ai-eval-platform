@@ -1205,7 +1205,7 @@ def _selected_model_config(db: Session) -> tuple[ModelConfig, _ProfileSnapshot]:
         temperature=0.2,
         # 输出上限从协议档 max_output_tokens 读取（默认 8192）：长文档总结/
         # 导出类任务可调大，避免回答在输出上限处被上游截断。
-        max_tokens=int(getattr(profile, "max_output_tokens", 0) or 8192),
+        max_tokens=_output_budget(profile),
         timeout_s=60.0,
         reasoning_enabled=reasoning_enabled,
         reasoning_effort=reasoning_effort,
@@ -1220,6 +1220,24 @@ def _selected_model_config(db: Session) -> tuple[ModelConfig, _ProfileSnapshot]:
     )
     _MODEL_CONFIG_CACHE[profile_id] = (now + _MODEL_CONFIG_CACHE_TTL_S, (config, snapshot))
     return config, snapshot
+
+
+# effort 型思考模板只传思考档位、不设思考预算上限；推理模型（如 hy4）可能把
+# max_tokens 全花在思考上，导致正文为空、前端只看到「达到输出上限」。
+_EFFORT_TEMPLATE_HINTS = ("effort",)
+# 与协议档 schema 的上限一致（131072），避免兜底反而把用户设的大预算压小。
+_MAX_OUTPUT_BUDGET = 131072
+# 预算已经够大（≥16K）时不再翻倍：翻倍只为把小预算从「思考饿死正文」里救出来。
+_EFFORT_DOUBLE_THRESHOLD = 16384
+
+
+def _output_budget(profile: object) -> int:
+    """计算单回合最大输出 token，给思考不可控的模板留一倍余量。"""
+    base = int(getattr(profile, "max_output_tokens", 0) or 8192)
+    template = str(getattr(profile, "reasoning_template_id", "") or "").lower()
+    if any(hint in template for hint in _EFFORT_TEMPLATE_HINTS) and base < _EFFORT_DOUBLE_THRESHOLD:
+        return min(base * 2, _MAX_OUTPUT_BUDGET)
+    return base
 
 
 def _window_messages(db: Session, session_id: str) -> tuple[list[dict], dict[str, object]]:

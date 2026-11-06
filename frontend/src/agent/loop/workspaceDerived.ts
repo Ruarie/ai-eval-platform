@@ -109,7 +109,8 @@ export function taskForToolRow(tool: ToolRun, tasks: Record<string, LoopRecord> 
 
 /** 结束原因文案（模板状态条与 phase 映射共用）。 */
 export const finishLabels: Record<string, string> = {
-  max_tokens: '达到输出上限，本轮已结束',
+  // 推理模型常把输出预算全花在思考上，正文为空；提示里给出可操作的排查方向。
+  max_tokens: '达到输出上限，本轮已结束（若正文为空，通常是模型的思考占满了输出预算：可在协议档调大「单回合输出上限」或降低思考档位）',
   max_steps: '达到步骤上限，本轮已结束。如需继续，可发送“继续”接着处理。',
   cancelled: '本轮已取消',
   service_restart: '服务更新中断了本轮，已有结果已保留。服务恢复后可发送“继续”。',
