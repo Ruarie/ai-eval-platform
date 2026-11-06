@@ -143,23 +143,50 @@ def format_steps(steps: str) -> str:
 
 
 _RULE_LINE = re.compile(r"^\s*(?:\d+[.、．)]|[-*•])\s*\S")
-_RULE_HINTS = ("不可", "不得", "必须", "必填", "禁止", "校验")
+# 需求编号条目（FR-301 / NFR-12 / BR-3）：PRD 里通常写在表格首列。
+# 旧实现只认列表符号，表格里的编号条目全部漏掉，模型因此整段功能域不生成用例。
+_FR_LINE = re.compile(r"^\s*\|?\s*(?:FR|NFR|BR|SR)[-_ ]?\d{2,4}\b", re.IGNORECASE)
+_RULE_HINTS = ("不可", "不得", "必须", "必填", "禁止", "校验", "上限", "阈值", "超时")
 
 
-def requirement_rules(source_text: str, limit: int = 12) -> list[str]:
-    """抽出需求里的编号规则和硬约束，供提示词逐条要求覆盖。
+def _clean_rule(raw: str) -> str:
+    """把表格行压成一行文本：去掉竖线与多余空白，保留编号、描述与优先级。"""
+    text = raw.strip().strip("|").strip()
+    cells = [cell.strip() for cell in text.split("|") if cell.strip()]
+    text = " ".join(cells) if cells else text
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:80]
 
-    只取原文已有的行，不改写成另一套需求点。过长的行截断，避免提示词被单条规则撑满。
+
+def requirement_rules(source_text: str, limit: int = 80) -> list[str]:
+    """抽出需求里的编号条目和硬约束，供提示词逐条要求覆盖。
+
+    只取原文已有的行，不改写成另一套需求点。先收带编号的条目（FR-/NFR-/BR-），
+    它们代表功能域完整性；再收列表项与硬约束关键词行。过长的行截断，避免提示词
+    被单条规则撑满。
     """
     rules: list[str] = []
+    seen: set[str] = set()
+
+    def push(raw: str) -> None:
+        item = _clean_rule(raw)
+        if item and item not in seen:
+            seen.add(item)
+            rules.append(item)
+
     for raw in source_text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        if _RULE_LINE.match(line) or any(hint in line for hint in _RULE_HINTS):
-            rules.append(line[:80])
+        if len(rules) >= limit:
+            return rules
+        if _FR_LINE.match(raw):
+            push(raw)
+    for raw in source_text.splitlines():
         if len(rules) >= limit:
             break
+        line = raw.strip()
+        if not line or _FR_LINE.match(line):
+            continue
+        if _RULE_LINE.match(line) or any(hint in line for hint in _RULE_HINTS):
+            push(line)
     return rules
 
 
@@ -196,6 +223,13 @@ def build_prompts(
         "expected 至少 6 个字，写明可核对的提示文案、页面跳转、状态变化、HTTP 状态码、金额或次数，"
         "不要只写“正常”或“成功”。"
         "「不可再次」「不得重复」类约束，feature_point 要写出「重复」和被禁止的行为。"
+        "覆盖要求：带编号的条目（FR-/NFR-/BR-）代表功能域，不允许整段跳过；"
+        "标 P0 的条目必须一条用例对应一条，条数不足时先砍 P1/P2，禁止用低优先级用例"
+        "挤占 P0 名额；覆盖不全时宁可少写近似重复用例。"
+        "六类策略都要出现，边界与反向合计不低于 40%，纯正向堆量视为不合格。"
+        "expected 必须含可判定信号：具体提示文案、HTTP 状态码、字段值、数量或时序，"
+        "不得只写「正常」「成功」。"
+        "生成后自检：逐个模块核对是否有对应用例，缺失的模块必须补齐再输出。"
         "不同用例的 name 与 feature_point 不得只是同一规则的改写。"
         "不要输出 id、case_set_id、mapped、pending_complete、extras、sort_order。"
         "需求未给出确定预期时不要编造；expected 留空，并在 test_type 标记“待澄清”。"
@@ -216,8 +250,10 @@ def build_prompts(
     if rules:
         listed = "\n".join(f"- {rule}" for rule in rules)
         rule_block = (
-            "\n\n以下需求规则必须各自至少有一条用例覆盖，feature_point 保留规则中的原词"
-            "（尤其是必填、不可、不得、必须、校验、上限）：\n"
+            "\n\n以下是需求编号条目与硬约束，必须按优先级覆盖：P0 条目一条用例对一条，"
+            "P1/P2 在条数允许时覆盖；带编号（FR-/NFR-/BR-）的条目代表功能域，不能整段跳过；"
+            "feature_point 保留编号与规则原词"
+            "（尤其是必填、不可、不得、必须、校验、上限、阈值、超时）：\n"
             f"{listed}"
         )
     user = (

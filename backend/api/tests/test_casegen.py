@@ -267,13 +267,37 @@ def test_dedupe_cases_merges_same_steps_and_expected():
     assert [item["name"] for item in kept] == ["验证码有效期校验", "验证码过期提示"]
 
 
-def test_build_prompts_lists_requirement_rules_for_coverage():
-    """编号规则和必填约束要出现在用户提示里，功能点才能沿用需求原词。"""
+def test_requirement_rules_extracts_numbered_and_constraint_lines():
+    """编号列表与硬约束要进规则块；普通说明行不进，避免提示词被噪声撑满。"""
     source = "需求：上传附件。\n1. 字段 file 必填。\n2. 已退款订单不可再次申请。\n补充说明不单列。"
-    _, user = casegen.build_prompts(source, 8)
-    assert "字段 file 必填" in user
-    assert "已退款订单不可再次申请" in user
-    assert "补充说明不单列" not in user.split("以下需求规则", 1)[-1]
+    rules = casegen.requirement_rules(source)
+    joined = " | ".join(rules)
+    assert "字段 file 必填" in joined
+    assert "已退款订单不可再次申请" in joined
+    assert "补充说明不单列" not in joined
+
+
+def test_requirement_rules_keeps_numbered_requirement_rows():
+    """PRD 表格里的 FR 编号条目要保留编号与优先级，这是功能域完整的抓手。"""
+    source = (
+        "| 编号 | 需求 | 优先级 |\n"
+        "| --- | --- | --- |\n"
+        "| FR-601 | 生成面试报告 | P0 |\n"
+        "| FR-801 | 账号与权限管理 | P0 |\n"
+    )
+    rules = casegen.requirement_rules(source)
+    joined = " | ".join(rules)
+    assert "FR-601" in joined and "生成面试报告" in joined
+    assert "FR-801" in joined
+
+
+def test_build_prompts_requires_numbered_coverage():
+    """提示词要明确 P0 一条对一条、六类策略齐备、边界与反向合计下限。"""
+    source = "| FR-101 | 创建岗位 | P0 |\n| FR-601 | 生成报告 | P0 |"
+    system, user = casegen.build_prompts(source, 12)
+    assert "P0" in system and "一条用例对应一条" in system
+    assert "边界与反向合计不低于 40%" in system
+    assert "FR-101" in user and "FR-601" in user
 
 
 def test_format_steps_numbers_semicolon_actions():
