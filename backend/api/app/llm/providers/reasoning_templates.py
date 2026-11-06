@@ -57,7 +57,9 @@ class ReasoningTemplate:
 TEMPLATES: tuple[ReasoningTemplate, ...] = (
     ReasoningTemplate(
         "newapi-chat-effort-v1", "New API Chat · 思考强度", "*", "openai_chat",
-        "effort", _EFFORTS, "medium", "newapi_effort",
+        # 默认 high：effort 型模板的思考量由模型决定，medium 在长上下文下容易
+        # 把预算花在「想」上；high 配合 ≥16K 输出上限更稳（hy4 实测）。
+        "effort", _EFFORTS, "high", "newapi_effort",
         "发送网关 reasoning_effort，由 New API 转换上游参数；每档须验证思考证据。", version=3,
     ),
     ReasoningTemplate(

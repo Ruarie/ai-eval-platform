@@ -1,6 +1,10 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.29 ｜ 审查日期：2026-11-06（effort 型思考模板默认档位固定为 high：`newapi-chat-effort-v1` 的 `default_effort` 由 medium 改为 high。原因是 effort 型模板的思考量由上游决定，medium 在长上下文下容易把预算花在思考上（hy4 曾出现 reasoning=8192、正文为空）；high 配合 ≥16K 输出上限更稳。实测 hy4 默认档位=高强度、五档全通过（off/low/medium/high/max），真实对话输出 865 token、无输出上限截断。另对全部 3 个协议档做真实思考探测：deepseek-v4.1-flash（off/low/high/max 全通过，2.3s）、qwen3.8-max-0902（五档全通过，6.4s）、hy4（五档全通过，6.6s），UI 三个模型各发一条真实问题均正常返回、无截断。）
+
+> 版本：V2.28 ｜ 审查日期：2026-11-06（用例 AI 评审：新增 `POST /api/case-sets/{set_id}/ai-review`，对已落库用例集按覆盖度/可执行性/去重/策略分布四维打分并给出问题清单（每条含 type/detail/fix），结果写入 `case_sets.checks`（`kind=ai_review`，保留自检红字，不改动用例内容与状态，confirmed 快照也可评审）。`shared/casegen` 新增 `build_review_prompt` / `parse_review`：分数收敛 0–100、问题上限 20 条、verdict 非法时按分数推断、字段长度截断。前端新增 `CaseReviewDrawer`（分数 + 四维进度 + 问题清单 + 重试）与用例页「AI 评审」入口。实测同一份 66 条用例集可返回结构化评审结果。门禁：casegen 39 passed、route 注册校验通过、前端 typecheck/build 通过。）
+
 > 版本：V2.27 ｜ 审查日期：2026-11-06（用例生成改为按需求分节分批：实测 hy4 在「一次产出 45 条 JSON」时把 max_tokens 全花在思考上、正文 0 字符（单模块 16K 预算同样为空），同一 prompt 换 qwen3.8-max 仅 1121 tokens 就出 8 条。① `shared.casegen.split_sections`：优先按「4.x」功能小节切（不拆 4.3.1 子节），无编号标题退化为任意标题、再退化为按长度切块；段数超上限贪心合并（标题保留两段），单段超 4000 字再切；② worker `run_testcase` 逐批生成：每批 6–10 条、独立预算与截断重试，单批失败不整单失败，全部失败才报错（全为截断时给 BUDGET_EXCEEDED）；③ 进度按批次推送。实测同一 PRD 切 9 段（4.1–4.8，4.8 超长拆两段）。门禁：api 2433 passed/89 skipped、worker 87 passed（1 例既有失败与本批无关）。）
 
 > 版本：V2.26 ｜ 审查日期：2026-11-06（用例生成补齐逐条需求覆盖：评审任务 2f7b889d 的 46 条用例漏掉整个功能域（报告 FR-600、运营 FR-800）。根因是 `shared/casegen.requirement_rules` 只认「1. 」「- 」列表符号，PRD 表格里的 `| FR-xxx |` 行完全没进提示词，上限又只有 12 条。修复：① 新增 FR-/NFR-/BR- 编号行识别（表格行压成「编号 描述 优先级」），上限 12→80（该 PRD 有 62 条编号需求，60 会漏尾部模块）；② 提示词明确 P0 一条用例对一条、条数不足先砍 P1/P2，六类策略都要出现且边界+反向合计 ≥40%，expected 必须含可判定信号；③ 要求输出前逐模块自检补齐。实测同一份 PRD 现在抽出 80 条规则（62 条 FR，含此前漏掉的 FR-801/802/803）。门禁：api 2430 passed/89 skipped、worker 87 passed（1 例既有失败与本批无关）。）
