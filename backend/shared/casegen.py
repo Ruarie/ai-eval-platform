@@ -313,8 +313,24 @@ def split_sections(
     return _merge_sections(sections, max_chars, max_sections)
 
 
+def module_label(section_title: str) -> str:
+    """把小节标题收敛成 module 字段可用的名字。
+
+    ``### 4.1 岗位与能力模型（FR-100）`` → ``岗位与能力模型``。
+    分批生成时用它约束 module，避免模型自创模块名导致同一功能域被拆成好几块。
+    """
+    label = re.sub(r"^#+\s*", "", str(section_title or ""))
+    label = re.sub(r"^\d+(?:\.\d+)*\s*", "", label)
+    label = re.sub(r"[（(]\s*FR-\d+\s*[)）]", "", label)
+    label = re.split(r"\s*—\s*|\s+-\s+", label)[0]
+    return label.strip()[:40]
+
+
 def build_prompts(
-    source_text: str, target_count: int, weights: dict[str, int] | None = None
+    source_text: str,
+    target_count: int,
+    weights: dict[str, int] | None = None,
+    module_name: str = "",
 ) -> tuple[str, str]:
     """组装六策略用例生成的中文 system / user prompt（口径对齐 api ai-generate）。"""
     weights = validate_strategy_weights(weights)
@@ -354,6 +370,12 @@ def build_prompts(
         '"expected":"登录成功并跳转首页","test_type":"核心业务"}]'
         "只输出一个 JSON 数组，不要输出任何解释文字或 markdown 代码围栏。"
     )
+    if module_name:
+        system += (
+            f"本批只针对需求小节「{module_name}」：所有用例的 module 字段必须原样填"
+            f"「{module_name}」，submodule 用该小节内的具体功能点名称；"
+            "不要自创模块名，也不要输出其它小节的用例。"
+        )
     rules = requirement_rules(source_text)
     rule_block = ""
     if rules:

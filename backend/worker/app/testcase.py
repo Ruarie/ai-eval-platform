@@ -32,6 +32,7 @@ from shared.casegen import (
     dedupe_cases,
     generation_token_budget,
     parse_cases_with_stats,
+    module_label,
     rebalance_with_stats,
     split_sections,
     selfcheck,
@@ -302,7 +303,10 @@ def run_testcase(task_id: str) -> None:
             if is_cancelled(db, task.id):
                 logger.info("testcase task %s cancelled during batched generation", task_id)
                 return
-            system, user = build_prompts(body, per_batch, weights=weights)
+            # 传小节名约束 module：模型自创模块名会让同一功能域被拆成多块。
+            system, user = build_prompts(
+                body, per_batch, weights=weights, module_name=module_label(title)
+            )
             budget = generation_token_budget(per_batch)
             try:
                 result = invoke(system, user, budget)

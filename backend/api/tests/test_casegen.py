@@ -374,3 +374,19 @@ def test_split_sections_stops_at_higher_level_heading():
     assert all("技术方案" not in s["text"] for s in sections)
     assert "FR-201" in sections[1]["text"]
     assert titles[1].startswith("4.2")
+
+def test_module_label_strips_numbering_and_tags():
+    """小节标题要收敛成可直接当 module 的名称。"""
+    assert casegen.module_label("### 4.1 岗位与能力模型（FR-100）") == "岗位与能力模型"
+    assert casegen.module_label("### 4.3 智能出题（FR-300）— 核心模块") == "智能出题"
+    assert casegen.module_label("## 4.8 运营与系统管理") == "运营与系统管理"
+
+
+def test_build_prompts_pins_module_when_given():
+    """分批生成时把本批小节名写进提示词，禁止模型自创模块名。"""
+    system, _ = casegen.build_prompts("### 4.1 岗位\nFR-101 创建岗位", 6, module_name="岗位与能力模型")
+    assert "module 字段必须原样填" in system
+    assert "岗位与能力模型" in system
+    # 不传时不追加约束，保持 api 侧单批次行为不变
+    plain, _ = casegen.build_prompts("### 4.1 岗位\nFR-101 创建岗位", 6)
+    assert "module 字段必须原样填" not in plain
