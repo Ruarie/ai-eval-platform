@@ -71,7 +71,8 @@ test('知识图谱抽屉展示实体、关系与中文类型详情', async ({ pa
   await expect(page.getByText('3 个实体 · 1 条关系')).toBeVisible()
   await expect(page.locator('svg.graph-canvas .graph-node')).toHaveCount(3)
 
-  await page.locator('svg.graph-canvas .graph-node').first().click()
+  // 节点顺序由布局决定，点击「关联度最高」列表里的退款更稳。
+  await page.locator('.graph-side .top-chip', { hasText: '退款' }).click()
   await expect(page.getByText('退款业务对象')).toBeVisible()
   // 类型中文化：event → 事件
   await expect(page.locator('.graph-side .chip')).toHaveText('事件')
