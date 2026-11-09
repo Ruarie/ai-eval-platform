@@ -52,4 +52,9 @@ artifacts/
 
 # Agent 全量测试产物（本地留存，不入库）
 tools/agent-eval/reports/
-\n# 56MB 原始用例表，只用于一次性导入，不进仓库\n造化插件+资产库前端-测试用例.xlsx
+# 56MB 原始用例表，只用于一次性导入，不进仓库
+造化插件+资产库前端-测试用例.xlsx
+# 本机自动部署辅助文件（各机器本地）
+.auto-deploy.env
+.auto-deploy.lock
+deploy/local-build-mirror.sh
