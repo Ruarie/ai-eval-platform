@@ -149,6 +149,115 @@
                 </div>
               </div>
             </div>
+
+            <div class="req-section req-change">
+              <div class="req-section-title row-between">
+                <span>需求变更分析</span>
+                <button v-if="!showChange" class="link-btn" @click="openChange">粘贴新版本需求</button>
+                <button v-else class="link-btn" @click="showChange = false">收起</button>
+              </div>
+
+              <div v-if="showChange && !changeTarget" class="req-change-form">
+                <div class="field">
+                  <label class="field-label">新版本名称</label>
+                  <n-input v-model:value="changeForm.name" placeholder="例如：支付模块 PRD V3" maxlength="120" />
+                </div>
+                <div class="field">
+                  <label class="field-label">新版本需求原文</label>
+                  <n-input
+                    v-model:value="changeForm.sourceText"
+                    type="textarea"
+                    :autosize="{ minRows: 6, maxRows: 12 }"
+                    placeholder="粘贴改版后的需求文本；平台只抽取 FR-/NFR-/BR-/SR- 条目并与当前版本对比。"
+                  />
+                </div>
+                <div class="req-actions">
+                  <button class="btn btn-primary btn-sm" :disabled="changeCreating" @click="createChangeVersion">
+                    {{ changeCreating ? '解析中…' : '解析并分析影响' }}
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="changeTarget" class="req-change-result">
+                <div class="req-meta">
+                  <span class="req-badge" :class="changeTarget.status === 'confirmed' ? 'is-confirmed' : 'is-draft'">
+                    {{ changeTarget.status === 'confirmed' ? '新版本已确认' : '新版本草稿' }}
+                  </span>
+                  <span class="small tertiary">{{ changeTarget.name }} · {{ changeTarget.requirement_count }} 条需求</span>
+                </div>
+
+                <div v-if="changeDiff" class="req-change-counts">
+                  <span>新增 <b>{{ changeDiff.added_count }}</b></span>
+                  <span>删除 <b>{{ changeDiff.removed_count }}</b></span>
+                  <span>修改 <b>{{ changeDiff.changed_count }}</b></span>
+                  <span v-if="changeDiff.truncated" class="small tertiary">明细仅展示前 500 条</span>
+                </div>
+
+                <div v-if="changeDiff?.added.length" class="req-change-group">
+                  <div class="small">新增需求</div>
+                  <div v-for="item in changeDiff.added.slice(0, 20)" :key="`add-${item.id}`" class="req-change-row">
+                    <b class="mono">{{ item.req_no }}</b>
+                    <span>{{ item.title }}</span>
+                    <span class="small tertiary">{{ item.priority || '—' }} · {{ item.module || '未分模块' }}</span>
+                  </div>
+                </div>
+                <div v-if="changeDiff?.removed.length" class="req-change-group">
+                  <div class="small">删除需求</div>
+                  <div v-for="item in changeDiff.removed.slice(0, 20)" :key="`del-${item.id}`" class="req-change-row">
+                    <b class="mono">{{ item.req_no }}</b>
+                    <span>{{ item.title }}</span>
+                  </div>
+                </div>
+                <div v-if="changeDiff?.changed.length" class="req-change-group">
+                  <div class="small">修改需求</div>
+                  <div v-for="item in changeDiff.changed.slice(0, 20)" :key="`chg-${item.id}`" class="req-change-row">
+                    <b class="mono">{{ item.req_no }}</b>
+                    <span>{{ item.title }}</span>
+                    <span class="small tertiary">
+                      <template v-for="(field, index) in item.fields" :key="field.field">
+                        {{ index ? '；' : '' }}{{ field.label }}：{{ field.before || '空' }} → {{ field.after || '空' }}
+                      </template>
+                    </span>
+                  </div>
+                </div>
+
+                <div v-if="changeImpact" class="req-change-impact">
+                  <div class="small">
+                    受影响用例集 <b>{{ changeImpact.affected_set_count }}</b> 个 · 用例 <b>{{ changeImpact.affected_case_count }}</b> 条
+                    <span v-if="changeImpact.truncated" class="tertiary">（明细截断）</span>
+                  </div>
+                  <div v-if="!changeImpact.affected_case_count" class="small tertiary">
+                    没有已关联用例受本次变更影响；新增需求仍需补充用例。
+                  </div>
+                  <div v-for="item in changeImpact.sets" :key="item.case_set_id" class="req-change-row">
+                    <router-link :to="`/cases?set_id=${item.case_set_id}`" class="link">{{ item.name }}</router-link>
+                    <span class="small tertiary">{{ item.status }} · {{ item.affected_cases }} 条受影响</span>
+                  </div>
+                  <div class="req-change-cases">
+                    <div v-for="item in changeImpact.cases.slice(0, 50)" :key="`${item.case_set_id}-${item.case_item_id}-${item.req_no}`" class="req-change-row">
+                      <span class="mono small">{{ item.req_no }}</span>
+                      <span>{{ item.case_name }}</span>
+                      <span class="small tertiary">{{ item.change_type === 'removed' ? '需求已删除' : '需求已修改' }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="req-actions">
+                  <button
+                    v-if="changeTarget.status === 'draft'"
+                    class="btn btn-primary btn-sm"
+                    :disabled="confirming"
+                    @click="confirmChangeVersion"
+                  >
+                    {{ confirming ? '确认中…' : '确认新版本' }}
+                  </button>
+                  <button class="btn btn-secondary btn-sm" @click="changeTarget = null; changeDiff = null; changeImpact = null">
+                    重新分析
+                  </button>
+                  <span class="small tertiary">本期只展示影响，不自动修改用例；请按清单人工处理。</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div v-else class="req-unbound">
@@ -196,6 +305,8 @@ import type {
   RequirementAutoLink,
   RequirementBaseline,
   RequirementBaselineDetail,
+  RequirementDiff,
+  RequirementImpact,
 } from '../../api/types'
 
 const props = defineProps<{
@@ -229,6 +340,13 @@ const autoLinks = ref<RequirementAutoLink[]>([])
 const selectedCandidates = reactive<Record<string, boolean>>({})
 
 const createForm = reactive({ name: '', sourceText: '' })
+// 需求改版分析：默认以当前确认基线为父版本，只读展示差异与影响。
+const showChange = ref(false)
+const changeForm = reactive({ name: '', sourceText: '' })
+const changeCreating = ref(false)
+const changeTarget = ref<RequirementBaselineDetail | null>(null)
+const changeDiff = ref<RequirementDiff | null>(null)
+const changeImpact = ref<RequirementImpact | null>(null)
 
 const baselineOptions = computed(() =>
   baselines.value.map((item) => ({
@@ -356,6 +474,58 @@ async function confirmBaseline(): Promise<void> {
     await bindBaseline()
   } catch (err) {
     message.error(err instanceof Error ? err.message : '确认需求基线失败')
+  } finally {
+    confirming.value = false
+  }
+}
+
+function openChange(): void {
+  if (!detail.value) return
+  showChange.value = true
+  changeTarget.value = null
+  changeDiff.value = null
+  changeImpact.value = null
+  changeForm.name = `${detail.value.name} V${detail.value.revision + 1}`
+  changeForm.sourceText = ''
+}
+
+async function createChangeVersion(): Promise<void> {
+  if (!detail.value || changeCreating.value) return
+  if (!changeForm.name.trim() || !changeForm.sourceText.trim()) {
+    message.warning('请填写新版本名称与需求原文')
+    return
+  }
+  changeCreating.value = true
+  try {
+    const target = await api.requirements.createVersion(detail.value.id, {
+      name: changeForm.name.trim(),
+      source_text: changeForm.sourceText,
+      source_kind: 'text',
+    })
+    changeTarget.value = target
+    const [diff, impact] = await Promise.all([
+      api.requirements.diff(target.id, detail.value.id),
+      api.requirements.impact(target.id, detail.value.id),
+    ])
+    changeDiff.value = diff
+    changeImpact.value = impact
+    message.success(`已解析新版本 ${target.requirement_count} 条需求，请核对差异后确认`)
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '创建需求新版本失败')
+  } finally {
+    changeCreating.value = false
+  }
+}
+
+async function confirmChangeVersion(): Promise<void> {
+  if (!changeTarget.value || confirming.value) return
+  confirming.value = true
+  try {
+    changeTarget.value = await api.requirements.confirmBaseline(changeTarget.value.id)
+    await loadBaselines()
+    message.success('新版本已确认；请按影响清单人工处理用例')
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '确认新版本失败')
   } finally {
     confirming.value = false
   }
@@ -658,5 +828,64 @@ watch(
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+.req-change-form {
+  padding: 10px 12px;
+  border: 1px dashed var(--border, #d1d5db);
+  border-radius: 10px;
+  margin-top: 8px;
+}
+
+.req-change-result {
+  margin-top: 8px;
+}
+
+.req-change-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+.req-change-group {
+  margin-top: 10px;
+}
+
+.req-change-group > .small {
+  color: var(--text-tertiary);
+  margin-bottom: 5px;
+}
+
+.req-change-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--border-subtle, #f1f5f9);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.req-change-impact {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+}
+
+.req-change-cases {
+  margin-top: 6px;
+}
+
+@media (max-width: 700px) {
+  .req-change-counts {
+    gap: 8px;
+  }
 }
 </style>

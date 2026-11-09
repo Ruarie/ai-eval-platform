@@ -210,3 +210,85 @@ def test_requirement_coverage_requires_binding(requirement_case):
     response = requirement_case.client.get("/api/case-sets/set-1/coverage")
     assert response.status_code == 400
     assert response.json()["code"] == "VALIDATION"
+
+
+def test_requirement_version_diff_and_impact(requirement_case):
+    """从已确认基线派生新版本，分析差异与受影响用例。"""
+    client = requirement_case.client
+    created = client.post(
+        "/api/requirement-baselines",
+        json={
+            "name": "登录需求 V1",
+            "source_text": """
+### 4.1 登录
+| FR-101 | 支持手机号加密码登录 | P0 | 登录 |
+| FR-102 | 手机号为空时提示 | P1 | 登录 |
+""",
+        },
+    )
+    assert created.status_code == 201, created.text
+    base = created.json()
+    base_id = base["id"]
+    req_101 = base["requirements"][0]["id"]
+    assert client.post(f"/api/requirement-baselines/{base_id}/confirm").status_code == 200
+    assert client.post(
+        "/api/case-sets/set-1/requirement-baseline", json={"baseline_id": base_id}
+    ).status_code == 200
+    assert client.post(
+        "/api/case-sets/set-1/requirements/link",
+        json={
+            "baseline_id": base_id,
+            "links": [{"case_item_id": "case-1", "requirement_ids": [req_101]}],
+        },
+    ).status_code == 200
+
+    version = client.post(
+        f"/api/requirement-baselines/{base_id}/versions",
+        json={
+            "name": "登录需求 V2",
+            "source_text": """
+### 4.1 登录
+| FR-101 | 支持手机号加密码或验证码登录 | P0 | 登录 |
+| FR-103 | 支持图形验证码 | P1 | 登录 |
+""",
+        },
+    )
+    assert version.status_code == 201, version.text
+    target = version.json()
+    target_id = target["id"]
+    assert target["parent_id"] == base_id
+    assert target["status"] == "draft"
+    assert [item["req_no"] for item in target["requirements"]] == ["FR-101", "FR-103"]
+
+    diff = client.get(f"/api/requirement-baselines/{target_id}/diff")
+    assert diff.status_code == 200, diff.text
+    body = diff.json()
+    assert body["base_id"] == base_id
+    assert body["added_count"] == 1
+    assert body["removed_count"] == 1
+    assert body["changed_count"] == 1
+    assert body["removed"][0]["req_no"] == "FR-102"
+    assert body["changed"][0]["req_no"] == "FR-101"
+
+    impact = client.get(f"/api/requirement-baselines/{target_id}/impact")
+    assert impact.status_code == 200, impact.text
+    report = impact.json()
+    assert report["affected_set_count"] == 1
+    assert report["affected_case_count"] == 1
+    assert report["sets"][0]["case_set_id"] == "set-1"
+    assert report["cases"][0]["case_item_id"] == "case-1"
+    assert report["cases"][0]["change_type"] == "changed"
+
+    # 草稿版本不能作为新版本的父级；必须先确认。
+    draft_child = client.post(
+        f"/api/requirement-baselines/{target_id}/versions",
+        json={"name": "V3", "source_text": "| FR-101 | 登录 | P0 | 登录 |"},
+    )
+    assert draft_child.status_code == 400
+
+    assert client.post(f"/api/requirement-baselines/{target_id}/confirm").status_code == 200
+    confirmed_child = client.post(
+        f"/api/requirement-baselines/{target_id}/versions",
+        json={"name": "V3", "source_text": "| FR-101 | 登录 | P0 | 登录 |"},
+    )
+    assert confirmed_child.status_code == 201

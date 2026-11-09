@@ -1322,6 +1322,7 @@ class RequirementBaselineOut(ApiModel):
     """需求基线列表项。"""
 
     id: str
+    parent_id: str | None = None
     name: str
     source_kind: str
     source_name: str
@@ -1346,6 +1347,77 @@ class RequirementItemUpdate(ApiModel):
     description: str | None = Field(default=None, max_length=2000)
     priority: str | None = Field(default=None, max_length=8)
     module: str | None = Field(default=None, max_length=40)
+
+
+class RequirementChangeFieldOut(ApiModel):
+    """单个需求字段的变化。"""
+
+    field: str
+    label: str
+    before: str = ""
+    after: str = ""
+
+
+class RequirementChangeItemOut(ApiModel):
+    """一条新增/删除/修改的需求。"""
+
+    id: str
+    req_no: str
+    title: str
+    priority: str = ""
+    module: str = ""
+    fields: list[RequirementChangeFieldOut] = Field(default_factory=list)
+
+
+class RequirementDiffOut(ApiModel):
+    """两个需求基线版本之间的差异。"""
+
+    base_id: str
+    target_id: str
+    base_name: str = ""
+    target_name: str = ""
+    added_count: int = 0
+    removed_count: int = 0
+    changed_count: int = 0
+    added: list[RequirementChangeItemOut] = Field(default_factory=list)
+    removed: list[RequirementChangeItemOut] = Field(default_factory=list)
+    changed: list[RequirementChangeItemOut] = Field(default_factory=list)
+    truncated: bool = False
+
+
+class RequirementImpactCaseOut(ApiModel):
+    """受需求变更影响的用例。"""
+
+    case_set_id: str
+    set_name: str = ""
+    set_status: str = ""
+    case_item_id: str
+    case_name: str = ""
+    req_no: str = ""
+    req_title: str = ""
+    change_type: str = "changed"
+
+
+class RequirementImpactSetOut(ApiModel):
+    """受影响的用例集摘要。"""
+
+    case_set_id: str
+    name: str = ""
+    status: str = ""
+    affected_cases: int = 0
+
+
+class RequirementImpactOut(ApiModel):
+    """需求变更影响分析响应。"""
+
+    base_id: str
+    target_id: str
+    diff: RequirementDiffOut
+    affected_set_count: int = 0
+    affected_case_count: int = 0
+    sets: list[RequirementImpactSetOut] = Field(default_factory=list)
+    cases: list[RequirementImpactCaseOut] = Field(default_factory=list)
+    truncated: bool = False
 
 
 class CaseRequirementBindIn(ApiModel):

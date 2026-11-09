@@ -29,6 +29,12 @@ from ..models import (
     User,
     utcnow,
 )
+from ..requirement_change_service import (
+    create_version,
+    diff_baselines,
+    impact_baselines,
+    resolve_pair,
+)
 from ..schemas import (
     CaseAutoLinkIn,
     CaseAutoLinkOut,
@@ -38,6 +44,8 @@ from ..schemas import (
     RequirementBaselineCreate,
     RequirementBaselineDetailOut,
     RequirementBaselineOut,
+    RequirementDiffOut,
+    RequirementImpactOut,
     RequirementItemOut,
     RequirementItemUpdate,
 )
@@ -97,6 +105,7 @@ def _baseline_detail(db: Session, baseline: RequirementBaseline) -> RequirementB
     """组装基线详情，避免前端多次请求。"""
     return RequirementBaselineDetailOut(
         id=baseline.id,
+        parent_id=baseline.parent_id,
         name=baseline.name,
         source_kind=baseline.source_kind,
         source_name=baseline.source_name,
@@ -206,6 +215,7 @@ def list_requirement_baselines(
     return [
         RequirementBaselineOut(
             id=row.id,
+            parent_id=row.parent_id,
             name=row.name,
             source_kind=row.source_kind,
             source_name=row.source_name,
@@ -317,6 +327,59 @@ def confirm_requirement_baseline(
         db.commit()
         db.refresh(baseline)
     return _baseline_detail(db, baseline)
+
+
+@router.post(
+    "/api/requirement-baselines/{baseline_id}/versions",
+    response_model=RequirementBaselineDetailOut,
+    status_code=201,
+    summary="从已确认基线创建新版本草稿",
+)
+def create_requirement_baseline_version(
+    baseline_id: str,
+    payload: RequirementBaselineCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RequirementBaselineDetailOut:
+    """新版本保留 parent_id，确认前仍可人工校对。"""
+    base = _get_baseline_or_404(db, baseline_id, lock=True)
+    version = create_version(db, base, payload, user=user, ip=client_ip(request))
+    return _baseline_detail(db, version)
+
+
+@router.get(
+    "/api/requirement-baselines/{baseline_id}/diff",
+    response_model=RequirementDiffOut,
+    summary="对比需求基线版本",
+)
+def diff_requirement_baseline(
+    baseline_id: str,
+    base_id: str | None = None,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> RequirementDiffOut:
+    """默认与 parent 对比；没有父版本时必须显式传 base_id。"""
+    target = _get_baseline_or_404(db, baseline_id)
+    base, target = resolve_pair(db, target, base_id)
+    return diff_baselines(db, base, target)
+
+
+@router.get(
+    "/api/requirement-baselines/{baseline_id}/impact",
+    response_model=RequirementImpactOut,
+    summary="分析需求变更影响的用例",
+)
+def impact_requirement_baseline(
+    baseline_id: str,
+    base_id: str | None = None,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> RequirementImpactOut:
+    """只读列出旧基线绑定用例集中受变更影响的用例。"""
+    target = _get_baseline_or_404(db, baseline_id)
+    base, target = resolve_pair(db, target, base_id)
+    return impact_baselines(db, base, target)
 
 
 @router.post(
