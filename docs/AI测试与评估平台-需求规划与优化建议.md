@@ -2,11 +2,11 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.3 |
-| 文档状态 | 提案稿（Phase 1 已启动；N-01/N-02/N-07/O-01/O-02 已交付 MVP）。不改变 PRD、API.md、AGENTS.md 的现行效力 |
+| 文档版本 | V1.4 |
+| 文档状态 | 提案稿（Phase 1/2 已启动；N-01/N-02/N-03/N-07/O-01/O-02 已交付 MVP）。不改变 PRD、API.md、AGENTS.md 的现行效力 |
 | 撰写日期 | 2026-11-09 |
-| 代码基线 | 工作区当前代码（最近提交 `99bd07f`，分支 `feat/rag-lightrag-integration`） |
-| 契约基线 | PRD V1.62、AGENTS V2.32、API.md V2.53 |
+| 代码基线 | 工作区当前代码（分支 `feat/case-quality-metrics`，基于 `017c0d5`） |
+| 契约基线 | PRD V1.63、AGENTS V2.33、API.md V2.54 |
 | 适用范围 | 产品、前端、后端、Worker、测试、运维 |
 | 核对方式 | 代码检索 + 文档核对，证据见附录 A |
 
@@ -1279,9 +1279,10 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 | N-01 需求覆盖率 MVP | 已完成 | 基线创建/确认、用例集绑定、覆盖率与缺口、自动关联候选与人工确认；见 PRD V1.60、API V2.52 |
 | N-07 全局搜索 MVP | 已完成 | Cmd/Ctrl+K 命令面板，八类实体只读检索，私有会话/工作区/记忆按属主过滤；见 PRD V1.61、API V2.52 |
 | N-02 评审工作流 MVP | 已完成 | 发起/决策/评论、AI 评审历史、版本快照/字段 diff/回滚新草稿；见 PRD V1.62、API V2.53 |
+| N-03 质量看板 MVP | 已完成 | 运行/生成/确认/采纳率/成功率/AI 均分与按天/模型/状态/模块分布；见 PRD V1.63、API V2.54 |
 | O-03 用例页拆分 | 未开始 | 仍为后续；N-01/N-02 抽屉已独立组件化，避免继续增大 `Cases.vue` |
 | O-09 报告分享死代码 | 未开始 | 需先确认是恢复入口还是下线 share API |
-| O-18 文档契约治理 | 部分完成 | PRD V1.62、API V2.53、AGENTS V2.32 已登记；Harness 正文与双圆环废弃标注仍待处理 |
+| O-18 文档契约治理 | 部分完成 | PRD V1.63、API V2.54、AGENTS V2.33 已登记；Harness 正文与双圆环废弃标注仍待处理 |
 
 ---
 
@@ -1353,7 +1354,7 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 
 | 文档 | 关系 | 使用方式 |
 | --- | --- | --- |
-| PRD V1.62 | 产品范围唯一权威 | 本文只是候选池；批准后回写 PRD，再排期 |
+| PRD V1.63 | 产品范围唯一权威 | 本文只是候选池；批准后回写 PRD，再排期 |
 | API.md | 接口契约唯一权威 | 本文提到的端点均为建议；实现前先改 API.md |
 | AGENTS.md | 工程规范与状态地图 | 拆分、迁移、测试、提交按 AGENTS 执行 |
 | Harness 需求/六层 | 运行时能力基线 | N-09/N-11 承接其 P2/演进项 |
@@ -1380,6 +1381,8 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 | `backend/shared/case_review.py`、`backend/api/app/case_review_service.py`、`routers/case_reviews.py`、迁移 `c1e7f3a9d2b4` | N-02：评审请求/评论/AI 历史/版本快照与 diff |
 | `backend/api/tests/test_case_review.py`、`test_case_review_route.py` | N-02：diff 纯函数与路由回归 |
 | `frontend/src/components/drawers/CaseReviewFlowDrawer.vue`、`views/Cases.vue` | N-02：评审工作台、评论、AI 历史、版本对比与回滚 |
-| `docs/AI测试与评估平台-PRD.md`、`docs/AI测试与评估平台-API.md`、`AGENTS.md` | 登记 PRD V1.62、API V2.53、AGENTS V2.32 |
+| `backend/api/app/routers/metrics.py`、`tests/test_casegen_metrics.py`、`worker/app/testcase.py` | N-03：质量聚合接口、模型归因与回归 |
+| `frontend/src/views/CasegenQuality.vue`、`router/index.ts`、`layouts/MainLayout.vue` | N-03：质量看板页面、路由与导航入口 |
+| `docs/AI测试与评估平台-PRD.md`、`docs/AI测试与评估平台-API.md`、`AGENTS.md` | 登记 PRD V1.63、API V2.54、AGENTS V2.33 |
 
-> 2026-11-09 Phase 1 实施：O-01、O-02 已完成；N-01、N-02、N-07 MVP 已完成并通过 23 项需求/搜索/评审测试、ruff、前端 typecheck/build。O-03 用例页拆分、O-09 分享死代码清理、O-18 Harness 文档回写仍待后续。本文其余条目仍为候选，不构成已批准需求。
+> 2026-11-09 Phase 1/2 实施：O-01、O-02 已完成；N-01、N-02、N-03、N-07 MVP 已完成并通过 26 项需求/搜索/评审/质量测试、ruff、前端 typecheck/build。O-03 用例页拆分、O-09 分享死代码清理、O-18 Harness 文档回写仍待后续。本文其余条目仍为候选，不构成已批准需求。

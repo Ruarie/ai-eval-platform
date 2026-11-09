@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.33 ｜ 审查日期：2026-11-09（N-03 用例质量看板 MVP：新增 `GET /api/metrics/casegen`，按 7/30/90 天聚合运行数、生成/确认、采纳率、成功率、最新 AI 评分、按天/模型/状态/模块分布；Worker 成功任务结果补充 `profile_id/profile_name/model_name` 用于归因；前端新增 `/case-quality` 页面与「用例质量」入口。只读现有事实，缺失模型/评分显示占位，不用 0 冒充。门禁：质量看板 3 项 + 评审 8 项 + 需求/搜索 15 项通过、ruff、前端 typecheck/build。契约见 API V2.54、PRD V1.63。）
+>
 > 版本：V2.32 ｜ 审查日期：2026-11-09（N-02 用例评审工作流与版本历史 MVP：① 新增 `case_review_requests` / `case_review_comments` / `case_review_runs` / `case_set_versions` 四表与 `case_sets.review_state/review_assignee_id`（迁移 `c1e7f3a9d2b4`）；② `/api/case-sets/{id}/review` 聚合工作台、请求/决策/评论、AI 历史、版本列表/diff/回滚；③ `/ai-review` 改为追加历史，`checks` 保留最新一份兼容；确认入库前自动生成 `reason=confirm` 版本；④ 回滚只新建草稿，不修改当前集合或历史；⑤ 前端新增 `CaseReviewFlowDrawer` 与用例页「评审工作台」入口。门禁：评审测试 8 项与需求/搜索 15 项（合计 23 项）通过、ruff 通过、前端 typecheck/build 通过。契约见 API V2.53、PRD V1.62。）
 >
 > 版本：V2.31 ｜ 审查日期：2026-11-09（Phase 1 治理与 N-01/N-07 MVP：① 登录页移除模拟 SSO/社交登录，只保留本地账号；② 侧栏改为「工作台 / 资产与历史 / 协作 / 管理」四组，补齐 `/datasets`、`/model-compare`、`/admin/stress` 入口，消除孤立路由；③ 新增需求基线与用例覆盖：`requirement_baselines` / `requirement_items` / `case_requirement_links` 三表与 `case_sets.requirement_baseline_id`（迁移 `a9d4e6f2b8c1`），`shared/requirements.py` 负责编号抽取/相似度/覆盖率，新增 `/api/requirement-baselines`、`/api/case-sets/{id}/coverage`、`.../requirements/auto-link`、`.../requirements/link`；④ 新增 `/api/search` 跨实体只读搜索与前端 Cmd/Ctrl+K 命令面板，私有会话/工作区/记忆按属主过滤。自动关联只返回候选，人工确认才落库，关联不推进用例集 revision。门禁：需求与搜索测试 15 项通过、ruff 通过、前端 typecheck/build 通过。契约见 API V2.52、PRD V1.61。）
@@ -148,6 +150,7 @@
 | testcase 用例生成 | 真实执行器（六策略 LLM 生成、72h 确认超时扫描） | `backend/worker/app/testcase.py` |
 | 需求基线与覆盖 | MVP 已交付：编号抽取、基线确认、用例绑定、覆盖率与自动关联候选；不改用例正文与 revision | `backend/shared/requirements.py`、`backend/api/app/routers/requirements.py` |
 | 用例评审与版本 | MVP 已交付：人工评审请求/结论/评论、AI 历史、版本快照/diff/回滚新草稿；评审状态独立于 status | `backend/api/app/routers/case_reviews.py`、`backend/shared/case_review.py` |
+| 用例质量看板 | MVP 已交付：运行/生成/确认/采纳率/成功率/AI 均分与按天/模型/状态/模块分布；只读聚合 | `backend/api/app/routers/metrics.py`、`frontend/src/views/CasegenQuality.vue` |
 | 全局搜索 | MVP 已交付：八类实体只读检索，私有会话/工作区/记忆按属主过滤 | `backend/api/app/routers/search.py`、`frontend/src/components/search/GlobalSearch.vue` |
 | rag 知识库评测 | 已停用；保留历史报告只读 | `backend/worker/app/rag.py`、`backend/shared/kb.py` |
 | stress 压测 | 已停用；不再派生，运行中的旧任务取消并请求引擎停止 | `backend/worker/app/stress.py` |

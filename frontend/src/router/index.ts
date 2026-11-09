@@ -30,6 +30,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'dispatch', component: () => import('../views/Dispatch.vue'), meta: { title: '调度中心' } },
       { path: 'model-compare', component: () => import('../views/ModelCompare.vue'), meta: { title: '模型对比' } },
       { path: 'tasks', component: () => import('../views/Tasks.vue'), meta: { title: '任务中心' } },
+      { path: 'case-quality', component: () => import('../views/CasegenQuality.vue'), meta: { title: '用例质量' } },
       // benchmark / RAG 已停止新建，页面文案统一为「历史」；标题只在本表维护。
       { path: 'reports', component: () => import('../views/Report.vue'), meta: { title: '历史报告' } },
       { path: 'reports/:id', component: () => import('../views/Report.vue'), meta: { title: '历史报告' } },

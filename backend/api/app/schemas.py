@@ -1405,6 +1405,90 @@ class CoverageModuleOut(ApiModel):
     coverage_percent: float
 
 
+class CasegenRunOut(ApiModel):
+    """一次用例生成运行的质量摘要。"""
+
+    task_id: str
+    case_set_id: str | None = None
+    name: str = ""
+    status: str = ""
+    model_name: str = ""
+    profile_id: str = ""
+    profile_name: str = ""
+    target_count: int = 0
+    generated_count: int = 0
+    confirmed_count: int = 0
+    adoption_rate: float = 0.0
+    ai_score: int | None = None
+    ai_verdict: str = ""
+    review_state: str = ""
+    error_code: str = ""
+    created_at: Any | None = None
+    started_at: Any | None = None
+    finished_at: Any | None = None
+    duration_ms: int | None = None
+
+
+class CasegenSeriesOut(ApiModel):
+    """按天聚合的生成/确认趋势。"""
+
+    day: str
+    runs: int = 0
+    generated: int = 0
+    confirmed: int = 0
+    adoption_rate: float = 0.0
+
+
+class CasegenModelOut(ApiModel):
+    """按模型/协议档聚合的质量。"""
+
+    profile_id: str = ""
+    model_name: str = "未记录"
+    runs: int = 0
+    generated: int = 0
+    confirmed: int = 0
+    adoption_rate: float = 0.0
+    avg_ai_score: float | None = None
+
+
+class CasegenStatusOut(ApiModel):
+    """任务状态分布。"""
+
+    status: str
+    count: int = 0
+
+
+class CasegenModuleOut(ApiModel):
+    """模块用例分布。"""
+
+    module: str
+    case_count: int = 0
+
+
+class CasegenMetricsOut(ApiModel):
+    """用例生成质量看板响应。"""
+
+    days: int
+    generated_at: Any | None = None
+    total_runs: int = 0
+    succeeded_runs: int = 0
+    failed_runs: int = 0
+    cancelled_runs: int = 0
+    awaiting_runs: int = 0
+    success_rate: float = 0.0
+    total_generated: int = 0
+    total_confirmed: int = 0
+    adoption_rate: float = 0.0
+    ai_scored_runs: int = 0
+    avg_ai_score: float | None = None
+    review_approved: int = 0
+    series: list[CasegenSeriesOut] = Field(default_factory=list)
+    by_model: list[CasegenModelOut] = Field(default_factory=list)
+    by_status: list[CasegenStatusOut] = Field(default_factory=list)
+    modules: list[CasegenModuleOut] = Field(default_factory=list)
+    recent: list[CasegenRunOut] = Field(default_factory=list)
+
+
 class CaseCoverageOut(ApiModel):
     """用例集需求覆盖率响应。"""
 
