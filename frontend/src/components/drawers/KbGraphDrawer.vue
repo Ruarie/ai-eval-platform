@@ -217,8 +217,8 @@ const emit = defineEmits<{
   (event: 'upload'): void
 }>()
 
-const CANVAS_WIDTH = 1000
-const CANVAS_HEIGHT = 700
+const CANVAS_WIDTH = 1200
+const CANVAS_HEIGHT = 800
 const LEGEND_LIMIT = 6
 // 与图例、节点、圆点共用一套定性色板：同类同色、跨类区分度高。
 const TYPE_COLORS: Record<string, string> = {
@@ -250,7 +250,7 @@ async function load() {
   selectedId.value = ''
   try {
     // 不设人工上限：要多少由后端按引擎能力截断（truncated 会提示）。
-    const data = await api.kb.getGraph(kbId, 2000)
+    const data = await api.kb.getGraph(kbId, 500)
     // 请求期间切换了知识库：丢弃旧响应，避免把上一个库的图写到当前库上。
     if (kbId !== props.kbId) return
     graph.value = data
@@ -290,11 +290,8 @@ interface PlacedNode {
   labelAnchor: 'start' | 'middle' | 'end'
 }
 
-// 画布可用半径与簇心分布半径：簇心均匀落在一个椭圆上。
-const MAX_RADIUS_Y = CANVAS_HEIGHT / 2 - 34
-const MAX_RADIUS_X = (MAX_RADIUS_Y * CANVAS_WIDTH) / CANVAS_HEIGHT
-const CLUSTER_RX = MAX_RADIUS_X * 0.72
-const CLUSTER_RY = MAX_RADIUS_Y * 0.76
+// 分簇用网格铺排：簇多、单簇节点多时，环形分布会互相重叠，网格最稳。
+const CELL_GAP = 18
 
 interface ClusterInfo {
   type: string
@@ -308,18 +305,14 @@ interface ClusterInfo {
 }
 
 /**
- * 类型分簇布局：每个实体类型占一个「海岛」，簇内沿黄金角螺旋展开。
+ * 类型分簇 + 网格铺排：每个实体类型占一个格子，簇内沿黄金角螺旋展开。
  *
- * 节点不设上限后，簇内间距与节点半径都要随总量自适应：密度系数取
- * sqrt(总数 / 120)，500 个节点时步长翻倍、半径缩小，否则会糊成一团。
+ * 500 节点时（概念 115 / 产物 106 …）环形簇心距离不够，大簇必然互相压；
+ * 改成网格后每个簇有独立空间，簇内步长按格子大小自适应，重叠问题消失。
  */
 function layout(nodes: KbGraphNode[]): { nodes: PlacedNode[]; clusters: ClusterInfo[] } {
   const total = nodes.length
   if (!total) return { nodes: [], clusters: [] }
-
-  const centerX = CANVAS_WIDTH / 2
-  const centerY = CANVAS_HEIGHT / 2
-  const density = Math.max(1, Math.min(2.2, Math.sqrt(total / 120)))
 
   const byType = new Map<string, KbGraphNode[]>()
   for (const node of nodes) {
@@ -332,27 +325,39 @@ function layout(nodes: KbGraphNode[]): { nodes: PlacedNode[]; clusters: ClusterI
     (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]),
   )
 
+  const cols = Math.ceil(Math.sqrt(groups.length))
+  const rows = Math.ceil(groups.length / cols)
+  const cellW = CANVAS_WIDTH / cols
+  const cellH = CANVAS_HEIGHT / rows
+
   const placedNodes: PlacedNode[] = []
   const clusters: ClusterInfo[] = []
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
 
   groups.forEach(([type, bucket], groupIndex) => {
     bucket.sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
-    const baseAngle = -Math.PI / 2 + (groupIndex / groups.length) * Math.PI * 2
-    const clusterX = centerX + Math.cos(baseAngle) * CLUSTER_RX
-    const clusterY = centerY + Math.sin(baseAngle) * CLUSTER_RY
+    const col = groupIndex % cols
+    const row = Math.floor(groupIndex / cols)
+    const cellX = col * cellW
+    const cellY = row * cellH
+    const cx = cellX + cellW / 2
+    const cy = cellY + cellH / 2 + 10
+    const n = bucket.length
+    // 步长同时受簇规模与格子尺寸约束，保证不越出本格。
+    const step = n <= 1 ? 0 : Math.min(11 + 7.4 * Math.sqrt(n - 1), Math.min(cellW, cellH) * 0.34)
+    const shrink = Math.max(0.55, Math.min(1, step / 62))
 
     bucket.forEach((node, index) => {
-      // 第一个节点占簇心，其余按 sqrt 递增的半径绕开，避免挤成一点。
-      const spread = index === 0 ? 0 : (11 + 7.6 * Math.sqrt(index)) * density
+      const ratio = n <= 1 ? 0 : Math.sqrt(index / (n - 1))
+      const spread = step * ratio
       const angle = index === 0 ? 0 : index * GOLDEN_ANGLE
-      const x = clusterX + Math.cos(angle) * spread * 1.12
-      const y = clusterY + Math.sin(angle) * spread * 0.82
+      const x = cx + Math.cos(angle) * spread * 1.08
+      const y = cy + Math.sin(angle) * spread * 0.86
       const radius =
-        (3.6 + Math.min(7.4, Math.sqrt(Math.max(0, node.degree)) * 1.45)) / Math.sqrt(density)
+        (3.8 + Math.min(7.2, Math.sqrt(Math.max(0, node.degree)) * 1.35)) * shrink
 
       const outward =
-        Math.cos(angle) * Math.cos(baseAngle) + Math.sin(angle) * Math.sin(baseAngle) >= 0
+        Math.cos(angle) * Math.cos(-Math.PI / 2) + Math.sin(angle) * Math.sin(-Math.PI / 2) >= 0
       const anchor: 'start' | 'middle' | 'end' =
         index === 0 ? 'middle' : outward ? 'start' : 'end'
       placedNodes.push({
@@ -368,19 +373,16 @@ function layout(nodes: KbGraphNode[]): { nodes: PlacedNode[]; clusters: ClusterI
       })
     })
 
-    // 簇的外接半径：用于画底色与放「类型 + 数量」标签。
-    const radius =
-      bucket.length === 1 ? 22 : (11 + 7.6 * Math.sqrt(bucket.length - 1)) * density + 14
-    const labelY = clusterY - radius * 0.82 - 8 < 14 ? clusterY + radius * 0.82 + 16 : clusterY - radius * 0.82 - 8
     clusters.push({
       type,
       label: typeLabel(type),
       color: typeColor(type),
-      count: bucket.length,
-      x: clusterX,
-      y: clusterY,
-      radius,
-      labelY,
+      count: n,
+      x: cx,
+      y: cy,
+      radius: step + 16,
+      // 标签固定在格子顶部，避免被簇内节点盖住。
+      labelY: cellY + 18,
     })
   })
 
@@ -412,7 +414,7 @@ const renderedEdges = computed(() => {
     const touch = edge.source === selectedId.value || edge.target === selectedId.value
     const weak = Math.min(from.node.degree, to.node.degree)
     // 两端都弱的边几乎看不见：几百条边全画成实线就是"蜘蛛网"的主因。
-    const base = 0.05 + Math.min(0.24, (weak / 40) * 0.24)
+    const base = 0.025 + Math.min(0.14, (weak / 40) * 0.14)
     lines.push({
       key: `${edge.source}->${edge.target}`,
       x1: from.x,
@@ -420,7 +422,7 @@ const renderedEdges = computed(() => {
       x2: to.x,
       y2: to.y,
       opacity: selectedId.value ? (touch ? 0.62 : 0.035) : base,
-      width: selectedId.value ? (touch ? 1.5 : 0.7) : 0.7 + Math.min(0.8, weak / 60),
+      width: selectedId.value ? (touch ? 1.5 : 0.7) : 0.6 + Math.min(0.5, weak / 90),
       description: (edge.description || '').trim(),
       highlight: Boolean(selectedId.value) && touch,
     })
@@ -679,7 +681,7 @@ function docName(docId: string) {
   min-width: 0;
   width: 100%;
   height: auto;
-  aspect-ratio: 1000 / 700;
+  aspect-ratio: 1200 / 800;
   max-height: calc(100vh - 300px);
   /* 极浅的径向渐变把视觉重心收到中心，比纯灰底更像「图」而不是「表格」。 */
   background:
@@ -751,10 +753,10 @@ function docName(docId: string) {
 }
 
 .graph-cluster-labels .cluster-label {
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
-  letter-spacing: 0.2px;
-  opacity: 0.72;
+  letter-spacing: 0.3px;
+  opacity: 0.85;
   pointer-events: none;
   paint-order: stroke;
   stroke: #f8fafc;
