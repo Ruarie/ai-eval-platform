@@ -265,7 +265,7 @@ async function load() {
   selectedId.value = ''
   try {
     // 不设人工上限：要多少由后端按引擎能力截断（truncated 会提示）。
-    const data = await api.kb.getGraph(kbId, 500)
+    const data = await api.kb.getGraph(kbId, 2000)
     // 请求期间切换了知识库：丢弃旧响应，避免把上一个库的图写到当前库上。
     if (kbId !== props.kbId) return
     graph.value = data
