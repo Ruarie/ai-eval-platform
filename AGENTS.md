@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.40 ｜ 审查日期：2026-11-09（N-10b 用量费用估算：新增 `model_prices`（迁移 `d3f7a1c9e6b2`）与 `GET/PUT /api/usage/prices`；按模型名保存 USD/1M token 输入/输出单价，用量汇总/按模型/最近调用返回 `cost_usd`、`priced_calls`、`unpriced_calls`、`total_cost_usd`；未配置单价的调用保持 null，不按 0 冒充；单价 0 视为免费；前端用量页新增费用 KPI/列与价格配置弹窗。门禁：用量 3 项 + 轨迹/通知 7 项通过、ruff、前端 typecheck/build、单测 123/123。契约见 API V2.60、PRD V1.69。）
+>
 > 版本：V2.39 ｜ 审查日期：2026-11-09（O-03 用例工作台拆分第一步：`Cases.vue` 的 1248 行 scoped 样式迁到 `frontend/src/styles/views/cases.css`，SFC 从 3885 行降到 2636 行；`<style scoped src>` 由 Vite 正常注入 data-v 作用域。仅结构调整，不改模板、交互与接口；组件级拆分（表格/生成向导/评审抽屉）仍待后续。门禁：前端 typecheck/build、单测 123/123 通过。）
 >
 > 版本：V2.38 ｜ 审查日期：2026-11-09（N-10 Token 用量中心 MVP：新增 `GET /api/usage/summary`，按天/模型/会话属主聚合 assistant 消息 `turn_stats.usage`；只读、不返回正文；未配置逐模型单价，不展示费用；前端新增 `/usage` 与「用量中心」导航。门禁：用量 2 项 + 轨迹/通知/评审/搜索 10 项通过、ruff、前端 typecheck/build、单测 123/123。契约见 API V2.59、PRD V1.68。）
@@ -167,7 +169,7 @@
 | 用例资产库 | MVP 已交付：确认物化、跨集合检索、标签、文本查重、历史回填；不做自动合并/复制 | `backend/api/app/case_asset_service.py`、`frontend/src/views/CaseAssets.vue` |
 | 站内通知 | MVP 已交付：任务生成/失败、评审指派/结论通知；顶栏未读与通知页；无外发渠道 | `backend/api/app/notification_service.py`、`frontend/src/components/notifications/NotificationBell.vue` |
 | 历史轨迹 | MVP 已交付：按回合聚合 AgentEvent，展示计时/工具/模型/token 与脱敏事件；无正文与工具结果 | `backend/api/app/routers/traces.py`、`frontend/src/components/drawers/TraceHistoryDrawer.vue` |
-| 用量中心 | MVP 已交付：按天/模型/成员聚合 token 与调用；只读、无费用估算 | `backend/api/app/routers/usage.py`、`frontend/src/views/UsageCenter.vue` |
+| 用量中心 | MVP 已交付：按天/模型/成员聚合 token 与调用；按模型单价估算 USD 费用，未配置保持未计价 | `backend/api/app/routers/usage.py`、`frontend/src/views/UsageCenter.vue` |
 | 全局搜索 | MVP 已交付：八类实体只读检索，私有会话/工作区/记忆按属主过滤 | `backend/api/app/routers/search.py`、`frontend/src/components/search/GlobalSearch.vue` |
 | rag 知识库评测 | 已停用；保留历史报告只读 | `backend/worker/app/rag.py`、`backend/shared/kb.py` |
 | stress 压测 | 已停用；不再派生，运行中的旧任务取消并请求引擎停止 | `backend/worker/app/stress.py` |

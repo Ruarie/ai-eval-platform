@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h1>用量中心</h1>
-        <p class="page-sub">按 assistant 消息的 turn_stats 聚合 token；当前未配置逐模型单价，不展示费用估算。</p>
+        <p class="page-sub">按 assistant 消息的 turn_stats 聚合 token；费用按模型单价估算，未配置单价的调用明确标记为未计价。</p>
       </div>
       <div class="page-actions">
         <div class="range-switch" role="group" aria-label="统计时间范围">
@@ -11,6 +11,7 @@
             {{ option.label }}
           </button>
         </div>
+        <button class="btn btn-secondary btn-sm" @click="openPrices">价格配置</button>
         <button class="btn btn-secondary btn-sm" :disabled="loading" @click="load">刷新</button>
       </div>
     </header>
@@ -34,7 +35,14 @@
           <div class="kpi"><b>{{ formatTokens(data.total_tokens) }}</b><span>总 token</span></div>
           <div class="kpi"><b>{{ formatTokens(data.prompt_tokens) }}</b><span>输入 token</span></div>
           <div class="kpi"><b>{{ formatTokens(data.completion_tokens) }}</b><span>输出 token</span></div>
+          <div class="kpi">
+            <b>{{ formatCost(data.total_cost_usd) }}</b>
+            <span>估算费用</span>
+          </div>
         </section>
+        <p v-if="data.unpriced_calls" class="small tertiary cost-note">
+          {{ data.unpriced_calls }} 次调用未配置单价，未计入费用；已计价 {{ data.priced_calls }} 次。
+        </p>
 
         <section class="panel">
           <div class="panel-head">
@@ -57,7 +65,7 @@
           <section class="panel">
             <div class="panel-head"><h3>按模型 / 协议档</h3></div>
             <table class="ds-table">
-              <thead><tr><th>模型</th><th>调用</th><th>会话</th><th>输入</th><th>输出</th><th>总 token</th><th>占比</th></tr></thead>
+              <thead><tr><th>模型</th><th>调用</th><th>会话</th><th>输入</th><th>输出</th><th>总 token</th><th>占比</th><th>费用</th></tr></thead>
               <tbody>
                 <tr v-for="item in data.by_model" :key="`${item.profile_id}-${item.model_name}`">
                   <td>
@@ -70,6 +78,10 @@
                   <td>{{ formatTokens(item.completion_tokens) }}</td>
                   <td>{{ formatTokens(item.total_tokens) }}</td>
                   <td>{{ share(item.total_tokens) }}</td>
+                  <td>
+                    <span v-if="item.cost_usd != null">{{ formatCost(item.cost_usd) }}</span>
+                    <span v-else class="small tertiary">未计价</span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -92,7 +104,7 @@
             <span class="small tertiary">最多 50 条；不展示消息正文</span>
           </div>
           <table class="ds-table">
-            <thead><tr><th>时间</th><th>会话</th><th>模型</th><th>输入</th><th>输出</th><th>总 token</th></tr></thead>
+            <thead><tr><th>时间</th><th>会话</th><th>模型</th><th>输入</th><th>输出</th><th>总 token</th><th>费用</th></tr></thead>
             <tbody>
               <tr v-for="(item, index) in data.recent" :key="`${item.session_id}-${index}`">
                 <td class="small mono">{{ formatTime(item.created_at) }}</td>
@@ -103,12 +115,41 @@
                 <td>{{ formatTokens(item.prompt_tokens) }}</td>
                 <td>{{ formatTokens(item.completion_tokens) }}</td>
                 <td>{{ formatTokens(item.total_tokens) }}</td>
+                <td>
+                  <span v-if="item.cost_usd != null">{{ formatCost(item.cost_usd) }}</span>
+                  <span v-else class="small tertiary">未计价</span>
+                </td>
               </tr>
             </tbody>
           </table>
         </section>
       </template>
     </template>
+
+    <n-modal v-model:show="priceOpen" preset="card" title="模型单价" style="width: 760px; max-width: 96vw">
+      <p class="small tertiary price-hint">
+        单价按每百万 token 填写；未填写的模型不估算费用。保存后只影响之后的统计展示。
+      </p>
+      <div v-if="!priceRows.length" class="empty-inline">当前时间窗没有可配置的模型。</div>
+      <table v-else class="ds-table">
+        <thead><tr><th>模型</th><th>输入 / 1M（USD）</th><th>输出 / 1M（USD）</th></tr></thead>
+        <tbody>
+          <tr v-for="row in priceRows" :key="row.model_name">
+            <td class="small">{{ row.model_name }}</td>
+            <td><input v-model.number="row.input_per_1m" class="price-input" type="number" min="0" step="0.01" /></td>
+            <td><input v-model.number="row.output_per_1m" class="price-input" type="number" min="0" step="0.01" /></td>
+          </tr>
+        </tbody>
+      </table>
+      <template #footer>
+        <div class="price-actions">
+          <button class="btn btn-secondary btn-sm" @click="priceOpen = false">取消</button>
+          <button class="btn btn-primary btn-sm" :disabled="priceSaving" @click="savePrices">
+            {{ priceSaving ? '保存中…' : '保存单价' }}
+          </button>
+        </div>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -116,7 +157,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { api } from '../api/http'
-import type { UsageSummary } from '../api/types'
+import type { ModelPrice, UsageSummary } from '../api/types'
 
 const ranges = [
   { value: 7, label: '7 天' },
@@ -127,6 +168,9 @@ const days = ref(30)
 const data = ref<UsageSummary | null>(null)
 const loading = ref(false)
 const error = ref('')
+const priceOpen = ref(false)
+const priceSaving = ref(false)
+const priceRows = ref<ModelPrice[]>([])
 
 const hasSeries = computed(() => (data.value?.series || []).some((item) => item.total_tokens > 0))
 const maxTokens = computed(() => Math.max(1, ...(data.value?.series || []).map((item) => item.total_tokens)))
@@ -149,6 +193,42 @@ function changeRange(value: number): void {
   void load()
 }
 
+async function openPrices(): Promise<void> {
+  const models = Array.from(
+    new Set((data.value?.by_model || []).map((item) => item.model_name).filter((name) => name && name !== '未记录')),
+  )
+  let saved: ModelPrice[] = []
+  try {
+    saved = await api.usage.prices()
+  } catch {
+    saved = []
+  }
+  const savedMap = new Map(saved.map((item) => [item.model_name, item]))
+  priceRows.value = models.map((name) => {
+    const price = savedMap.get(name)
+    return {
+      model_name: name,
+      input_per_1m: price?.input_per_1m ?? 0,
+      output_per_1m: price?.output_per_1m ?? 0,
+      currency: 'USD',
+    }
+  })
+  priceOpen.value = true
+}
+
+async function savePrices(): Promise<void> {
+  priceSaving.value = true
+  try {
+    await api.usage.savePrices(priceRows.value)
+    priceOpen.value = false
+    await load()
+  } catch (err: any) {
+    error.value = err?.message || '保存模型单价失败'
+  } finally {
+    priceSaving.value = false
+  }
+}
+
 function barHeight(value: number): string {
   if (!value) return '2px'
   return `${Math.max(4, Math.round((value / maxTokens.value) * 100))}%`
@@ -162,6 +242,12 @@ function userWidth(value: number): string {
 function share(value: number): string {
   const total = data.value?.total_tokens || 0
   return total ? `${((value / total) * 100).toFixed(1)}%` : '—'
+}
+
+function formatCost(value?: number | null): string {
+  if (value == null) return '—'
+  if (value < 0.01) return `$${value.toFixed(4)}`
+  return `$${value.toFixed(2)}`
 }
 
 function formatTokens(value: number): string {
@@ -188,7 +274,11 @@ onMounted(load)
 .range-switch { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); }
 .range-btn { border: none; background: transparent; color: var(--text-secondary); padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; }
 .range-btn.active { background: var(--bg-main); color: var(--accent-ai); box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08); }
-.kpi-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
+.cost-note { margin: -8px 0 0; }
+.price-hint { margin: 0 0 10px; line-height: 1.6; }
+.price-input { width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-main); color: var(--text-primary); font-size: 12px; }
+.price-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .kpi { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-main); padding: 12px 14px; display: flex; flex-direction: column; gap: 3px; }
 .kpi b { font-size: 22px; line-height: 1.1; }
 .kpi span { font-size: 12px; color: var(--text-secondary); }

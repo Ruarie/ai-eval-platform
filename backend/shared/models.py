@@ -825,6 +825,24 @@ class Setting(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
 
+class ModelPrice(Base):
+    """模型单价（每百万 token），用于用量中心的费用估算。
+
+    单价按模型名保存；未配置的模型不做费用估算，不用全局均价冒充。
+    """
+
+    __tablename__ = "model_prices"
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    model_name = Column(String, nullable=False, unique=True, index=True)
+    input_per_1m = Column(Float, nullable=False, default=0.0)
+    output_per_1m = Column(Float, nullable=False, default=0.0)
+    currency = Column(String, nullable=False, default="USD")
+    updated_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
 class Notification(Base):
     """站内通知：任务终态、评审指派/结论等；按用户隔离。"""
 

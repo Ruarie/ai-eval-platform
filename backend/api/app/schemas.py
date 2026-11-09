@@ -1477,6 +1477,34 @@ class CoverageModuleOut(ApiModel):
     coverage_percent: float
 
 
+class ModelPriceIn(ApiModel):
+    """单个模型的每百万 token 单价。"""
+
+    model_name: str = Field(min_length=1, max_length=200)
+    input_per_1m: float = Field(default=0.0, ge=0, le=1_000_000)
+    output_per_1m: float = Field(default=0.0, ge=0, le=1_000_000)
+    # MVP 只支持美元，避免多币种直接相加；人民币换算后续再做。
+    currency: Literal["USD"] = "USD"
+
+
+class ModelPriceOut(ModelPriceIn):
+    """已保存的模型单价。"""
+
+    updated_at: Any | None = None
+
+
+class ModelPriceListOut(ApiModel):
+    """模型单价列表。"""
+
+    items: list[ModelPriceOut] = Field(default_factory=list)
+
+
+class ModelPriceUpdateIn(ApiModel):
+    """批量保存模型单价；未列出的模型保持不变。"""
+
+    prices: list[ModelPriceIn] = Field(default_factory=list, max_length=200)
+
+
 class UsageSeriesOut(ApiModel):
     """按天用量。"""
 
@@ -1497,6 +1525,9 @@ class UsageModelOut(ApiModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    priced_calls: int = 0
+    unpriced_calls: int = 0
+    cost_usd: float | None = None
 
 
 class UsageUserOut(ApiModel):
@@ -1518,6 +1549,7 @@ class UsageRecentOut(ApiModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    cost_usd: float | None = None
 
 
 class UsageSummaryOut(ApiModel):
@@ -1531,6 +1563,9 @@ class UsageSummaryOut(ApiModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    priced_calls: int = 0
+    unpriced_calls: int = 0
+    total_cost_usd: float | None = None
     series: list[UsageSeriesOut] = Field(default_factory=list)
     by_model: list[UsageModelOut] = Field(default_factory=list)
     by_user: list[UsageUserOut] = Field(default_factory=list)

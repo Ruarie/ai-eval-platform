@@ -1,11 +1,11 @@
 """Token 用量中心（N-10 MVP）。
 
 只聚合已落库 assistant 消息的 ``turn_stats.usage``：
-- 不做费用估算（当前没有可信的逐模型单价）；
-- 不读取消息正文、提示词或工具结果；
-- 按天/模型/会话属主聚合，供容量与预算观察。
+- 按天/模型/会话属主聚合，供容量与预算观察；
+- 按模型名单价估算费用；未配置单价的调用明确标记为未计价；
+- 不读取消息正文、提示词或工具结果。
 
-费用配置与预算告警留到后续批次。
+预算阈值与告警留到后续批次。
 """
 
 from __future__ import annotations
@@ -14,20 +14,24 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import get_current_user
-from ..models import Message, User
+from ..models import AuditLog, Message, ModelPrice, User, utcnow
 from ..models import Session as AgentSession
 from ..schemas import (
+    ModelPriceListOut,
+    ModelPriceOut,
+    ModelPriceUpdateIn,
     UsageModelOut,
     UsageRecentOut,
     UsageSeriesOut,
     UsageSummaryOut,
     UsageUserOut,
 )
+from ._common import client_ip
 
 router = APIRouter(prefix="/api/usage", tags=["usage"])
 
@@ -52,6 +56,25 @@ def _usage(row: Message) -> tuple[int, int, int]:
 def _day(value: datetime | None) -> str:
     """统一 YYYY-MM-DD；缺失时间不参与趋势。"""
     return value.date().isoformat() if value else ""
+
+
+def _cost(prompt: int, completion: int, price: ModelPrice | None) -> float | None:
+    """按每百万 token 单价估算；未配置价格返回 None，不用 0 冒充已计价。"""
+    if not price:
+        return None
+    cost = (prompt * float(price.input_per_1m or 0) + completion * float(price.output_per_1m or 0)) / 1_000_000
+    return round(cost, 6)
+
+
+def _price_out(price: ModelPrice) -> ModelPriceOut:
+    """单价 ORM 转响应。"""
+    return ModelPriceOut(
+        model_name=price.model_name,
+        input_per_1m=float(price.input_per_1m or 0),
+        output_per_1m=float(price.output_per_1m or 0),
+        currency=price.currency,
+        updated_at=price.updated_at,
+    )
 
 
 @router.get("/summary", response_model=UsageSummaryOut, summary="Token 用量汇总")
@@ -91,12 +114,24 @@ def usage_summary(
     )
     user_names = {row[0]: row[1] for row in users}
 
+    price_map = {row.model_name: row for row in db.query(ModelPrice).all()}
     total_prompt = total_completion = total_tokens = 0
+    total_cost = 0.0
+    priced_calls = unpriced_calls = 0
     series_map: dict[str, dict[str, int]] = defaultdict(
         lambda: {"calls": 0, "prompt": 0, "completion": 0, "total": 0}
     )
     model_map: dict[tuple[str, str], dict[str, Any]] = defaultdict(
-        lambda: {"calls": 0, "sessions": set(), "prompt": 0, "completion": 0, "total": 0}
+        lambda: {
+            "calls": 0,
+            "sessions": set(),
+            "prompt": 0,
+            "completion": 0,
+            "total": 0,
+            "cost": 0.0,
+            "priced": 0,
+            "unpriced": 0,
+        }
     )
     user_map: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "total": 0})
     recent: list[UsageRecentOut] = []
@@ -108,6 +143,14 @@ def usage_summary(
         total_prompt += prompt
         total_completion += completion
         total_tokens += total
+        model_name = (row.model_name or "").strip() or "未记录"
+        price = price_map.get(model_name)
+        cost = _cost(prompt, completion, price)
+        if cost is None:
+            unpriced_calls += 1
+        else:
+            total_cost += cost
+            priced_calls += 1
         day = _day(row.created_at)
         if day:
             bucket = series_map[day]
@@ -116,7 +159,6 @@ def usage_summary(
             bucket["completion"] += completion
             bucket["total"] += total
 
-        model_name = (row.model_name or "").strip() or "未记录"
         profile_id = row.profile_id or ""
         model_bucket = model_map[(profile_id, model_name)]
         model_bucket["calls"] += 1
@@ -124,6 +166,11 @@ def usage_summary(
         model_bucket["prompt"] += prompt
         model_bucket["completion"] += completion
         model_bucket["total"] += total
+        if cost is None:
+            model_bucket["unpriced"] += 1
+        else:
+            model_bucket["priced"] += 1
+            model_bucket["cost"] += cost
 
         owner_id = session_meta.get(row.session_id, ("", ""))[1] or ""
         owner_name = user_names.get(owner_id, "未记录") if owner_id else "未记录"
@@ -142,6 +189,7 @@ def usage_summary(
                     prompt_tokens=prompt,
                     completion_tokens=completion,
                     total_tokens=total,
+                    cost_usd=cost,
                 )
             )
 
@@ -168,6 +216,9 @@ def usage_summary(
             prompt_tokens=value["prompt"],
             completion_tokens=value["completion"],
             total_tokens=value["total"],
+            priced_calls=value["priced"],
+            unpriced_calls=value["unpriced"],
+            cost_usd=round(value["cost"], 6) if value["priced"] else None,
         )
         for key, value in model_map.items()
     ]
@@ -194,8 +245,60 @@ def usage_summary(
         prompt_tokens=total_prompt,
         completion_tokens=total_completion,
         total_tokens=total_tokens,
+        priced_calls=priced_calls,
+        unpriced_calls=unpriced_calls,
+        total_cost_usd=round(total_cost, 6) if priced_calls else None,
         series=series,
         by_model=by_model,
         by_user=by_user,
         recent=recent,
     )
+
+
+@router.get("/prices", response_model=ModelPriceListOut, summary="读取模型单价")
+def list_model_prices(
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> ModelPriceListOut:
+    """返回已配置单价的模型；未配置的模型不出现在列表中。"""
+    rows = db.query(ModelPrice).order_by(ModelPrice.model_name.asc()).all()
+    return ModelPriceListOut(items=[_price_out(row) for row in rows])
+
+
+@router.put("/prices", response_model=ModelPriceListOut, summary="批量保存模型单价")
+def save_model_prices(
+    payload: ModelPriceUpdateIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ModelPriceListOut:
+    """按模型名 upsert；未列出的模型保持不变，只记录变更数量。"""
+    changed: list[str] = []
+    for item in payload.prices:
+        model_name = item.model_name.strip()
+        if not model_name:
+            continue
+        row = db.query(ModelPrice).filter(ModelPrice.model_name == model_name).first()
+        if not row:
+            row = ModelPrice(model_name=model_name)
+            db.add(row)
+        row.input_per_1m = item.input_per_1m
+        row.output_per_1m = item.output_per_1m
+        row.currency = item.currency
+        row.updated_by = user.id
+        row.updated_at = utcnow()
+        changed.append(model_name)
+    if changed:
+        db.add(
+            AuditLog(
+                user_id=user.id,
+                action="model_price_update",
+                target_type="model_price",
+                target_id="bulk",
+                detail={"models": changed[:200]},
+                ip=client_ip(request),
+            )
+        )
+    db.commit()
+    rows = db.query(ModelPrice).order_by(ModelPrice.model_name.asc()).all()
+    return ModelPriceListOut(items=[_price_out(row) for row in rows])

@@ -6,10 +6,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.59 |
-| 本轮审查日期 | 2026-11-09（Token 用量中心 MVP：按天/模型/成员聚合用量） |
+| 文档版本 | V2.60 |
+| 本轮审查日期 | 2026-11-09（用量费用估算：模型单价维护与未计价标记） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
-| 对应 PRD | V1.68（功能唯一权威） |
+| 对应 PRD | V1.69（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
 | 对应 Agent 说明书 | `AI测试与评估平台-Agent开发文档.md` V1.7.15（AgentLoop 单入口；JSON 仍以本文为准） |
 | 对应前端计划 | AgentLoop 前端计划 V0.5 |
@@ -5045,3 +5045,59 @@ diff 响应：
 - `backend/api/tests/test_usage.py`：聚合、兜底与参数边界。
 - `frontend/src/views/UsageCenter.vue`、`router/index.ts`、`layouts/MainLayout.vue`：用量页、路由与导航。
 - `frontend/src/api/types.ts`、`http.ts`：用量类型与客户端。
+
+## V2.60 用量费用估算（N-10b MVP，2026-11-09）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/usage/prices` | 读取已配置模型单价 |
+| PUT | `/api/usage/prices` | 批量 upsert 模型单价 |
+
+单价请求：
+
+```json
+{
+  "prices": [
+    { "model_name": "model-a", "input_per_1m": 2, "output_per_1m": 6, "currency": "USD" }
+  ]
+}
+```
+
+单价响应：
+
+```json
+{
+  "items": [
+    {
+      "model_name": "model-a",
+      "input_per_1m": 2,
+      "output_per_1m": 6,
+      "currency": "USD",
+      "updated_at": "2026-11-09T08:00:00Z"
+    }
+  ]
+}
+```
+
+`/api/usage/summary` 新增字段：
+
+- 顶层：`priced_calls`、`unpriced_calls`、`total_cost_usd`（没有已计价调用时为 null）；
+- `by_model[]`：`priced_calls`、`unpriced_calls`、`cost_usd`（未配置为 null）；
+- `recent[]`：`cost_usd`（未配置为 null）。
+
+边界：
+
+- 单价按模型名唯一；单位 USD/1M token；`currency` 当前只接受 `USD`；
+- 费用公式 `(prompt*input + completion*output)/1_000_000`，四舍五入 6 位；
+- 未配置单价的调用不计入总费用，`cost_usd=null`，不按 0 冒充；
+- 单价 0 表示已配置但免费，仍计入 `priced_calls`；
+- 价格保存写审计（模型名列表），不记录正文；
+- 费用是估算值，不作为财务结算依据。
+
+### 修改代码文件与作用清单
+
+- `backend/shared/models.py`、`backend/api/app/models.py`：`model_prices`。
+- `backend/api/migrations/versions/d3f7a1c9e6b2_模型价格.py`：迁移。
+- `backend/api/app/routers/usage.py`、`app/schemas.py`：费用聚合与单价接口。
+- `backend/api/tests/test_usage.py`：费用、未计价与保存回归。
+- `frontend/src/views/UsageCenter.vue`、`api/types.ts`、`http.ts`：费用列/卡片与价格配置弹窗。

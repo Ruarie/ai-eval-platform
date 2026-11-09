@@ -13,10 +13,10 @@ from sqlalchemy.pool import StaticPool
 from app.db import get_db
 from app.deps import get_current_user
 from app.main import app
-from app.models import Message, User
+from app.models import AuditLog, Message, ModelPrice, User
 from app.models import Session as AgentSession
 
-_NEEDED_MODELS = (User, AgentSession, Message)
+_NEEDED_MODELS = (User, AgentSession, Message, ModelPrice, AuditLog)
 
 
 @pytest.fixture
@@ -112,6 +112,13 @@ def usage_case():
                     source_id="source-u",
                     created_at=now,
                 ),
+                ModelPrice(
+                    id="price-1",
+                    model_name="model-a",
+                    input_per_1m=10,
+                    output_per_1m=20,
+                    currency="USD",
+                ),
             ]
         )
 
@@ -146,6 +153,9 @@ def test_usage_summary_aggregates(usage_case):
     assert data["prompt_tokens"] == 230
     assert data["completion_tokens"] == 50
     assert data["total_tokens"] == 280
+    assert data["priced_calls"] == 2
+    assert data["unpriced_calls"] == 1
+    assert data["total_cost_usd"] == 0.0021
     assert len(data["series"]) == 30
     assert data["series"][-1]["total_tokens"] == 280
 
@@ -153,7 +163,12 @@ def test_usage_summary_aggregates(usage_case):
     assert models["model-a"]["calls"] == 2
     assert models["model-a"]["sessions"] == 1
     assert models["model-a"]["total_tokens"] == 180
+    assert models["model-a"]["priced_calls"] == 2
+    assert models["model-a"]["unpriced_calls"] == 0
+    assert models["model-a"]["cost_usd"] == 0.0021
     assert models["model-b"]["total_tokens"] == 100
+    assert models["model-b"]["cost_usd"] is None
+    assert models["model-b"]["unpriced_calls"] == 1
 
     users = {item["username"]: item for item in data["by_user"]}
     assert users["member"]["total_tokens"] == 180
@@ -161,6 +176,34 @@ def test_usage_summary_aggregates(usage_case):
 
     assert len(data["recent"]) == 3
     assert all("content" not in item for item in data["recent"])
+    assert sum(1 for item in data["recent"] if item["cost_usd"] is not None) == 2
+
+
+def test_model_price_list_and_save(usage_case):
+    """读取已有单价、批量保存新模型单价并回读生效。"""
+    client = usage_case.client
+    listed = client.get("/api/usage/prices")
+    assert listed.status_code == 200
+    assert [item["model_name"] for item in listed.json()["items"]] == ["model-a"]
+
+    saved = client.put(
+        "/api/usage/prices",
+        json={
+            "prices": [
+                {"model_name": "model-a", "input_per_1m": 2, "output_per_1m": 6, "currency": "USD"},
+                {"model_name": "model-b", "input_per_1m": 1, "output_per_1m": 2, "currency": "USD"},
+            ]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    rows = {item["model_name"]: item for item in saved.json()["items"]}
+    assert rows["model-a"]["input_per_1m"] == 2
+    assert rows["model-b"]["currency"] == "USD"
+
+    summary = client.get("/api/usage/summary").json()
+    assert summary["unpriced_calls"] == 0
+    assert summary["priced_calls"] == 3
+    assert summary["total_cost_usd"] is not None
 
 
 def test_usage_summary_days_validation(usage_case):

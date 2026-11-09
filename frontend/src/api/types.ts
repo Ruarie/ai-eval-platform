@@ -927,6 +927,9 @@ export interface UsageModel {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
+  priced_calls: number
+  unpriced_calls: number
+  cost_usd?: number | null
 }
 
 export interface UsageUser {
@@ -944,6 +947,7 @@ export interface UsageRecent {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
+  cost_usd?: number | null
 }
 
 export interface UsageSummary {
@@ -955,10 +959,21 @@ export interface UsageSummary {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
+  priced_calls: number
+  unpriced_calls: number
+  total_cost_usd?: number | null
   series: UsageSeries[]
   by_model: UsageModel[]
   by_user: UsageUser[]
   recent: UsageRecent[]
+}
+
+export interface ModelPrice {
+  model_name: string
+  input_per_1m: number
+  output_per_1m: number
+  currency: 'USD'
+  updated_at?: string | null
 }
 
 // ─── 历史轨迹（N-09） ─────────────────────────────────────────────

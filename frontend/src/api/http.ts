@@ -91,6 +91,7 @@ import {
   type TraceTurn,
   type TraceTurnDetail,
   type UsageSummary,
+  type ModelPrice,
   type GlobalSearchResult,
 } from './types'
 import {
@@ -1218,6 +1219,9 @@ export const api = {
           prompt_tokens: 0,
           completion_tokens: 0,
           total_tokens: 0,
+          priced_calls: 0,
+          unpriced_calls: 0,
+          total_cost_usd: null,
           series: [],
           by_model: [],
           by_user: [],
@@ -1226,6 +1230,16 @@ export const api = {
       }
       const { data } = await http.get('/api/usage/summary', { params: { days } })
       return data
+    },
+    async prices(): Promise<ModelPrice[]> {
+      if (getDataMode() === 'mock') return []
+      const { data } = await http.get('/api/usage/prices')
+      return data.items || []
+    },
+    async savePrices(prices: ModelPrice[]): Promise<ModelPrice[]> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持价格配置', ErrorCode.VALIDATION, 400)
+      const { data } = await http.put('/api/usage/prices', { prices })
+      return data.items || []
     },
   },
 
