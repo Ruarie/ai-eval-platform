@@ -47,6 +47,7 @@ from shared.models import (  # noqa: F401
     KnowledgeBase,
     KnowledgeMemory,
     Message,
+    Notification,
     ProtocolProfile,
     Report,
     RequirementBaseline,

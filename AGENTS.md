@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.36 ｜ 审查日期：2026-11-09（N-08 站内通知 MVP：新增 `notifications`（迁移 `b8e4d2f7c1a3`），任务生成完成/失败与评审指派/结论写入通知；`dedupe_key` 按用户唯一，重复写入跳过；新增 `/api/notifications` 列表/未读/已读接口与 `NotificationBell`、`/notifications` 页面；通知不含密钥/上游原文，无邮件/Webhook 外发。门禁：通知 2 项 + 评审/资产/用例/需求/质量/搜索 74 项、Worker 13 项通过，ruff、前端 typecheck/build、单测 123/123。契约见 API V2.57、PRD V1.66。）
+>
 > 版本：V2.35 ｜ 审查日期：2026-11-09（N-05 用例资产库 MVP：新增 `case_assets`（迁移 `f5c1d8a3b6e2`），确认入库时物化、幂等且不覆盖标签；新增 `/api/case-assets` 检索/概览/详情/标签/文本查重/历史回填；来源集合删除后资产保留，标签最多 10 个；前端新增 `/case-assets` 页面与「用例资产」导航。本期不做语义向量、自动合并或跨集合复制。门禁：资产测试 3 项 + 用例/需求/评审/质量/搜索 76 项通过、ruff、前端 typecheck/build、单测 123/123。契约见 API V2.56、PRD V1.65。）
 >
 > 版本：V2.34 ｜ 审查日期：2026-11-09（N-04 需求变更分析 MVP：`requirement_baselines` 增量 `parent_id`（迁移 `e2a6b9c4d7f1`）；新增 `POST /api/requirement-baselines/{base_id}/versions`、`GET .../diff`、`GET .../impact`；新版本只能从已确认基线派生，保留父版本，草稿可预览差异但不能绑定；影响分析只读旧基线绑定用例集与关联用例，标注 changed/removed，不自动修改用例；前端在需求覆盖抽屉内提供「需求变更分析」。门禁：需求相关 14 项 + 质量/评审/搜索 29 项通过、ruff、前端 typecheck/build。契约见 API V2.55、PRD V1.64。）
@@ -157,6 +159,7 @@
 | 用例质量看板 | MVP 已交付：运行/生成/确认/采纳率/成功率/AI 均分与按天/模型/状态/模块分布；只读聚合 | `backend/api/app/routers/metrics.py`、`frontend/src/views/CasegenQuality.vue` |
 | 需求变更分析 | MVP 已交付：基线版本链、版本 diff、受影响用例集/用例；只读分析，不自动改用例 | `backend/api/app/requirement_change_service.py`、`frontend/src/components/drawers/RequirementCoverageDrawer.vue` |
 | 用例资产库 | MVP 已交付：确认物化、跨集合检索、标签、文本查重、历史回填；不做自动合并/复制 | `backend/api/app/case_asset_service.py`、`frontend/src/views/CaseAssets.vue` |
+| 站内通知 | MVP 已交付：任务生成/失败、评审指派/结论通知；顶栏未读与通知页；无外发渠道 | `backend/api/app/notification_service.py`、`frontend/src/components/notifications/NotificationBell.vue` |
 | 全局搜索 | MVP 已交付：八类实体只读检索，私有会话/工作区/记忆按属主过滤 | `backend/api/app/routers/search.py`、`frontend/src/components/search/GlobalSearch.vue` |
 | rag 知识库评测 | 已停用；保留历史报告只读 | `backend/worker/app/rag.py`、`backend/shared/kb.py` |
 | stress 压测 | 已停用；不再派生，运行中的旧任务取消并请求引擎停止 | `backend/worker/app/stress.py` |

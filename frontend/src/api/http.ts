@@ -87,6 +87,7 @@ import {
   type CaseAssetSimilarItem,
   type CaseAssetStats,
   type CaseAssetBackfill,
+  type NotificationList,
   type GlobalSearchResult,
 } from './types'
 import {
@@ -1198,6 +1199,30 @@ export const api = {
     async deleteFolder(id: string): Promise<void> {
       if (getDataMode() === 'mock') return
       await http.delete(`/api/case-folders/${id}`)
+    },
+  },
+
+  // 7.1 站内通知（N-08）
+  notifications: {
+    async list(params: { unread?: boolean; offset?: number; limit?: number } = {}): Promise<NotificationList> {
+      if (getDataMode() === 'mock') return { items: [], total: 0, unread: 0, offset: 0, limit: 20 }
+      const { data } = await http.get('/api/notifications', { params })
+      return data
+    },
+    async unreadCount(): Promise<number> {
+      if (getDataMode() === 'mock') return 0
+      const { data } = await http.get('/api/notifications/unread-count')
+      return Number(data?.unread || 0)
+    },
+    async markRead(id: string): Promise<number> {
+      if (getDataMode() === 'mock') return 0
+      const { data } = await http.post(`/api/notifications/${id}/read`)
+      return Number(data?.unread || 0)
+    },
+    async markAllRead(): Promise<number> {
+      if (getDataMode() === 'mock') return 0
+      const { data } = await http.post('/api/notifications/read-all')
+      return Number(data?.unread || 0)
     },
   },
 

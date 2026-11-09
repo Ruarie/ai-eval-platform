@@ -74,6 +74,9 @@
 
         <!-- 右侧操作栏 -->
         <div class="topbar-actions">
+          <!-- 站内通知：轮询未读计数，下拉看最近 8 条 -->
+          <NotificationBell />
+
           <!-- 全局搜索：Cmd/Ctrl+K 命令面板 -->
           <button class="topbar-search-btn" title="全局搜索 (Ctrl/Cmd+K)" aria-label="全局搜索" @click="searchRef?.open()">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -161,6 +164,7 @@ import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import { api } from '../api/http'
 import GlobalSearch from '../components/search/GlobalSearch.vue'
+import NotificationBell from '../components/notifications/NotificationBell.vue'
 
 const route = useRoute()
 const router = useRouter()

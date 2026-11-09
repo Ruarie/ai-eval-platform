@@ -909,6 +909,26 @@ export interface RequirementAutoLinkResult {
   matched_case_count: number
 }
 
+// ─── 站内通知（N-08） ─────────────────────────────────────────────
+
+export interface NotificationItem {
+  id: string
+  type: string
+  title: string
+  body: string
+  link: string
+  read_at?: string | null
+  created_at?: string | null
+}
+
+export interface NotificationList {
+  items: NotificationItem[]
+  total: number
+  unread: number
+  offset: number
+  limit: number
+}
+
 // ─── 用例资产库（N-05） ───────────────────────────────────────────
 
 export interface CaseAsset {
