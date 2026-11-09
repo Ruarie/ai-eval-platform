@@ -6,10 +6,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.57 |
-| 本轮审查日期 | 2026-11-09（站内通知中心 MVP：任务/评审通知、未读与已读接口） |
+| 文档版本 | V2.58 |
+| 本轮审查日期 | 2026-11-09（Agent 历史轨迹查询 MVP：回合摘要与脱敏事件时间线） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
-| 对应 PRD | V1.66（功能唯一权威） |
+| 对应 PRD | V1.67（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
 | 对应 Agent 说明书 | `AI测试与评估平台-Agent开发文档.md` V1.7.15（AgentLoop 单入口；JSON 仍以本文为准） |
 | 对应前端计划 | AgentLoop 前端计划 V0.5 |
@@ -4917,3 +4917,66 @@ diff 响应：
 - `backend/api/tests/test_notifications.py`、`worker/tests/conftest.py`：通知回归与测试表。
 - `frontend/src/components/notifications/NotificationBell.vue`、`views/NotificationCenter.vue`、`layouts/MainLayout.vue`、`router/index.ts`：铃铛、通知页与路由。
 - `frontend/src/api/types.ts`、`http.ts`：通知类型与客户端。
+
+## V2.58 Agent 历史轨迹查询（N-09 MVP，2026-11-09）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/sessions/{session_id}/trace/turns?limit=20` | 最近回合摘要，按回合号倒序 |
+| GET | `/api/sessions/{session_id}/trace/turns/{turn}?limit=500` | 单回合脱敏事件时间线 |
+
+回合摘要：
+
+```json
+{
+  "turn": 3,
+  "started_at": 1762671600.0,
+  "finished_at": 1762671612.4,
+  "status": "completed",
+  "event_count": 18,
+  "tool_calls": 4,
+  "model_attempts": 5,
+  "prompt_tokens": 12000,
+  "completion_tokens": 1800,
+  "total_tokens": 13800
+}
+```
+
+单回合详情：
+
+```json
+{
+  "turn": 3,
+  "summary": { "turn": 3, "status": "completed", "event_count": 18 },
+  "events": [
+    {
+      "seq": 41,
+      "type": "turn/start",
+      "ts": 1762671600.0,
+      "turn": 3,
+      "name": "turn",
+      "status": "running",
+      "duration_ms": null,
+      "error_code": "",
+      "prompt_tokens": 0,
+      "completion_tokens": 0
+    }
+  ]
+}
+```
+
+边界：
+
+- 只读 `agent_events`；不新增轨迹表、不写库；
+- 只返回元数据：不返回消息正文、工具参数/结果、提示词、上游原文或凭据；
+- 无 `turn` 号的事件不进入回合聚合；工具失败只给状态/错误码；
+- 单次最多读取最近 5000 条事件；详情最多 500 条；
+- 私有会话仅属主/管理员可见，不可见统一 `NOT_FOUND`；
+- `limit` 越界按统一 `VALIDATION` 返回 400。
+
+### 修改代码文件与作用清单
+
+- `backend/api/app/routers/traces.py`、`app/schemas.py`、`app/main.py`：轨迹接口与路由。
+- `backend/api/tests/test_traces.py`：回合聚合、脱敏与权限回归。
+- `frontend/src/components/drawers/TraceHistoryDrawer.vue`、`views/Agent.vue`：历史轨迹抽屉与入口。
+- `frontend/src/api/types.ts`、`http.ts`：轨迹类型与客户端。

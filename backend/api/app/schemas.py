@@ -1477,6 +1477,44 @@ class CoverageModuleOut(ApiModel):
     coverage_percent: float
 
 
+class TraceTurnOut(ApiModel):
+    """一个用户回合的轨迹摘要。"""
+
+    turn: int
+    started_at: float | None = None
+    finished_at: float | None = None
+    status: str = ""
+    event_count: int = 0
+    tool_calls: int = 0
+    model_attempts: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+class TraceEventOut(ApiModel):
+    """脱敏后的轨迹事件；不返回正文、工具结果或提示词。"""
+
+    seq: int
+    type: str
+    ts: float | None = None
+    turn: int | None = None
+    name: str = ""
+    status: str = ""
+    duration_ms: int | None = None
+    error_code: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+
+class TraceTurnDetailOut(ApiModel):
+    """单个回合的事件列表。"""
+
+    turn: int
+    summary: TraceTurnOut
+    events: list[TraceEventOut] = Field(default_factory=list)
+
+
 class NotificationOut(ApiModel):
     """站内通知响应。"""
 
