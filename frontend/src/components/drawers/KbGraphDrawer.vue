@@ -306,8 +306,6 @@ interface PlacedNode {
 }
 
 // 分簇用网格铺排：簇多、单簇节点多时，环形分布会互相重叠，网格最稳。
-const CELL_GAP = 18
-
 interface ClusterInfo {
   type: string
   label: string

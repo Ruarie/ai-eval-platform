@@ -133,7 +133,8 @@ jobs:
 
       - name: Deploy to server
         if: steps.check.outputs.skip != 'true'
-        # 将触发工作流的提交透传到远端，禁止旧工作流改为部署更新后的 main。
+        # 直接使用 runner 自带的 ssh：appleboy/ssh-action 每次运行都要从
+        # GitHub Releases 下载 drone-ssh，网络抖动时 504 直接失败（run 42572630521）。
         env:
           DEPLOY_COMMIT: ${{ github.sha }}
           DEPLOY_BASE_COMMIT: ${{ needs.plan.outputs.base_sha }}
@@ -141,33 +142,40 @@ jobs:
           GHCR_ACTOR: ${{ github.actor }}
           IMAGE_PREFIX: ghcr.io/${{ github.repository }}
           IMAGE_TAG: ${{ github.sha }}
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER || 'deploy' }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
-          envs: DEPLOY_COMMIT,DEPLOY_BASE_COMMIT,GHCR_TOKEN,GHCR_ACTOR,IMAGE_PREFIX,IMAGE_TAG
-          # 生产机首次拉取或镜像缓存被清理后，多个业务镜像可能在低带宽下持续重试；
-          # 超时需覆盖完整拉取和滚动更新，不能在下载正常进行时中断旧容器的平滑部署。
-          command_timeout: 45m
-          script: |
-            set -e
-            APP_DIR=/opt/ai-eval-platform
-            # 只 fetch，不在锁外 reset 工作区；从目标提交提取脚本后由脚本持锁完成同步。
-            if [ -d "$APP_DIR/.git" ]; then
-              cd "$APP_DIR"
-              # 被取消的旧部署可能留下 HEAD.lock；超过 20s 视为过期后再 fetch。
-              find "$APP_DIR/.git" -name '*.lock' -type f ! -newermt "-20 seconds" -delete 2>/dev/null || true
-              git fetch origin main
-              git cat-file -e "${DEPLOY_COMMIT}^{commit}"
-              DEPLOY_ENTRY=$(mktemp)
-              git show "${DEPLOY_COMMIT}:deploy/deploy.sh" > "$DEPLOY_ENTRY"
-              chmod +x "$DEPLOY_ENTRY"
-              exec env DEPLOY_COMMIT="$DEPLOY_COMMIT" DEPLOY_BASE_COMMIT="$DEPLOY_BASE_COMMIT" \
-                GHCR_TOKEN="$GHCR_TOKEN" GHCR_ACTOR="$GHCR_ACTOR" \
-                IMAGE_PREFIX="$IMAGE_PREFIX" IMAGE_TAG="$IMAGE_TAG" \
-                bash "$DEPLOY_ENTRY"
-            fi
-            echo "错误：部署目录不存在或尚未初始化：$APP_DIR"
-            exit 1
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+          SSH_USER: ${{ secrets.SSH_USER || 'deploy' }}
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          # 内网 IP 可能扫不到指纹：扫到就固定下来，扫不到则 accept-new 放行。
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+          ssh -i "$HOME/.ssh/deploy_key" -p "$SSH_PORT" \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            "$SSH_USER@$SSH_HOST" \
+            "env DEPLOY_COMMIT='$DEPLOY_COMMIT' DEPLOY_BASE_COMMIT='$DEPLOY_BASE_COMMIT' GHCR_TOKEN='$GHCR_TOKEN' GHCR_ACTOR='$GHCR_ACTOR' IMAGE_PREFIX='$IMAGE_PREFIX' IMAGE_TAG='$IMAGE_TAG' bash -s" <<'REMOTE'
+          set -e
+          APP_DIR=/opt/ai-eval-platform
+          # 只 fetch，不在锁外 reset 工作区；从目标提交提取脚本后由脚本持锁完成同步。
+          if [ -d "$APP_DIR/.git" ]; then
+            cd "$APP_DIR"
+            # 被取消的旧部署可能留下 HEAD.lock；超过 20s 视为过期后再 fetch。
+            find "$APP_DIR/.git" -name '*.lock' -type f ! -newermt "-20 seconds" -delete 2>/dev/null || true
+            git fetch origin main
+            git cat-file -e "${DEPLOY_COMMIT}^{commit}"
+            DEPLOY_ENTRY=$(mktemp)
+            git show "${DEPLOY_COMMIT}:deploy/deploy.sh" > "$DEPLOY_ENTRY"
+            chmod +x "$DEPLOY_ENTRY"
+            exec env DEPLOY_COMMIT="$DEPLOY_COMMIT" DEPLOY_BASE_COMMIT="$DEPLOY_BASE_COMMIT" \
+              GHCR_TOKEN="$GHCR_TOKEN" GHCR_ACTOR="$GHCR_ACTOR" \
+              IMAGE_PREFIX="$IMAGE_PREFIX" IMAGE_TAG="$IMAGE_TAG" \
+              bash "$DEPLOY_ENTRY"
+          fi
+          echo "错误：部署目录不存在或尚未初始化：$APP_DIR"
+          exit 1
+          REMOTE
