@@ -920,6 +920,7 @@ import {
   CASE_STRATEGIES as STRATEGIES,
   casePayload,
   caseSetStatusLabel,
+  createEmptyCase,
   editableCase,
   getCaseExtra,
   highlightText,
@@ -1470,23 +1471,7 @@ function createEmptyCaseSet() {
 }
 
 function buildEmptyCase(): ExtendedTestCase {
-  const nextNum = cases.value.length + 1
-  const code = `TC-${String(nextNum).padStart(3, '0')}`
-  return {
-    id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    set_id: activeSetId.value,
-    code,
-    name: '',
-    module: '通用',
-    feature_point: '',
-    strategy: '正向',
-    priority: 'HX',
-    preconditions: '',
-    steps: ['1. 执行标准输入'],
-    expected_result: '',
-    target_dataset_id: undefined,
-    extras: {},
-  }
+  return createEmptyCase(activeSetId.value, cases.value.length + 1)
 }
 
 function addCase() {

@@ -111,6 +111,25 @@ export function getCaseExtra(c: ExtendedTestCase, key: string): string {
   return String(c.extras?.[key] ?? '')
 }
 
+/** 新建空用例行；编号按当前集合行数递增，ID 带时间戳避免并发重复。 */
+export function createEmptyCase(setId: string, nextNumber: number): ExtendedTestCase {
+  return {
+    id: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    set_id: setId,
+    code: `TC-${String(nextNumber).padStart(3, '0')}`,
+    name: '',
+    module: '通用',
+    feature_point: '',
+    strategy: '正向',
+    priority: 'HX',
+    preconditions: '',
+    steps: ['1. 执行标准输入'],
+    expected_result: '',
+    target_dataset_id: undefined,
+    extras: {},
+  }
+}
+
 /** 只输出经过转义的纯文本 + mark 标签，调用方仍需只用于 v-html。 */
 export function highlightText(text: string, query: string): string {
   const q = query.trim()

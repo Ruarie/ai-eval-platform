@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   casePayload,
+  createEmptyCase,
   editableCase,
   getCaseExtra,
   highlightText,
@@ -74,4 +75,13 @@ test('搜索高亮只输出转义文本与 mark 标签', () => {
 
 test('空查询返回转义文本且不添加标记', () => {
   assert.equal(highlightText('a&b', ''), 'a&amp;b')
+})
+
+test('新建空用例带三位编号与默认策略', () => {
+  const row = createEmptyCase('set-1', 7)
+  assert.equal(row.set_id, 'set-1')
+  assert.equal(row.code, 'TC-007')
+  assert.equal(row.strategy, '正向')
+  assert.deepEqual(row.steps, ['1. 执行标准输入'])
+  assert.ok(row.id.startsWith('temp-'))
 })
