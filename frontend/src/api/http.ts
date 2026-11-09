@@ -74,6 +74,8 @@ import {
   type RequirementItem,
   type CaseCoverage,
   type RequirementAutoLinkResult,
+  type RequirementDiff,
+  type RequirementImpact,
   type CaseReviewWorkspace,
   type CaseReviewRun,
   type CaseSetVersion,
@@ -1319,6 +1321,25 @@ export const api = {
         throw new ApiError('Mock 模式不支持需求基线确认', ErrorCode.VALIDATION, 400)
       }
       const { data } = await http.post(`/api/requirement-baselines/${id}/confirm`)
+      return data
+    },
+    async createVersion(baseId: string, payload: { name: string; source_text: string; source_kind?: 'text' | 'file'; source_name?: string }): Promise<RequirementBaselineDetail> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持需求改版分析', ErrorCode.VALIDATION, 400)
+      const { data } = await http.post(`/api/requirement-baselines/${baseId}/versions`, payload)
+      return data
+    },
+    async diff(targetId: string, baseId?: string): Promise<RequirementDiff> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持需求改版分析', ErrorCode.VALIDATION, 400)
+      const { data } = await http.get(`/api/requirement-baselines/${targetId}/diff`, {
+        params: baseId ? { base_id: baseId } : {},
+      })
+      return data
+    },
+    async impact(targetId: string, baseId?: string): Promise<RequirementImpact> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持需求改版分析', ErrorCode.VALIDATION, 400)
+      const { data } = await http.get(`/api/requirement-baselines/${targetId}/impact`, {
+        params: baseId ? { base_id: baseId } : {},
+      })
       return data
     },
     async bind(caseSetId: string, baselineId: string): Promise<CaseCoverage> {

@@ -1018,6 +1018,13 @@ class RequirementBaseline(Base):
     )
 
     id = Column(String, primary_key=True, default=uuid_str)
+    # 版本链：新版本指向被修订的基线；首版为空。
+    parent_id = Column(
+        String,
+        ForeignKey("requirement_baselines.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     name = Column(String, nullable=False, default="未命名需求基线")
     # text=粘贴文本 / file=上传文件；当前只保存来源文件名，不复制正文。
     source_kind = Column(String, nullable=False, default="text")

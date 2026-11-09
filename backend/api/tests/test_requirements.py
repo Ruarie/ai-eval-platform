@@ -143,3 +143,44 @@ def test_build_coverage_counts_p0_and_uncovered_modules():
         "covered": 1,
         "coverage_percent": 50.0,
     }
+
+
+def test_diff_requirements_detects_added_removed_changed():
+    """按需求编号匹配版本，输出新增/删除/字段修改。"""
+    base = [
+        {"id": "r1", "req_no": "FR-101", "title": "登录", "priority": "P0", "module": "登录"},
+        {"id": "r2", "req_no": "FR-102", "title": "锁定", "priority": "P1", "module": "登录"},
+    ]
+    target = [
+        {"id": "r1b", "req_no": "FR-101", "title": "手机号登录", "priority": "P0", "module": "登录"},
+        {"id": "r3", "req_no": "FR-103", "title": "验证码", "priority": "P1", "module": "登录"},
+    ]
+    diff = requirements.diff_requirements(base, target)
+    assert diff["added_count"] == 1
+    assert diff["removed_count"] == 1
+    assert diff["changed_count"] == 1
+    assert diff["added"][0]["req_no"] == "FR-103"
+    assert diff["removed"][0]["req_no"] == "FR-102"
+    assert diff["changed"][0]["req_no"] == "FR-101"
+    assert diff["changed"][0]["fields"][0] == {
+        "field": "title",
+        "label": "标题",
+        "before": "登录",
+        "after": "手机号登录",
+    }
+
+
+def test_diff_requirements_ignores_empty_and_truncates():
+    """空值与缺失等价；明细截断但计数保持全量。"""
+    base = [{"id": "r1", "req_no": "FR-101", "title": "登录", "description": ""}]
+    target = [{"id": "r1", "req_no": "FR-101", "title": "登录", "description": None}]
+    assert requirements.diff_requirements(base, target)["changed_count"] == 0
+
+    base = []
+    target = [
+        {"id": f"r{i}", "req_no": f"FR-{100 + i}", "title": f"需求{i}"} for i in range(5)
+    ]
+    diff = requirements.diff_requirements(base, target, limit=2)
+    assert diff["added_count"] == 5
+    assert len(diff["added"]) == 2
+    assert diff["truncated"] is True

@@ -772,6 +772,7 @@ export interface CaseVersionRestore {
 
 export interface RequirementBaseline {
   id: string
+  parent_id?: string | null
   name: string
   source_kind: 'text' | 'file'
   source_name: string
@@ -796,6 +797,65 @@ export interface RequirementItem {
 
 export interface RequirementBaselineDetail extends RequirementBaseline {
   requirements: RequirementItem[]
+}
+
+export interface RequirementChangeField {
+  field: string
+  label: string
+  before: string
+  after: string
+}
+
+export interface RequirementChangeItem {
+  id: string
+  req_no: string
+  title: string
+  priority: string
+  module: string
+  fields: RequirementChangeField[]
+}
+
+export interface RequirementDiff {
+  base_id: string
+  target_id: string
+  base_name: string
+  target_name: string
+  added_count: number
+  removed_count: number
+  changed_count: number
+  added: RequirementChangeItem[]
+  removed: RequirementChangeItem[]
+  changed: RequirementChangeItem[]
+  truncated: boolean
+}
+
+export interface RequirementImpactCase {
+  case_set_id: string
+  set_name: string
+  set_status: string
+  case_item_id: string
+  case_name: string
+  req_no: string
+  req_title: string
+  change_type: 'changed' | 'removed'
+}
+
+export interface RequirementImpactSet {
+  case_set_id: string
+  name: string
+  status: string
+  affected_cases: number
+}
+
+export interface RequirementImpact {
+  base_id: string
+  target_id: string
+  diff: RequirementDiff
+  affected_set_count: number
+  affected_case_count: number
+  sets: RequirementImpactSet[]
+  cases: RequirementImpactCase[]
+  truncated: boolean
 }
 
 export interface CoverageRequirement {

@@ -6,10 +6,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.54 |
-| 本轮审查日期 | 2026-11-09（用例质量看板 MVP：新增生成运行/采纳率/成功率/AI 评分聚合接口） |
+| 文档版本 | V2.55 |
+| 本轮审查日期 | 2026-11-09（需求变更分析 MVP：基线版本链、版本 diff 与受影响用例分析） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
-| 对应 PRD | V1.63（功能唯一权威） |
+| 对应 PRD | V1.64（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
 | 对应 Agent 说明书 | `AI测试与评估平台-Agent开发文档.md` V1.7.15（AgentLoop 单入口；JSON 仍以本文为准） |
 | 对应前端计划 | AgentLoop 前端计划 V0.5 |
@@ -4684,3 +4684,105 @@ diff 响应：
 - `frontend/src/views/CasegenQuality.vue`：质量看板页面。
 - `frontend/src/router/index.ts`、`layouts/MainLayout.vue`：`/case-quality` 路由与入口。
 - `frontend/src/api/types.ts`、`http.ts`：指标类型与客户端。
+
+## V2.55 需求变更分析（N-04 MVP，2026-11-09）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/requirement-baselines/{base_id}/versions` | 从已确认基线派生新版本草稿 |
+| GET | `/api/requirement-baselines/{target_id}/diff?base_id=` | 版本差异；默认对比 parent |
+| GET | `/api/requirement-baselines/{target_id}/impact?base_id=` | 受变更影响的用例集与用例 |
+
+派生请求沿用创建基线字段：
+
+```json
+{
+  "name": "支付模块 PRD V3",
+  "source_text": "| FR-101 | 支持手机号或验证码登录 | P0 | 登录 |",
+  "source_kind": "text",
+  "source_name": "payment-prd-v3.md"
+}
+```
+
+响应为 `RequirementBaselineDetail`，新增 `parent_id` 指回被修订版本。
+
+差异响应：
+
+```json
+{
+  "base_id": "base-id",
+  "target_id": "target-id",
+  "base_name": "支付模块 PRD V2",
+  "target_name": "支付模块 PRD V3",
+  "added_count": 1,
+  "removed_count": 1,
+  "changed_count": 1,
+  "added": [
+    { "id": "r3", "req_no": "FR-103", "title": "验证码", "priority": "P1", "module": "登录", "fields": [] }
+  ],
+  "removed": [
+    { "id": "r2", "req_no": "FR-102", "title": "锁定", "priority": "P1", "module": "登录", "fields": [] }
+  ],
+  "changed": [
+    {
+      "id": "r1b",
+      "req_no": "FR-101",
+      "title": "手机号或验证码登录",
+      "priority": "P0",
+      "module": "登录",
+      "fields": [
+        { "field": "title", "label": "标题", "before": "手机号登录", "after": "手机号或验证码登录" }
+      ]
+    }
+  ],
+  "truncated": false
+}
+```
+
+影响响应：
+
+```json
+{
+  "base_id": "base-id",
+  "target_id": "target-id",
+  "diff": { "added_count": 1, "removed_count": 1, "changed_count": 1 },
+  "affected_set_count": 1,
+  "affected_case_count": 1,
+  "sets": [
+    { "case_set_id": "set-1", "name": "登录用例集", "status": "generated", "affected_cases": 1 }
+  ],
+  "cases": [
+    {
+      "case_set_id": "set-1",
+      "set_name": "登录用例集",
+      "set_status": "generated",
+      "case_item_id": "case-1",
+      "case_name": "手机号登录成功",
+      "req_no": "FR-101",
+      "req_title": "手机号登录",
+      "change_type": "changed"
+    }
+  ],
+  "truncated": false
+}
+```
+
+边界：
+
+- 只有 `confirmed` 基线可派生新版本；草稿/已废弃返回 `VALIDATION`；
+- 新版本 `status=draft`，确认前可查看 diff/impact，但不能被用例集绑定；
+- 匹配以需求编号为准；编号改名视为删除+新增，不做模糊匹配；
+- 空值与缺失等价；排序变化不算修改；
+- 影响分析只查旧基线绑定用例集与已有关联，不修改任何用例；
+- 单次 diff 每类明细最多 500 条；影响用例最多 1000 条、用例集最多 100 个，超出置 `truncated`；
+- 本期不提供“自动创建变更草稿”接口，避免分析即改库。
+
+### 修改代码文件与作用清单
+
+- `backend/shared/models.py`、`backend/api/app/models.py`：`requirement_baselines.parent_id`。
+- `backend/api/migrations/versions/e2a6b9c4d7f1_需求基线版本链.py`：版本链迁移。
+- `backend/shared/requirements.py`：`diff_requirements`。
+- `backend/api/app/requirement_change_service.py`：派生、diff、impact。
+- `backend/api/app/routers/requirements.py`、`app/schemas.py`：接口与契约。
+- `backend/api/tests/test_requirements.py`、`test_requirements_route.py`：差异与改版链路回归。
+- `frontend/src/components/drawers/RequirementCoverageDrawer.vue`、`api/types.ts`、`http.ts`：改版分析交互与客户端。

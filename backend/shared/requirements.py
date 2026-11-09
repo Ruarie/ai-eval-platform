@@ -328,3 +328,89 @@ def build_coverage(
         "linked_case_count": len(linked_case_ids),
         "unlinked_case_count": max(0, len(case_by_id) - len(linked_case_ids)),
     }
+
+
+_DIFF_FIELDS = (
+    ("title", "标题"),
+    ("priority", "优先级"),
+    ("module", "模块"),
+    ("description", "描述"),
+)
+
+
+def _requirement_key(item: Mapping[str, Any]) -> str:
+    """按需求编号匹配版本；编号缺失时退回 ID，仍保持稳定。"""
+    req_no = str(item.get("req_no") or "").strip().upper()
+    return req_no or str(item.get("id") or "")
+
+
+def _diff_item(item: Mapping[str, Any], *, fields: list[dict[str, str]] | None = None) -> dict[str, Any]:
+    """输出需求条目的稳定结构，供 API 直接序列化。"""
+    return {
+        "id": str(item.get("id") or ""),
+        "req_no": str(item.get("req_no") or ""),
+        "title": str(item.get("title") or ""),
+        "priority": str(item.get("priority") or ""),
+        "module": str(item.get("module") or ""),
+        "fields": fields or [],
+    }
+
+
+def diff_requirements(
+    base_items: Sequence[Mapping[str, Any]],
+    target_items: Sequence[Mapping[str, Any]],
+    *,
+    limit: int = 500,
+) -> dict[str, Any]:
+    """对比两版需求条目。
+
+    匹配以需求编号优先；输出新增、删除、字段修改三类。排序变化不算修改，
+    空字符串与缺失值等价。明细最多 ``limit`` 条，但计数保持全量。
+    """
+    base_map: dict[str, Mapping[str, Any]] = {}
+    for item in base_items:
+        base_map[_requirement_key(item)] = item
+    target_map: dict[str, Mapping[str, Any]] = {}
+    for item in target_items:
+        target_map[_requirement_key(item)] = item
+
+    added: list[dict[str, Any]] = []
+    removed: list[dict[str, Any]] = []
+    changed: list[dict[str, Any]] = []
+    added_count = removed_count = changed_count = 0
+
+    for key, item in target_map.items():
+        if key not in base_map:
+            added_count += 1
+            if len(added) < limit:
+                added.append(_diff_item(item))
+            continue
+        base = base_map[key]
+        fields: list[dict[str, str]] = []
+        for field, label in _DIFF_FIELDS:
+            before = str(base.get(field) or "").strip()
+            after = str(item.get(field) or "").strip()
+            if before != after:
+                fields.append({"field": field, "label": label, "before": before, "after": after})
+        if fields:
+            changed_count += 1
+            if len(changed) < limit:
+                changed.append(_diff_item(item, fields=fields))
+
+    for key, item in base_map.items():
+        if key not in target_map:
+            removed_count += 1
+            if len(removed) < limit:
+                removed.append(_diff_item(item))
+
+    return {
+        "added": added,
+        "removed": removed,
+        "changed": changed,
+        "added_count": added_count,
+        "removed_count": removed_count,
+        "changed_count": changed_count,
+        "truncated": any(
+            count > limit for count in (added_count, removed_count, changed_count)
+        ),
+    }
