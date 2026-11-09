@@ -90,20 +90,30 @@ if [ -z "$DEPLOY_BASE_COMMIT" ] && [ -s "$DEPLOY_MARKER" ]; then
 fi
 
 # 工作流入口已经 fetch 过目标提交；脚本重载后 HEAD 已到位。再 fetch 会被 GitHub SSH 拒通道。
-if [ -n "$DEPLOY_COMMIT" ] && git cat-file -e "${DEPLOY_COMMIT}^{commit}" 2>/dev/null \
-    && [ "$(git rev-parse HEAD 2>/dev/null || true)" = "$(git rev-parse "$DEPLOY_COMMIT")" ]; then
-    echo "==> 工作区已在目标提交 ${DEPLOY_COMMIT:0:8}，跳过 fetch"
-elif [ -n "$DEPLOY_COMMIT" ] && git cat-file -e "${DEPLOY_COMMIT}^{commit}" 2>/dev/null; then
-    echo "==> 目标提交已在本地对象库，跳过 fetch：${DEPLOY_COMMIT:0:8}"
-    git reset --hard "$DEPLOY_COMMIT"
+#
+# 分支保护：git reset --hard 会把当前分支退回目标提交，未推送的开发提交会变成游离
+# 对象、未跟踪文件也会被清掉（本机每 5 分钟的自动部署踩过两次）。因此只在 main
+# 分支上做重置；其它分支按现有工作区部署，切回 main 后自动恢复同步。
+CURRENT_BRANCH=$(git symbolic-ref --short -q HEAD 2>/dev/null || true)
+if [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "main" ]; then
+    echo "==> 当前分支 ${CURRENT_BRANCH} 不是 main：跳过 git reset，按工作区现有代码部署"
+    echo "    （保护未推送的开发提交；切回 main 后恢复自动同步）"
 else
-    git_fetch_with_retry origin "$BRANCH"
-    # CI 必须部署触发提交，避免旧工作流在 fetch 后误部署更晚推送的 main。
-    if [ -n "$DEPLOY_COMMIT" ]; then
-        git cat-file -e "${DEPLOY_COMMIT}^{commit}"
+    if [ -n "$DEPLOY_COMMIT" ] && git cat-file -e "${DEPLOY_COMMIT}^{commit}" 2>/dev/null \
+        && [ "$(git rev-parse HEAD 2>/dev/null || true)" = "$(git rev-parse "$DEPLOY_COMMIT")" ]; then
+        echo "==> 工作区已在目标提交 ${DEPLOY_COMMIT:0:8}，跳过 fetch"
+    elif [ -n "$DEPLOY_COMMIT" ] && git cat-file -e "${DEPLOY_COMMIT}^{commit}" 2>/dev/null; then
+        echo "==> 目标提交已在本地对象库，跳过 fetch：${DEPLOY_COMMIT:0:8}"
         git reset --hard "$DEPLOY_COMMIT"
     else
-        git reset --hard "origin/$BRANCH"
+        git_fetch_with_retry origin "$BRANCH"
+        # CI 必须部署触发提交，避免旧工作流在 fetch 后误部署更晚推送的 main。
+        if [ -n "$DEPLOY_COMMIT" ]; then
+            git cat-file -e "${DEPLOY_COMMIT}^{commit}"
+            git reset --hard "$DEPLOY_COMMIT"
+        else
+            git reset --hard "origin/$BRANCH"
+        fi
     fi
 fi
 
