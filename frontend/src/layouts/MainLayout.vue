@@ -219,6 +219,13 @@ const IconProfiles = () =>
     h('path', { d: 'M7 10h4M7 14h7' }),
   ])
 
+// 质量看板：柱状图 + 上升趋势。
+const IconQuality = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { d: 'M4 20V6M4 20h16' }),
+    h('path', { d: 'M8 16v-4M12 16V8M16 16v-6M20 16v-2' }),
+  ])
+
 const IconUsers = () =>
   h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
     h('circle', { cx: '9', cy: '8', r: '3.5' }),
@@ -275,6 +282,7 @@ const navGroups = [
     items: [
       { path: '/agent', label: '智能体', icon: IconAgent, t: 'var(--t-agent)', c: 'var(--c-agent)' },
       { path: '/cases', label: '用例', icon: IconCases, t: 'var(--t-cases)', c: 'var(--c-cases)' },
+      { path: '/case-quality', label: '用例质量', icon: IconQuality, t: 'var(--t-cases)', c: 'var(--c-cases)' },
       { path: '/tasks', label: '任务中心', icon: IconTasks, t: 'var(--t-tasks)', c: 'var(--c-tasks)' },
       { path: '/dispatch', label: '调度中心', icon: IconDispatch, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)' },
     ],

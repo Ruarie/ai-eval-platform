@@ -849,6 +849,80 @@ export interface RequirementAutoLinkResult {
   matched_case_count: number
 }
 
+// ─── 用例生成质量看板（N-03） ─────────────────────────────────────
+
+export interface CasegenRun {
+  task_id: string
+  case_set_id?: string | null
+  name: string
+  status: string
+  model_name: string
+  profile_id: string
+  profile_name: string
+  target_count: number
+  generated_count: number
+  confirmed_count: number
+  adoption_rate: number
+  ai_score?: number | null
+  ai_verdict: string
+  review_state: string
+  error_code: string
+  created_at?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+  duration_ms?: number | null
+}
+
+export interface CasegenSeries {
+  day: string
+  runs: number
+  generated: number
+  confirmed: number
+  adoption_rate: number
+}
+
+export interface CasegenModel {
+  profile_id: string
+  model_name: string
+  runs: number
+  generated: number
+  confirmed: number
+  adoption_rate: number
+  avg_ai_score?: number | null
+}
+
+export interface CasegenStatus {
+  status: string
+  count: number
+}
+
+export interface CasegenModule {
+  module: string
+  case_count: number
+}
+
+export interface CasegenMetrics {
+  days: number
+  generated_at?: string | null
+  total_runs: number
+  succeeded_runs: number
+  failed_runs: number
+  cancelled_runs: number
+  awaiting_runs: number
+  success_rate: number
+  total_generated: number
+  total_confirmed: number
+  adoption_rate: number
+  ai_scored_runs: number
+  avg_ai_score?: number | null
+  review_approved: number
+  series: CasegenSeries[]
+  by_model: CasegenModel[]
+  by_status: CasegenStatus[]
+  modules: CasegenModule[]
+  recent: CasegenRun[]
+}
+
 // ─── 全局搜索（N-07 MVP） ────────────────────────────────────────────
 
 export interface GlobalSearchItem {

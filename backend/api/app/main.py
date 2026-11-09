@@ -32,6 +32,7 @@ from .routers import (
     files,
     kb,
     mcp,
+    metrics,
     profiles,
     reports,
     requirements,
@@ -238,6 +239,7 @@ app.include_router(cases.router)
 app.include_router(case_reviews.router)
 app.include_router(requirements.router)
 app.include_router(search.router)
+app.include_router(metrics.router)
 app.include_router(collaborations.router)
 app.include_router(cases.folders_router)
 app.include_router(admin.router)

@@ -444,7 +444,14 @@ def run_testcase(task_id: str) -> None:
 
         task.status = "awaiting_case_confirm"
         task.progress = {"percent": 100, "done": len(cases), "total": len(cases), "message": "用例已生成，等待确认入库"}
-        task.result = {"case_set_id": case_set.id, "generated_count": len(cases)}
+        task.result = {
+            "case_set_id": case_set.id,
+            "generated_count": len(cases),
+            # 质量看板需要按模型聚合；只记录 ID/名称/模型，不记录密钥或端点。
+            "profile_id": getattr(profile, "id", "") or "",
+            "profile_name": getattr(profile, "name", "") or "",
+            "model_name": model or "",
+        }
         db.add(
             TaskEvent(
                 task_id=task.id,

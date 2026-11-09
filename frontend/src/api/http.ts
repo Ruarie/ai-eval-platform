@@ -79,6 +79,7 @@ import {
   type CaseSetVersion,
   type CaseVersionDiff,
   type CaseVersionRestore,
+  type CasegenMetrics,
   type GlobalSearchResult,
 } from './types'
 import {
@@ -1190,6 +1191,37 @@ export const api = {
     async deleteFolder(id: string): Promise<void> {
       if (getDataMode() === 'mock') return
       await http.delete(`/api/case-folders/${id}`)
+    },
+  },
+
+  // 7.3 用例生成质量看板（N-03）
+  metrics: {
+    async casegen(days = 30): Promise<CasegenMetrics> {
+      if (getDataMode() === 'mock') {
+        return {
+          days,
+          generated_at: new Date().toISOString(),
+          total_runs: 0,
+          succeeded_runs: 0,
+          failed_runs: 0,
+          cancelled_runs: 0,
+          awaiting_runs: 0,
+          success_rate: 0,
+          total_generated: 0,
+          total_confirmed: 0,
+          adoption_rate: 0,
+          ai_scored_runs: 0,
+          avg_ai_score: null,
+          review_approved: 0,
+          series: [],
+          by_model: [],
+          by_status: [],
+          modules: [],
+          recent: [],
+        }
+      }
+      const { data } = await http.get('/api/metrics/casegen', { params: { days } })
+      return data
     },
   },
 

@@ -6,10 +6,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.53 |
-| 本轮审查日期 | 2026-11-09（用例评审工作流与版本历史 MVP：评审请求/结论/评论、AI 历史、版本快照/diff/回滚） |
+| 文档版本 | V2.54 |
+| 本轮审查日期 | 2026-11-09（用例质量看板 MVP：新增生成运行/采纳率/成功率/AI 评分聚合接口） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
-| 对应 PRD | V1.62（功能唯一权威） |
+| 对应 PRD | V1.63（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
 | 对应 Agent 说明书 | `AI测试与评估平台-Agent开发文档.md` V1.7.15（AgentLoop 单入口；JSON 仍以本文为准） |
 | 对应前端计划 | AgentLoop 前端计划 V0.5 |
@@ -4596,3 +4596,91 @@ diff 响应：
 - `backend/api/tests/test_case_review.py`、`test_case_review_route.py`：纯函数与路由回归。
 - `frontend/src/api/types.ts`、`http.ts`：评审与版本类型/客户端。
 - `frontend/src/components/drawers/CaseReviewFlowDrawer.vue`、`views/Cases.vue`：评审工作台入口与交互。
+
+## V2.54 用例质量看板（N-03 MVP，2026-11-09）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/metrics/casegen?days=30` | 按时间窗聚合用例生成运行与质量 |
+
+`days` 取值 1–365，默认 30；越界按统一 `VALIDATION` 返回 400。
+
+响应：
+
+```json
+{
+  "days": 30,
+  "generated_at": "2026-11-09T07:00:00Z",
+  "total_runs": 12,
+  "succeeded_runs": 10,
+  "failed_runs": 1,
+  "cancelled_runs": 1,
+  "awaiting_runs": 0,
+  "success_rate": 0.8333,
+  "total_generated": 320,
+  "total_confirmed": 240,
+  "adoption_rate": 0.75,
+  "ai_scored_runs": 8,
+  "avg_ai_score": 86.5,
+  "review_approved": 6,
+  "series": [
+    { "day": "2026-11-09", "runs": 2, "generated": 45, "confirmed": 30, "adoption_rate": 0.6667 }
+  ],
+  "by_model": [
+    {
+      "profile_id": "profile-a",
+      "model_name": "model-a",
+      "runs": 6,
+      "generated": 180,
+      "confirmed": 140,
+      "adoption_rate": 0.7778,
+      "avg_ai_score": 88.0
+    }
+  ],
+  "by_status": [{ "status": "succeeded", "count": 10 }],
+  "modules": [{ "module": "支付", "case_count": 42 }],
+  "recent": [
+    {
+      "task_id": "task-1",
+      "case_set_id": "set-1",
+      "name": "支付用例集",
+      "status": "succeeded",
+      "model_name": "model-a",
+      "profile_id": "profile-a",
+      "profile_name": "主力模型",
+      "target_count": 45,
+      "generated_count": 42,
+      "confirmed_count": 36,
+      "adoption_rate": 0.8571,
+      "ai_score": 90,
+      "ai_verdict": "pass",
+      "review_state": "approved",
+      "error_code": "",
+      "created_at": "2026-11-09T06:00:00Z",
+      "started_at": "2026-11-09T06:00:05Z",
+      "finished_at": "2026-11-09T06:04:10Z",
+      "duration_ms": 245000
+    }
+  ]
+}
+```
+
+边界：
+
+- 只读聚合，不写审计、不修改任务/用例集/评审状态；
+- 运行数按 `tasks.kind=testcase` 且 `created_at` 在时间窗内统计，最多扫描最近 1000 条；
+- 成功率 = `succeeded_runs / total_runs`；`awaiting_case_confirm` 不计入成功或失败；
+- 采纳率 = `confirmed_count / generated_count`，分母为 0 返回 0；
+- AI 均分只取每个用例集最新一次 `case_review_runs`；没有评分返回 null；
+- 模型归因取任务结果中的 `profile_id/profile_name/model_name`，缺失显示“未记录”，不猜模型；
+- `series` 每个自然日一行（含零值），长度与 `days` 一致；
+- `modules` 按当前时间窗内用例集的 `case_items.module` 聚合，最多 20 个。
+
+### 修改代码文件与作用清单
+
+- `backend/api/app/routers/metrics.py`、`app/main.py`、`app/schemas.py`：聚合接口与契约。
+- `backend/worker/app/testcase.py`：任务结果补充模型归因字段。
+- `backend/api/tests/test_casegen_metrics.py`：聚合、单日窗口与参数边界回归。
+- `frontend/src/views/CasegenQuality.vue`：质量看板页面。
+- `frontend/src/router/index.ts`、`layouts/MainLayout.vue`：`/case-quality` 路由与入口。
+- `frontend/src/api/types.ts`、`http.ts`：指标类型与客户端。
