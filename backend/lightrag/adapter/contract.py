@@ -37,7 +37,7 @@ _UNSAFE_NAME = re.compile(r"[/\\\x00-\x1f]")
 # 这里重复声明而不 import lightrag，保证契约层可脱离引擎依赖做单测。
 GRAPH_FIELD_SEP = "<SEP>"
 # 单次图谱返回的节点上限（与 API 契约一致）。
-MAX_GRAPH_NODES = 500
+MAX_GRAPH_NODES = 2000
 # 节点/关系描述来自多个切块摘要拼接，回传前截断，避免单次响应过大。
 GRAPH_DESCRIPTION_LIMIT = 400
 

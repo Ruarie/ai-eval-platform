@@ -482,7 +482,8 @@ class LightRAGEngine:
         """
         rag = self._require_rag()
         limit = max(1, min(int(limit or 1), MAX_GRAPH_NODES))
-        fetch_nodes = min(max(limit * 5, 200), 1000)
+        # 候选窗口随返回上限放大：窗口太小会漏掉目标库里度数较低的实体。
+        fetch_nodes = min(max(limit * 3, 500), 3000)
         try:
             kg = await rag.get_knowledge_graph("*", max_depth=1, max_nodes=fetch_nodes)
         except Exception as exc:  # noqa: BLE001 - 统一转引擎不可用
