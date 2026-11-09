@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.59 |
-| 本轮审查日期 | 2026-11-03（知识库只读知识图谱视图，F-RAG-07 交付） |
+| 文档版本 | V1.62 |
+| 本轮审查日期 | 2026-11-09（需求覆盖、全局搜索、用例评审工作流与版本历史 MVP 交付） |
 | 文档状态 | V1.31 已实现三类准备专家与受控草稿；V1.30 的完整计划/报告连接仍待实现，后台恢复与专家通讯仍待 P2/P3 |
 | 撰写日期 | 2026-08-17 |
 | 本轮修订 | 2026-09-26：V1.47 新增“我的记忆”，支持个人／个人工作区范围的主动保存、更正、撤回及私有主会话按预算召回；语义向量检索和自动抽取仍未交付。 |
@@ -43,6 +43,9 @@
 | V1.21 | 2026-09-12 | 协议档 → MCP 与工具新增受控媒体 MCP 配置；Qwen 生图和 HappyHorse 首帧图生视频接入 AgentLoop，视频仅异步提交与查询，不新增媒体任务表或结果归档 |
 | V1.22 | 2026-09-15 | 新模型用供应商与协议的受控思考模板逐档真实验证后才登记；验证结果限制 AgentLoop 可选思考强度，旧协议档保持 legacy 解析 |
 | V1.25 | 2026-09-15 | 补齐 Kimi K3、智谱 GLM 与火山方舟豆包的 Anthropic Messages 思考模板；Kimi 使用 output_config 强度，GLM/豆包使用标准 thinking 开关，均以真实探测为准 |
+| V1.60 | 2026-11-09 | 需求基线与用例覆盖 MVP：从需求原文抽取编号条目、人工确认基线、用例集绑定与覆盖率、自动关联候选与人工确认；不新增评测/压测入口 |
+| V1.61 | 2026-11-09 | 全局搜索 MVP：Cmd/Ctrl+K 命令面板，跨用例集、任务、会话、报告、知识库、数据集、工作区、记忆只读检索；私有资产按属主过滤 |
+| V1.62 | 2026-11-09 | 用例评审工作流与版本历史 MVP：人工评审请求/结论/评论、AI 评审历史、版本快照/字段级 diff/回滚为新草稿；不改变确认与任务联动 |
 
 ---
 
@@ -1301,3 +1304,128 @@ Excel 同一批次内的重复用例编号按最后一条更新，不重复创�
 - `backend/api/app/remote_workspace.py`：`temporary_workspace`（未落库的临时连接对象，根目录固定 `/`）与 `browse_dirs`（只列目录 + 父路径）。
 - `backend/api/app/routers/user_workspaces.py`：新增 `POST /api/workspaces/ssh/browse`，校验认证方式与凭证后代理到 SSH 层。
 - `frontend/src/api/http.ts`、`views/UserWorkspaces.vue`：`browseSshDirs` 与创建弹窗的「浏览」入口、目录选择弹窗与回填。
+
+## V1.60 需求基线与用例覆盖（N-01 MVP，2026-11-09）
+
+### 范围
+
+用例工作台新增「需求覆盖」入口，把需求原文中的编号条目保存为可校对基线，并回答三个问题：这份需求有哪些编号条目、当前用例集覆盖了哪些/漏了哪些、哪些用例可能对应哪条需求（仅候选，需人工确认）。
+
+本期只做追溯与统计：不自动修改用例内容，不生成可执行脚本，不接 TMS，不新增 Benchmark / RAG / 压测入口。
+
+### 功能需求
+
+| 编号 | 功能 | 优先级 | 说明 |
+| --- | --- | --- | --- |
+| F-CASE-01 | 需求基线解析 | P0 | 从粘贴文本抽取 `FR-/NFR-/BR-/SR-` 编号条目，保存编号、标题、优先级、模块、原文行号；解析不出编号时拒绝创建空基线 |
+| F-CASE-02 | 人工校对与确认 | P0 | 草稿状态可逐条修改标题/描述/优先级/模块；确认后只读，改版需新建基线；确认前不可作为覆盖率分母 |
+| F-CASE-03 | 用例集绑定与覆盖率 | P0 | 用例集绑定已确认基线；展示整体覆盖率、P0 覆盖率、未覆盖清单、按模块覆盖率、已关联/未关联用例数 |
+| F-CASE-04 | 自动关联候选 | P1 | 按“编号命中 > 标题完整命中 > 文本相似度 + 模块加成”生成候选；只返回候选，人工确认后才落库 |
+| F-CASE-05 | 人工关联 | P0 | 按用例替换关联；空数组表示解除；单条用例最多 20 条需求，单次最多 5000 条用例 |
+
+### 业务规则
+
+- 需求条目必须来自原文，平台与模型都不扩写；无编号段落不进入分母。
+- 同一基线内需求编号唯一；确认后只读；换绑基线清理旧关联。
+- 覆盖率只代表“有用例关联”，不代表功能已验证或正确。
+- 自动关联只做候选提示，不静默改写用例；关联不推进用例集 `revision`。
+- 已废弃用例集不能绑定或调整关联；已确认用例集允许补充关联元数据，但用例内容仍只读。
+- 需求或用例删除时关联级联清理；基线删除时用例集绑定置空。
+
+### 与现有流程的关系
+
+生成流程不变：PRD 推导向导、分批生成、AI 评审、确认入库、导出保持原行为。覆盖率不阻塞确认入库；P0 缺口在抽屉中明确展示，是否豁免仍由人工决定。数据与接口以 API.md V2.52 为准。
+
+### 修改代码文件与作用清单
+
+- `backend/shared/requirements.py`：编号抽取、中英文相似度、自动关联候选、覆盖率纯函数。
+- `backend/shared/models.py`、`backend/api/app/models.py`：三张新表与 `case_sets.requirement_baseline_id`。
+- `backend/api/app/schemas.py`、`routers/requirements.py`、`main.py`：需求域契约与路由注册。
+- `backend/api/migrations/versions/a9d4e6f2b8c1_需求基线与用例覆盖.py`：三张新表与绑定列。
+- `backend/api/tests/test_requirements.py`、`test_requirements_route.py`：抽取、去重、相似度、自动关联与覆盖率回归。
+- `frontend/src/api/types.ts`、`api/http.ts`、`components/drawers/RequirementCoverageDrawer.vue`、`views/Cases.vue`：需求覆盖抽屉与客户端。
+- `docs/AI测试与评估平台-API.md`：V2.52 契约登记。
+
+## V1.61 全局搜索（N-07 MVP，2026-11-09）
+
+### 范围
+
+侧栏顶栏新增搜索入口，支持 `Ctrl/Cmd + K` 打开命令面板，跨八类资产只读检索：用例集、任务、会话、历史报告、知识库、数据集、工作区、个人记忆。本期不包含自然语言问答式搜索、语义检索、搜索历史云端同步。
+
+### 功能需求
+
+| 编号 | 功能 | 优先级 | 说明 |
+| --- | --- | --- | --- |
+| F-SRCH-01 | 命令面板 | P0 | `Ctrl/Cmd+K` 打开；Esc 关闭；点击遮罩关闭；顶部搜索框自动聚焦 |
+| F-SRCH-02 | 跨实体检索 | P0 | 每类最多 5 条；用例集支持名称与用例正文命中；任务支持 ID/类型/状态；会话支持标题/ID；报告支持 ID/类型；知识库/数据集/工作区/记忆按名称或标题 |
+| F-SRCH-03 | 权限过滤 | P0 | 私有会话仅属主可见，团队会话全员可见；工作区与个人记忆只搜当前成员自己的数据 |
+| F-SRCH-04 | 键盘操作 | P0 | ↑↓ 在结果间移动，Enter 打开，Esc 关闭；高亮命中词 |
+| F-SRCH-05 | 直达 | P1 | 会话打开 `/agent?session_id=`；任务 `/tasks?id=`；报告 `/reports/{id}`；用例集 `/cases?set_id=`；知识库 `/kb?kb_id=` |
+| F-SRCH-06 | 最近搜索 | P2 | 本地保存最近 5 个关键词，可点击重搜；不跨设备同步 |
+
+### 业务规则
+
+- 搜索只读，不写审计、不改任何实体状态。
+- 不返回任务 `config/result` 大 JSON、报告 metrics/raw、会话消息正文、记忆正文。
+- 空搜索词返回空分组，不以 422 冒充“无结果”。
+- 结果数量不代表总数；本期不做“查看全部”分页。
+- 私有会话、他人工作区、他人记忆不得出现在结果中；权限以服务端为准，前端不自行过滤。
+- 命令面板不替代页面内筛选；它是跨页面发现入口。
+
+### 修改代码文件与作用清单
+
+- `backend/api/app/routers/search.py`、`app/main.py`：`GET /api/search` 与路由注册。
+- `backend/api/app/schemas.py`：`SearchItemOut/SearchGroupOut/SearchResultOut`。
+- `backend/api/tests/test_search.py`：八类实体、权限、类型筛选、空查询与 URL 回归。
+- `frontend/src/components/search/GlobalSearch.vue`：命令面板、键盘操作、最近搜索与高亮。
+- `frontend/src/layouts/MainLayout.vue`：顶栏搜索入口与 `Ctrl/Cmd+K` 注册。
+- `frontend/src/views/Agent.vue`、`views/Kb.vue`：`?session_id=` 与 `?kb_id=` 直达支持。
+- `frontend/src/api/types.ts`、`api/http.ts`：搜索类型与客户端。
+
+## V1.62 用例评审工作流与版本历史（N-02 MVP，2026-11-09）
+
+### 范围
+
+用例集从「AI 打一次分」升级为可留痕的人工评审：发起评审、指派负责人、整体/行级评论、通过或要求修改；AI 评审每次单独保留；重要节点生成不可变版本，可查看字段级 diff 并回滚为新草稿。
+
+本期不改变 `case_sets.status` 三态、72h 确认、任务联动与确认入库流程；评审状态是独立字段，不阻塞确认。回滚只新建草稿，不修改当前集合或历史快照。
+
+### 功能需求
+
+| 编号 | 功能 | 优先级 | 说明 |
+| --- | --- | --- | --- |
+| F-REV-01 | 发起评审 | P0 | 草稿用例集可发起；指定负责人与截止时间；同时只允许一个 pending 请求 |
+| F-REV-02 | 评审结论 | P0 | 通过 / 要求修改；要求修改必须填原因；结论写入评审请求与审计 |
+| F-REV-03 | 评论 | P0 | 整体评论或关联单条用例；按时间倒序展示；已废弃用例集不可新增 |
+| F-REV-04 | AI 评审历史 | P0 | 每次 `/ai-review` 追加一行，保留分数、结论、四维、问题清单、模型与时间；`checks` 仍保留最新一份兼容旧页面 |
+| F-REV-05 | 版本快照 | P0 | 确认入库、评审通过、手动存版均生成不可变版本；版本号在用例集内递增 |
+| F-REV-06 | 版本 diff | P1 | 以用例 ID 匹配，输出新增/删除/字段变更；默认对比上一版，第一版对比空快照；单次明细上限 500 |
+| F-REV-07 | 回滚 | P1 | 以历史版本创建新草稿（新用例集 ID），复制用例与扩展字段；不覆盖当前集合 |
+| F-REV-08 | 评审工作台 | P0 | 抽屉聚合状态、请求、评论、AI 历史与版本；支持发起/决策/评论/存版/对比/回滚 |
+| F-REV-09 | 审计 | P0 | 发起、决策、评论、存版、回滚写 AuditLog；只记录 ID、数量与结论，不记录评论正文 |
+
+### 业务规则
+
+- 评审状态仅 `draft/reviewing/approved/changes_requested`，与 `status` 独立；确认后 `review_state=approved`。
+- 已确认用例集只读：不再接受新的评审请求或手动存版；评论仍可作为审计备注追加，历史可查看。
+- 评审请求同一时间只允许一个 `pending`；重复发起返回 `CONCURRENCY`。
+- 评审结论不要求必须与 AI 评分一致；AI 评分是证据之一，不是门禁。
+- 版本快照不可变；确认/评审通过自动生成，手动存版也生成新版本。
+- 回滚生成的新草稿保留需求基线绑定、扩展列定义与自检结果；用例 ID 重新生成。
+- 字段 diff 忽略排序变化；空字符串与 `null` 视为等价；扩展字段按 JSON 比较。
+- 评论不修改用例内容，也不推进 `revision`；评论正文只存库，不进入模型上下文。
+
+### 数据与接口
+
+新增表：`case_review_requests`、`case_review_comments`、`case_review_runs`、`case_set_versions`；`case_sets` 增量 `review_state` 与 `review_assignee_id`。接口见 API.md V2.53。
+
+### 修改代码文件与作用清单
+
+- `backend/shared/models.py`、`backend/api/app/models.py`：评审请求/评论/AI 历史/版本表与用例集评审字段。
+- `backend/api/migrations/versions/c1e7f3a9d2b4_用例评审与版本历史.py`：新表、索引与绑定列。
+- `backend/shared/case_review.py`：用例快照归一、字段级 diff、截断与计数。
+- `backend/api/app/case_review_service.py`：版本号、快照生成、批量用户名投影。
+- `backend/api/app/routers/case_reviews.py`：评审工作台、请求/决策/评论、版本列表/详情/diff/回滚。
+- `backend/api/app/routers/cases.py`：`/ai-review` 追加历史；确认入库前生成版本。
+- `backend/api/tests/test_case_review.py`、`test_case_review_route.py`：diff 纯函数与路由回归。
+- `frontend/src/components/drawers/CaseReviewFlowDrawer.vue`、`views/Cases.vue`、`api/types.ts`、`api/http.ts`：评审工作台抽屉、评论、AI 历史、版本对比与回滚。

@@ -164,6 +164,22 @@
                   >
                     AI 评审
                   </button>
+                  <button
+                    v-if="currentSet"
+                    class="btn btn-secondary btn-md"
+                    aria-label="打开评审工作台"
+                    @click="reviewFlowOpen = true"
+                  >
+                    评审工作台
+                  </button>
+                  <button
+                    v-if="currentSet"
+                    class="btn btn-secondary btn-md"
+                    aria-label="查看需求覆盖与缺口"
+                    @click="coverageOpen = true"
+                  >
+                    需求覆盖
+                  </button>
                   <button class="btn btn-secondary btn-md" aria-label="打开 PRD 用例推导向导" @click="openAiGenDrawer">
                     PRD 推导向导
                   </button>
@@ -599,6 +615,21 @@
       :set-name="currentSet?.name"
       :case-count="cases.length"
     />
+    <CaseReviewFlowDrawer
+      v-model:show="reviewFlowOpen"
+      :set-id="currentSet?.id || ''"
+      :set-name="currentSet?.name"
+      :case-set-status="currentSet?.status"
+      :cases="cases"
+      @restored="onReviewRestored"
+    />
+    <RequirementCoverageDrawer
+      v-model:show="coverageOpen"
+      :set-id="currentSet?.id || ''"
+      :set-name="currentSet?.name"
+      :baseline-id="currentSet?.requirement_baseline_id"
+      @linked="onRequirementLinked"
+    />
 
     <!-- ─── 右侧滑出抽屉：PRD 用例推导向导 ─── -->
     <n-drawer v-model:show="aiGen.show" :width="drawerWidth" placement="right" :mask-closable="!aiGen.applying">
@@ -885,6 +916,8 @@ import { api } from '../api/http'
 import type { CaseSet, TestCase, TestCaseInput, TestCaseCheck, CaseCompareResult, CaseCoverageResult, ColumnSchemaItem, Profile, TaskStatus } from '../api/types'
 import { escapeHtml, escapeRegex, renderIcon } from '../utils/render'
 import CaseReviewDrawer from '../components/drawers/CaseReviewDrawer.vue'
+import CaseReviewFlowDrawer from '../components/drawers/CaseReviewFlowDrawer.vue'
+import RequirementCoverageDrawer from '../components/drawers/RequirementCoverageDrawer.vue'
 import ImportCasesExcelModal from '../components/modals/ImportCasesExcelModal.vue'
 
 type CaseStrategy = '正向' | '反向' | '边界' | '状态迁移' | '场景' | '等价类'
@@ -948,6 +981,8 @@ const showImportExcel = ref(false)
 const confirmingSet = ref(false)
 const filterStrategy = ref('')
 const reviewOpen = ref(false)
+const reviewFlowOpen = ref(false)
+const coverageOpen = ref(false)
 const selectedCaseIds = ref<string[]>([])
 const editingCell = ref<{ row: ExtendedTestCase; field: string; original: string } | null>(null)
 const focusedCell = ref<{ rowIdx: number; field: string } | null>(null)
@@ -2392,6 +2427,17 @@ function toggleAllCandidates() {
   if (aiGen.value.appliedToSetId || aiGen.value.applying || aiGen.value.generating) return
   const target = aiSelectedCount.value < aiGen.value.candidates.length
   aiGen.value.candidates.forEach(c => { c.selected = target })
+}
+
+/** 基线绑定/关联后同步本地用例集字段，避免再次打开抽屉时状态滞后。 */
+function onRequirementLinked(baselineId: string): void {
+  if (currentSet.value) currentSet.value.requirement_baseline_id = baselineId
+}
+
+/** 评审工作台回滚后会新建草稿；重新拉列表并选中新集合。 */
+async function onReviewRestored(caseSetId: string): Promise<void> {
+  await loadCaseSets()
+  await selectCaseSet(caseSetId)
 }
 
 /** 需求覆盖自检：独立请求，只提示未覆盖的功能点，不修改候选内容。 */

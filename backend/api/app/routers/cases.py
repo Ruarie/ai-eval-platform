@@ -53,14 +53,21 @@ from ..case_excel import (
     parse_cases_xlsx,
     xlsx_media_type,
 )
+from ..case_review_service import create_version
 from ..db import get_db
 from ..deps import get_current_user
 from ..errors import AppError, ErrorCode
-from ..llm_client import call_agent_model, call_profile_model, extract_json_array
+from ..llm_client import (
+    call_agent_model,
+    call_profile_model,
+    extract_json_array,
+    resolve_agent_profile,
+)
 from ..models import (
     AuditLog,
     CaseFolder,
     CaseItem,
+    CaseReviewRun,
     CaseSet,
     ProtocolProfile,
     Task,
@@ -969,6 +976,7 @@ def ai_review_case_set(
         for item in items[:MAX_COUNT]
     ]
     system, user_prompt = build_review_prompt(source_text, cases)
+    profile = resolve_agent_profile(db)
     result = call_agent_model(
         db, system, user_prompt, temperature=0.1,
         max_tokens=REVIEW_MAX_TOKENS, timeout_s=REVIEW_TIMEOUT_S,
@@ -991,6 +999,21 @@ def ai_review_case_set(
     ]
     checks.append({"kind": "ai_review", **review})
     case_set.checks = checks
+    # N-02：AI 评审改为追加历史；checks 保留最新一份供旧页面兼容。
+    db.add(
+        CaseReviewRun(
+            case_set_id=case_set.id,
+            score=int(review.get("score") or 0),
+            verdict=str(review.get("verdict") or ""),
+            summary=str(review.get("summary") or ""),
+            dimensions=review.get("dimensions") or {},
+            issues=review.get("issues") or [],
+            case_count=len(cases),
+            source_truncated=bool(source_truncated),
+            profile_id=profile.id,
+            created_by=user.id,
+        )
+    )
     db.commit()
     return review
 
@@ -1014,11 +1037,15 @@ def confirm_case_set(
     if body.ok:
         if case_set.generated_count < 1:
             raise AppError(ErrorCode.VALIDATION, "用例集至少需要一条用例才能确认入库")
+        # 入库即形成不可变版本；后续回滚只新建草稿，不改写该快照。
+        create_version(db, case_set, user_id=user.id, reason="confirm")
         case_set.status = "confirmed"
         case_set.confirmed_count = case_set.generated_count
+        case_set.review_state = "approved"
         task_status = "succeeded"
     else:
         case_set.status = "cancelled"
+        case_set.review_state = "draft"
         task_status = "cancelled"
     # 仅当关联任务仍在等待用例确认时联动流转，其余状态由任务域自行负责
     if task:

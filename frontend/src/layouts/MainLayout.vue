@@ -12,39 +12,24 @@
       </div>
 
       <nav class="nav">
-        <!-- 评测组 -->
-        <div class="nav-group">评测</div>
-        <router-link
-          v-for="item in evalRoutes"
-          :key="item.path"
-          :to="item.path"
-          class="nav-item"
-          :class="{ active: isRouteActive(item.path) }"
-          :style="isRouteActive(item.path) ? { '--t': item.t, '--c': item.c } : {}"
-          @click="closeMobileNavigation"
-        >
-          <span class="nav-ico">
-            <component :is="item.icon" />
-          </span>
-          <span class="nav-label">{{ item.label }}</span>
-        </router-link>
-
-        <!-- 管理组 -->
-        <div class="nav-group">管理</div>
-        <router-link
-          v-for="item in adminRoutes"
-          :key="item.path"
-          :to="item.path"
-          class="nav-item"
-          :class="{ active: isRouteActive(item.path) }"
-          :style="isRouteActive(item.path) ? { '--t': item.t, '--c': item.c } : {}"
-          @click="closeMobileNavigation"
-        >
-          <span class="nav-ico">
-            <component :is="item.icon" />
-          </span>
-          <span class="nav-label">{{ item.label }}</span>
-        </router-link>
+        <!-- 分组导航：所有业务路由必须有入口，历史页面显式标注，避免出现只能手输 URL 的孤立页。 -->
+        <template v-for="group in navGroups" :key="group.title">
+          <div class="nav-group">{{ group.title }}</div>
+          <router-link
+            v-for="item in group.items"
+            :key="item.path"
+            :to="item.path"
+            class="nav-item"
+            :class="{ active: isRouteActive(item.path) }"
+            :style="isRouteActive(item.path) ? { '--t': item.t, '--c': item.c } : {}"
+            @click="closeMobileNavigation"
+          >
+            <span class="nav-ico">
+              <component :is="item.icon" />
+            </span>
+            <span class="nav-label">{{ item.label }}</span>
+          </router-link>
+        </template>
       </nav>
 
       <!-- 侧边栏底部：折叠按钮（对齐原型 sidebar-fold）+ 用户信息 -->
@@ -89,6 +74,16 @@
 
         <!-- 右侧操作栏 -->
         <div class="topbar-actions">
+          <!-- 全局搜索：Cmd/Ctrl+K 命令面板 -->
+          <button class="topbar-search-btn" title="全局搜索 (Ctrl/Cmd+K)" aria-label="全局搜索" @click="searchRef?.open()">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="11" cy="11" r="7"></circle>
+              <path d="m20 20-3.5-3.5"></path>
+            </svg>
+            <span class="topbar-search-text">搜索</span>
+            <kbd class="topbar-search-kbd">⌘K</kbd>
+          </button>
+
           <!-- 数据源标记 -->
           <span
             class="data-source-badge"
@@ -152,6 +147,9 @@
         </div>
       </template>
     </n-modal>
+
+    <!-- 全局搜索命令面板：Ctrl/Cmd+K 打开，八类资产按权限检索。 -->
+    <GlobalSearch ref="searchRef" />
   </div>
 </template>
 
@@ -162,6 +160,7 @@ import { useMessage, useDialog } from 'naive-ui'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import { api } from '../api/http'
+import GlobalSearch from '../components/search/GlobalSearch.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -169,6 +168,7 @@ const message = useMessage()
 const dialog = useDialog()
 const auth = useAuthStore()
 const theme = useThemeStore()
+const searchRef = ref<InstanceType<typeof GlobalSearch> | null>(null)
 
 const showChangePwd = ref(false)
 const pwdLoading = ref(false)
@@ -247,22 +247,65 @@ const IconKnowledge = () =>
     h('path', { d: 'M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6' }),
   ])
 
-const evalRoutes = [
-  { path: '/agent', label: '智能体', icon: IconAgent, t: 'var(--t-agent)', c: 'var(--c-agent)' },
-  { path: '/dispatch', label: '调度中心', icon: IconDispatch, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)' },
-  { path: '/tasks', label: '任务中心', icon: IconTasks, t: 'var(--t-tasks)', c: 'var(--c-tasks)' },
-  { path: '/reports', label: '历史报告', icon: IconReports, t: 'var(--t-reports)', c: 'var(--c-reports)' },
-  { path: '/cases', label: '用例', icon: IconCases, t: 'var(--t-cases)', c: 'var(--c-cases)' },
-  // PRD 5.8 路由表包含 /kb；RAG 评测停用后移出菜单，知识库的检索与图谱仍需可进入。
-  { path: '/kb', label: '知识库', icon: IconKnowledge, t: 'var(--t-kb)', c: 'var(--c-kb)' },
-  // F1（G1）：我的工作区（用户自管数据域；管理端清理视图已于 V1.79 下线）
-  { path: '/workspaces', label: '我的工作区', icon: IconWorkspaces, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
-  { path: '/memories', label: '我的记忆', icon: IconMemories, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
-]
+// 数据集：历史评测遗留资产，当前只读维护。
+const IconDatasets = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('rect', { x: '3', y: '4', width: '18', height: '16', rx: '2.5' }),
+    h('path', { d: 'M3 9h18M9 9v11M15 9v11' }),
+  ])
 
-const adminRoutes = [
-  { path: '/admin/profiles', label: '协议档', icon: IconProfiles, t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
-  { path: '/admin/users', label: '账号', icon: IconUsers, t: 'var(--t-users)', c: 'var(--c-users)' },
+// 模型对比：历史 benchmark 只读对比页。
+const IconCompare = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { d: 'M4 7h11M4 7l3-3M4 7l3 3' }),
+    h('path', { d: 'M20 17H9M20 17l-3-3M20 17l-3 3' }),
+  ])
+
+// 压测治理：历史压测配置与白名单，页面明确标注已停用。
+const IconStress = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { d: 'M4 18a8 8 0 1 1 16 0' }),
+    h('path', { d: 'm12 14 4-4' }),
+    h('circle', { cx: '12', cy: '14', r: '1.4' }),
+  ])
+
+const navGroups = [
+  {
+    title: '工作台',
+    items: [
+      { path: '/agent', label: '智能体', icon: IconAgent, t: 'var(--t-agent)', c: 'var(--c-agent)' },
+      { path: '/cases', label: '用例', icon: IconCases, t: 'var(--t-cases)', c: 'var(--c-cases)' },
+      { path: '/tasks', label: '任务中心', icon: IconTasks, t: 'var(--t-tasks)', c: 'var(--c-tasks)' },
+      { path: '/dispatch', label: '调度中心', icon: IconDispatch, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)' },
+    ],
+  },
+  {
+    title: '资产与历史',
+    items: [
+      // 历史数据集与模型对比仍可进入，但只做只读查询/维护，不再作为新建评测入口。
+      { path: '/datasets', label: '历史数据集', icon: IconDatasets, t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
+      // PRD 5.8 路由表包含 /kb；RAG 评测停用后仍保留检索与图谱能力。
+      { path: '/kb', label: '知识库', icon: IconKnowledge, t: 'var(--t-kb)', c: 'var(--c-kb)' },
+      { path: '/reports', label: '历史报告', icon: IconReports, t: 'var(--t-reports)', c: 'var(--c-reports)' },
+      { path: '/model-compare', label: '模型对比', icon: IconCompare, t: 'var(--t-reports)', c: 'var(--c-reports)' },
+    ],
+  },
+  {
+    title: '协作',
+    items: [
+      // F1（G1）：我的工作区（用户自管数据域；管理端清理视图已于 V1.79 下线）
+      { path: '/workspaces', label: '我的工作区', icon: IconWorkspaces, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
+      { path: '/memories', label: '我的记忆', icon: IconMemories, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
+    ],
+  },
+  {
+    title: '管理',
+    items: [
+      { path: '/admin/profiles', label: '协议档', icon: IconProfiles, t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
+      { path: '/admin/users', label: '账号', icon: IconUsers, t: 'var(--t-users)', c: 'var(--c-users)' },
+      { path: '/admin/stress', label: '压测治理', icon: IconStress, t: 'var(--t-stress)', c: 'var(--c-stress)' },
+    ],
+  },
 ]
 
 /** 当前路由激活状态匹配判定 */
@@ -632,6 +675,35 @@ async function submitChangePassword() {
   gap: 12px;
 }
 
+.topbar-search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.topbar-search-btn:hover {
+  border-color: var(--accent-ai);
+  color: var(--accent-ai);
+}
+
+.topbar-search-kbd {
+  padding: 1px 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-main);
+  color: var(--text-tertiary, var(--text-secondary));
+  font: 600 9px/1.5 var(--font-mono);
+}
+
 .data-source-badge {
   display: inline-flex;
   align-items: center;
@@ -726,6 +798,15 @@ async function submitChangePassword() {
   .app.folded {
     display: block;
     height: 100dvh;
+  }
+  .topbar-search-btn {
+    width: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+  .topbar-search-text,
+  .topbar-search-kbd {
+    display: none;
   }
   .mobile-nav-backdrop {
     display: block;

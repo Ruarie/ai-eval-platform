@@ -6,10 +6,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.51 |
-| 本轮审查日期 | 2026-11-02（知识库接入真实 LightRAG：异步建索引状态收敛、删除顺序与降级口径；不新增路径与字段） |
+| 文档版本 | V2.53 |
+| 本轮审查日期 | 2026-11-09（用例评审工作流与版本历史 MVP：评审请求/结论/评论、AI 历史、版本快照/diff/回滚） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
-| 对应 PRD | V1.55（功能唯一权威） |
+| 对应 PRD | V1.62（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
 | 对应 Agent 说明书 | `AI测试与评估平台-Agent开发文档.md` V1.7.15（AgentLoop 单入口；JSON 仍以本文为准） |
 | 对应前端计划 | AgentLoop 前端计划 V0.5 |
@@ -4267,3 +4267,332 @@ Excel 导入在本批缓存已写入但尚未 flush 的用例，重复编号按�
 - `backend/api/tests/test_case_compare.py`、`test_cases_audit.py`：分数口径，以及单侧失败仍返回另一侧。
 - `frontend/src/api/types.ts`、`http.ts`、`views/Cases.vue`：对比入口、结果和采用某一侧候选。
 - `docs/AI测试与评估平台-API.md`：登记 `ai-compare`。
+
+## V2.52 需求基线、用例覆盖与全局搜索（2026-11-09）
+
+新增需求域与搜索域接口。所有接口需登录 Cookie；沿用十类统一错误码。
+
+### V2.52.1 需求基线
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/requirement-baselines` | 从原文解析 FR-/NFR-/BR-/SR- 条目并保存草稿 |
+| GET | `/api/requirement-baselines` | 最近 100 份基线（创建时间倒序） |
+| GET | `/api/requirement-baselines/{baseline_id}` | 基线详情与全部条目 |
+| PUT | `/api/requirement-baselines/{baseline_id}/requirements/{requirement_id}` | 草稿基线人工校对单条需求 |
+| POST | `/api/requirement-baselines/{baseline_id}/confirm` | 确认基线；确认后只读，重复确认幂等 |
+
+请求：
+
+```json
+{
+  "name": "支付模块 PRD V2",
+  "source_text": "| FR-101 | 支持手机号登录 | P0 | 登录 |",
+  "source_kind": "text",
+  "source_name": "payment-prd.md"
+}
+```
+
+响应 `RequirementBaselineDetail` 含 `id/name/status/revision/requirement_count/requirements[]`；条目字段为 `req_no/title/description/priority/module/source_ref/sort_order`。
+
+边界：
+
+- 未识别到编号条目返回 `VALIDATION`，不创建空基线；
+- 同一基线内 `req_no` 唯一，重复编号只保留首次出现；
+- `status` 仅 `draft` / `confirmed`；确认后条目不可修改；
+- 单次最多解析 300 条；标题截断 160 字。
+
+### V2.52.2 用例集绑定与覆盖率
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/case-sets/{set_id}/requirement-baseline` | 绑定已确认基线，并返回覆盖率快照 |
+| GET | `/api/case-sets/{set_id}/coverage` | 读取当前绑定基线的覆盖率 |
+
+`CaseCoverage` 返回：
+
+```json
+{
+  "baseline_id": "baseline-uuid",
+  "baseline_name": "支付模块 PRD V2",
+  "baseline_version": 2,
+  "total": 10,
+  "covered": 8,
+  "coverage_percent": 80.0,
+  "p0_total": 3,
+  "p0_covered": 3,
+  "p0_percent": 100.0,
+  "requirements": [],
+  "uncovered": [],
+  "modules": [],
+  "linked_case_count": 8,
+  "unlinked_case_count": 2
+}
+```
+
+边界：
+
+- 未绑定基线读取覆盖率返回 `VALIDATION`，不用 0% 冒充“无缺口”；
+- 只有 `confirmed` 基线可绑定；`cancelled` 用例集不可绑定；
+- 换绑基线会清理该用例集旧关联，避免换回时旧链接复活；
+- 覆盖率只代表“有用例关联”，不代表功能已验证；
+- 分母只含基线内需求条目；未关联用例计入 `unlinked_case_count`。
+
+### V2.52.3 自动关联候选与人工确认
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/case-sets/{set_id}/requirements/auto-link` | 生成候选，不落库 |
+| POST | `/api/case-sets/{set_id}/requirements/link` | 人工确认关联；按用例替换 |
+
+自动关联请求 `{ "baseline_id": "...", "threshold": 0.34 }`，返回 `{ links: [{case_item_id, requirement_id, confidence, reason, req_no, req_title, case_name}], matched_case_count }`。
+
+人工确认请求：
+
+```json
+{
+  "baseline_id": "baseline-uuid",
+  "links": [
+    { "case_item_id": "case-1", "requirement_ids": ["req-uuid"] }
+  ]
+}
+```
+
+边界：
+
+- 自动关联只返回候选，绝不直接写库；
+- 匹配优先“用例文本出现需求编号”（1.0），其次标题完整命中（0.8），最后文本相似度 + 模块加成；
+- 单次最多返回 500 条候选；单次人工关联最多 5000 条用例，每条用例最多 20 条需求；
+- 人工确认按用例替换关联；空数组表示解除；
+- 关联元数据不修改用例内容，也不推进 `case_sets.revision`。
+
+### V2.52.4 全局搜索
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/search?q=&limit=5&types=case,task,...` | 跨实体只读搜索 |
+
+支持类型：`case`（用例集，含用例正文命中）、`task`、`session`、`report`、`kb`、`dataset`、`workspace`、`memory`。响应：
+
+```json
+{
+  "query": "支付",
+  "groups": [
+    {
+      "type": "case",
+      "label": "用例集",
+      "items": [
+        {
+          "id": "set-id",
+          "type": "case",
+          "title": "支付回归",
+          "subtitle": "用例集 · 12 条用例",
+          "status": "待确认",
+          "url": "/cases?set_id=set-id",
+          "updated_at": "2026-11-09T08:00:00Z"
+        }
+      ]
+    }
+  ]
+}
+```
+
+边界：
+
+- 每类最多 `limit` 条（默认 5、上限 10），不返回全量计数；
+- 会话只搜标题与 ID；私有会话仅属主可见，团队会话全员可见；
+- 工作区与个人记忆只搜当前成员自己的数据；
+- 任务不扫描 `config/result` 大 JSON；报告不返回 metrics/raw；
+- 空搜索词返回空分组，不返回 422；
+- 只读接口，不写审计、不改任何实体状态。
+
+### V2.52.5 数据与审计
+
+新增表：`requirement_baselines`、`requirement_items`、`case_requirement_links`；`case_sets` 增量 `requirement_baseline_id`（`ON DELETE SET NULL`）。
+
+审计动作：`requirement_baseline_create`、`requirement_item_update`、`requirement_baseline_confirm`、`case_set_requirement_bind`、`case_requirement_link`。审计详情只记录 ID、数量、字段名与版本，不记录需求正文。
+
+### V2.52.6 修改代码文件与作用清单
+
+- `backend/shared/requirements.py`：需求抽取、相似度、自动关联与覆盖率纯函数。
+- `backend/shared/models.py`、`backend/api/app/models.py`：基线/条目/关联模型与用例集绑定列。
+- `backend/api/app/schemas.py`：需求、覆盖率、自动关联与搜索契约。
+- `backend/api/app/routers/requirements.py`、`routers/search.py`、`app/main.py`：需求域/搜索域路由注册。
+- `backend/api/migrations/versions/a9d4e6f2b8c1_需求基线与用例覆盖.py`：三张新表与绑定列。
+- `backend/api/tests/test_requirements.py`、`test_requirements_route.py`、`test_search.py`：纯函数、路由、权限与空查询回归。
+- `frontend/src/api/types.ts`、`http.ts`：需求、覆盖率、自动关联与搜索结果类型/客户端。
+- `frontend/src/components/drawers/RequirementCoverageDrawer.vue`、`views/Cases.vue`：需求覆盖抽屉与入口。
+- `frontend/src/layouts/MainLayout.vue`：四组导航与历史页面入口（同批 P0 治理）。
+
+## V2.53 用例评审工作流与版本历史（N-02 MVP，2026-11-09）
+
+所有接口需登录 Cookie；沿用十类统一错误码。
+
+### V2.53.1 评审工作台
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/case-sets/{set_id}/review` | 聚合返回评审状态、当前请求、评论、AI 历史与版本列表 |
+| POST | `/api/case-sets/{set_id}/review-requests` | 发起评审；同一集合只允许一个 pending |
+| POST | `/api/case-sets/{set_id}/review-requests/{request_id}/decision` | 通过或要求修改 |
+| POST | `/api/case-sets/{set_id}/comments` | 新增整体或行级评论 |
+| GET | `/api/case-sets/{set_id}/ai-reviews` | AI 评审历史（最新在前，默认 20 条） |
+
+`CaseReviewWorkspace`：
+
+```json
+{
+  "case_set_id": "set-1",
+  "review_state": "reviewing",
+  "review_assignee_id": "member",
+  "review_assignee_name": "member",
+  "active_request": {
+    "id": "req-1",
+    "status": "pending",
+    "note": "请检查边界",
+    "decision_note": "",
+    "assignee_id": "member",
+    "assignee_name": "member",
+    "due_at": "2026-11-12T10:00:00Z",
+    "created_by": "member",
+    "created_by_name": "member",
+    "created_at": "2026-11-09T06:00:00Z",
+    "decided_at": null
+  },
+  "latest_request": {
+    "id": "req-0",
+    "status": "changes_requested",
+    "note": "第一轮",
+    "decision_note": "补充异常路径",
+    "assignee_id": "member",
+    "assignee_name": "member",
+    "due_at": null,
+    "created_by": "member",
+    "created_by_name": "member",
+    "created_at": "2026-11-08T06:00:00Z",
+    "decided_at": "2026-11-08T08:00:00Z"
+  },
+  "comments": [],
+  "ai_runs": [],
+  "versions": []
+}
+```
+
+发起请求：
+
+```json
+{ "assignee_id": "member", "due_at": "2026-11-12T10:00:00Z", "note": "请检查边界" }
+```
+
+决策请求：
+
+```json
+{ "decision": "approved", "note": "可以入库" }
+```
+
+评论请求：
+
+```json
+{ "body": "第二条用例预期不明确", "case_item_id": "case-2" }
+```
+
+边界：
+
+- `active_request` 只含 pending；`latest_request` 含最近一次任意状态的请求，供页面展示上次结论；
+- 只有 `status=generated` 的草稿可发起评审；已确认/已废弃返回 `VALIDATION`；
+- 已确认用例集仍可追加评论作为审计备注，但不能发起评审或手动存版；
+- 同一集合已有 pending 时返回 `CONCURRENCY`；
+- `changes_requested` 必须填写 `note`，否则 `VALIDATION`；
+- 决策通过且集合仍是草稿时，自动生成 `reason=review_approved` 的版本；
+- 评论关联的 `case_item_id` 必须属于当前集合；已废弃集合不能新增评论；
+- 评论与决策都不修改用例正文，也不推进 `case_sets.revision`。
+
+### V2.53.2 版本历史
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/case-sets/{set_id}/versions` | 手动创建版本快照 |
+| GET | `/api/case-sets/{set_id}/versions` | 版本列表（最多 100 条，只含元信息） |
+| GET | `/api/case-sets/{set_id}/versions/{version}` | 版本详情与完整快照 |
+| GET | `/api/case-sets/{set_id}/versions/{version}/diff?base_version=` | 字段级 diff；默认对比上一版 |
+| POST | `/api/case-sets/{set_id}/versions/{version}/restore` | 以历史版本创建新草稿 |
+
+版本快照结构：
+
+```json
+{
+  "cases": [
+    {
+      "id": "case-1",
+      "strategy": "正向",
+      "priority": "HX",
+      "module": "登录",
+      "name": "手机号登录成功",
+      "steps": "1. 打开页面",
+      "expected": "进入首页",
+      "extras": {},
+      "sort_order": 0
+    }
+  ],
+  "checks": [],
+  "column_schema": []
+}
+```
+
+diff 响应：
+
+```json
+{
+  "base_version": 1,
+  "target_version": 2,
+  "base_count": 2,
+  "target_count": 2,
+  "added_count": 0,
+  "removed_count": 0,
+  "changed_count": 1,
+  "added": [],
+  "removed": [],
+  "changed": [
+    {
+      "id": "case-1",
+      "name": "手机号登录成功",
+      "fields": [
+        { "field": "priority", "label": "优先级", "before": "HX", "after": "FHX" }
+      ]
+    }
+  ],
+  "truncated": false
+}
+```
+
+回滚响应：
+
+```json
+{ "case_set_id": "new-set-id", "name": "登录用例集（回滚 v1）", "source_version": 1 }
+```
+
+边界：
+
+- 只有草稿用例集可以手动创建版本；空用例集与已确认/已废弃集合均返回 `VALIDATION`；
+- 版本号在用例集内递增；`(case_set_id, version)` 唯一；
+- diff 以用例 ID 匹配，排序变化不算修改；空值视为等价；单类明细最多 500 条并置 `truncated`；
+- 回滚创建新草稿，不修改当前集合或历史快照；新草稿保留扩展列、自检结果与需求基线绑定；
+- 确认入库时自动生成 `reason=confirm` 的版本；`/ai-review` 每次追加 `case_review_runs`，`checks` 保留最新一份兼容旧页面。
+
+### V2.53.3 数据与审计
+
+新增表：`case_review_requests`、`case_review_comments`、`case_review_runs`、`case_set_versions`；`case_sets` 增量 `review_state`（默认 `draft`）与 `review_assignee_id`。
+
+审计动作：`case_review_request`、`case_review_decision`、`case_review_comment`、`case_set_version_create`、`case_set_version_restore`。审计只记录 ID、数量、原因与结论，不记录评论正文。
+
+### V2.53.4 修改代码文件与作用清单
+
+- `backend/shared/models.py`、`backend/api/app/models.py`：四张新表与用例集评审字段。
+- `backend/api/migrations/versions/c1e7f3a9d2b4_用例评审与版本历史.py`：迁移。
+- `backend/shared/case_review.py`：快照归一与 diff 纯函数。
+- `backend/api/app/case_review_service.py`：版本号、快照与用户名投影。
+- `backend/api/app/routers/case_reviews.py`：评审工作台、评论、版本、diff、回滚。
+- `backend/api/app/routers/cases.py`：AI 评审追加历史；确认前生成版本。
+- `backend/api/tests/test_case_review.py`、`test_case_review_route.py`：纯函数与路由回归。
+- `frontend/src/api/types.ts`、`http.ts`：评审与版本类型/客户端。
+- `frontend/src/components/drawers/CaseReviewFlowDrawer.vue`、`views/Cases.vue`：评审工作台入口与交互。

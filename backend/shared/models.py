@@ -947,6 +947,27 @@ class CaseSet(Base):
     column_schema = Column(JSONB, nullable=False, default=list)
     # 确认页红字检查项数组：[{level, code, message}]，由生成/保存侧计算
     checks = Column(JSONB, nullable=False, default=list)
+    # 需求基线：用例集生成/绑定后固定，基线改版不回溯影响旧集。
+    requirement_baseline_id = Column(
+        String,
+        ForeignKey("requirement_baselines.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # 评审状态：独立于 status，避免破坏确认/取消与任务联动。
+    review_state = Column(
+        String,
+        nullable=False,
+        default="draft",
+        server_default=text("'draft'"),
+    )
+    # 当前评审负责人；只用于展示与提醒，不构成权限分级。
+    review_assignee_id = Column(
+        String,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     expires_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
@@ -980,6 +1001,193 @@ class CaseItem(Base):
     sort_order = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class RequirementBaseline(Base):
+    """需求基线：一次解析结果的可校对版本，确认后作为覆盖率分母。
+
+    基线一旦确认不可原地修改；修订必须新建版本，避免旧用例集的覆盖率
+    随需求改版漂移。
+    """
+
+    __tablename__ = "requirement_baselines"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'confirmed')", name="ck_requirement_baselines_status"
+        ),
+    )
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    name = Column(String, nullable=False, default="未命名需求基线")
+    # text=粘贴文本 / file=上传文件；当前只保存来源文件名，不复制正文。
+    source_kind = Column(String, nullable=False, default="text")
+    source_name = Column(String, nullable=False, default="")
+    status = Column(String, nullable=False, default="draft", index=True)
+    # 基线版本：人工修订后递增，用例集记录绑定时的版本。
+    revision = Column(Integer, nullable=False, default=1)
+    # 人工校对后的条目数；解析时为 0，保存条目后刷新。
+    requirement_count = Column(Integer, nullable=False, default=0)
+    created_by = Column(String, ForeignKey("users.id"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class RequirementItem(Base):
+    """需求条目：编号、标题、优先级与模块；只存原文已有信息。"""
+
+    __tablename__ = "requirement_items"
+    __table_args__ = (
+        UniqueConstraint("baseline_id", "req_no", name="uq_requirement_items_baseline_req_no"),
+    )
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    baseline_id = Column(
+        String,
+        ForeignKey("requirement_baselines.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    req_no = Column(String, nullable=False)
+    title = Column(String, nullable=False, default="")
+    description = Column(Text, nullable=False, default="")
+    priority = Column(String, nullable=False, default="")
+    module = Column(String, nullable=False, default="")
+    # 原文行号/章节，供人工回查；不保存整段需求正文。
+    source_ref = Column(String, nullable=False, default="")
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class CaseRequirementLink(Base):
+    """用例与需求条目的关联；``source`` 区分自动候选与人工确认。"""
+
+    __tablename__ = "case_requirement_links"
+    __table_args__ = (
+        UniqueConstraint("case_item_id", "requirement_id", name="uq_case_requirement_links_pair"),
+    )
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    case_set_id = Column(
+        String,
+        ForeignKey("case_sets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    case_item_id = Column(
+        String,
+        ForeignKey("case_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    requirement_id = Column(
+        String,
+        ForeignKey("requirement_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # auto=自动匹配候选 / manual=人工确认
+    source = Column(String, nullable=False, default="manual")
+    confidence = Column(Float, nullable=False, default=1.0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class CaseReviewRequest(Base):
+    """一次人工评审请求；同一用例集同时最多一个 pending。"""
+
+    __tablename__ = "case_review_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'changes_requested', 'cancelled')",
+            name="ck_case_review_requests_status",
+        ),
+    )
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    case_set_id = Column(
+        String,
+        ForeignKey("case_sets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    assignee_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    status = Column(String, nullable=False, default="pending", index=True)
+    note = Column(Text, nullable=False, default="")
+    decision_note = Column(Text, nullable=False, default="")
+    due_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decided_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class CaseReviewComment(Base):
+    """评审评论：整体评论不绑用例，行级评论绑定 case_item_id。"""
+
+    __tablename__ = "case_review_comments"
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    case_set_id = Column(
+        String,
+        ForeignKey("case_sets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    case_item_id = Column(
+        String,
+        ForeignKey("case_items.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    author_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class CaseReviewRun(Base):
+    """AI 评审历史：每次评审一行，不覆盖旧结果。"""
+
+    __tablename__ = "case_review_runs"
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    case_set_id = Column(
+        String,
+        ForeignKey("case_sets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    score = Column(Integer, nullable=False, default=0)
+    verdict = Column(String, nullable=False, default="")
+    summary = Column(Text, nullable=False, default="")
+    dimensions = Column(JSONB, nullable=False, default=dict)
+    issues = Column(JSONB, nullable=False, default=list)
+    case_count = Column(Integer, nullable=False, default=0)
+    source_truncated = Column(Boolean, nullable=False, default=False)
+    profile_id = Column(String, nullable=True)
+    created_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class CaseSetVersion(Base):
+    """用例集不可变版本快照；回滚只新建草稿，不修改历史。"""
+
+    __tablename__ = "case_set_versions"
+    __table_args__ = (
+        UniqueConstraint("case_set_id", "version", name="uq_case_set_versions_set_version"),
+    )
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    case_set_id = Column(
+        String,
+        ForeignKey("case_sets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False)
+    reason = Column(String, nullable=False, default="")
+    case_count = Column(Integer, nullable=False, default=0)
+    snapshot = Column(JSONB, nullable=False, default=dict)
+    created_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class EvalItem(Base):

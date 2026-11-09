@@ -676,10 +676,200 @@ export interface CaseSet {
   expires_in_h?: number
   expires_at?: string | null
   folder_id?: string | null
+  requirement_baseline_id?: string | null
+  review_state?: 'draft' | 'reviewing' | 'approved' | 'changes_requested'
+  review_assignee_id?: string | null
   column_schema?: ColumnSchemaItem[]
   checks: TestCaseCheck[]
   cases?: TestCase[]
   created_at?: string
+}
+
+// ─── 用例评审工作流与版本历史（N-02） ──────────────────────────────
+
+export interface CaseReviewRequestItem {
+  id: string
+  status: 'pending' | 'approved' | 'changes_requested' | 'cancelled'
+  note: string
+  decision_note: string
+  assignee_id?: string | null
+  assignee_name: string
+  due_at?: string | null
+  created_by?: string | null
+  created_by_name: string
+  created_at?: string
+  decided_at?: string | null
+}
+
+export interface CaseReviewComment {
+  id: string
+  case_item_id?: string | null
+  author_id?: string | null
+  author_name: string
+  body: string
+  created_at?: string
+}
+
+export interface CaseReviewRun {
+  id: string
+  score: number
+  verdict: string
+  summary: string
+  dimensions: Record<string, { score?: number; note?: string }>
+  issues: Array<{ type?: string; case?: string; detail?: string; fix?: string }>
+  case_count: number
+  source_truncated: boolean
+  created_at?: string
+}
+
+export interface CaseSetVersion {
+  id: string
+  version: number
+  reason: string
+  case_count: number
+  created_by?: string | null
+  created_by_name: string
+  created_at?: string
+}
+
+export interface CaseReviewWorkspace {
+  case_set_id: string
+  review_state: 'draft' | 'reviewing' | 'approved' | 'changes_requested'
+  review_assignee_id?: string | null
+  review_assignee_name: string
+  active_request: CaseReviewRequestItem | null
+  latest_request?: CaseReviewRequestItem | null
+  comments: CaseReviewComment[]
+  ai_runs: CaseReviewRun[]
+  versions: CaseSetVersion[]
+}
+
+export interface CaseVersionDiff {
+  base_version: number
+  target_version: number
+  base_count: number
+  target_count: number
+  added_count: number
+  removed_count: number
+  changed_count: number
+  added: Array<{ id: string; name: string }>
+  removed: Array<{ id: string; name: string }>
+  changed: Array<{
+    id: string
+    name: string
+    fields: Array<{ field: string; label: string; before: unknown; after: unknown }>
+  }>
+  truncated: boolean
+}
+
+export interface CaseVersionRestore {
+  case_set_id: string
+  name: string
+  source_version: number
+}
+
+// ─── 需求基线与用例覆盖（N-01） ───────────────────────────────────────
+
+export interface RequirementBaseline {
+  id: string
+  name: string
+  source_kind: 'text' | 'file'
+  source_name: string
+  status: 'draft' | 'confirmed'
+  revision: number
+  requirement_count: number
+  created_by?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface RequirementItem {
+  id: string
+  req_no: string
+  title: string
+  description: string
+  priority: string
+  module: string
+  source_ref: string
+  sort_order: number
+}
+
+export interface RequirementBaselineDetail extends RequirementBaseline {
+  requirements: RequirementItem[]
+}
+
+export interface CoverageRequirement {
+  id: string
+  req_no: string
+  title: string
+  priority: string
+  module: string
+  covered: boolean
+  case_count: number
+  case_ids: string[]
+  case_names: string[]
+}
+
+export interface CoverageModule {
+  module: string
+  total: number
+  covered: number
+  coverage_percent: number
+}
+
+export interface CaseCoverage {
+  baseline_id: string
+  baseline_name: string
+  baseline_version: number
+  total: number
+  covered: number
+  coverage_percent: number
+  p0_total: number
+  p0_covered: number
+  p0_percent: number
+  requirements: CoverageRequirement[]
+  uncovered: CoverageRequirement[]
+  modules: CoverageModule[]
+  linked_case_count: number
+  unlinked_case_count: number
+}
+
+export interface RequirementAutoLink {
+  case_item_id: string
+  requirement_id: string
+  confidence: number
+  reason: string
+  req_no?: string
+  req_title?: string
+  case_name?: string
+}
+
+export interface RequirementAutoLinkResult {
+  links: RequirementAutoLink[]
+  matched_case_count: number
+}
+
+// ─── 全局搜索（N-07 MVP） ────────────────────────────────────────────
+
+export interface GlobalSearchItem {
+  id: string
+  type: string
+  title: string
+  subtitle: string
+  status: string
+  url: string
+  updated_at?: string | null
+}
+
+export interface GlobalSearchGroup {
+  type: string
+  label: string
+  items: GlobalSearchItem[]
+}
+
+export interface GlobalSearchResult {
+  query: string
+  groups: GlobalSearchGroup[]
 }
 
 // 知识库与黄金 QA

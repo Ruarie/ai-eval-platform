@@ -461,12 +461,26 @@ function handleSelectAllChange(event: Event) {
 
 onMounted(async () => {
   await loadSessions()
-  // 异步初始化不能覆盖用户已经选中的 AgentLoop 会话。
-  if (!currentSessionId.value) resetToDraftSession()
+  // 全局搜索直达：有效会话优先打开，避免被草稿态覆盖。
+  const targetSessionId = String(route.query.session_id || '')
+  if (targetSessionId && sessions.value.some((session) => session.id === targetSessionId)) {
+    await selectSession(targetSessionId)
+  } else if (!currentSessionId.value) {
+    // 异步初始化不能覆盖用户已经选中的 AgentLoop 会话。
+    resetToDraftSession()
+  }
   // 报告直达仅预填 AgentLoop 草稿，实际发送统一经过 v2 composer。
   const interpretId = (route.query.interpret || route.query.report_id) as string | undefined
   if (interpretId) {
     handleInterpretReport(interpretId)
+  }
+})
+
+// 同一页面内再次从搜索面板跳转时，onMounted 不会重跑，需要响应查询参数。
+watch(() => route.query.session_id, async (sid) => {
+  const target = String(sid || '')
+  if (target && sessions.value.some((session) => session.id === target)) {
+    await selectSession(target)
   }
 })
 

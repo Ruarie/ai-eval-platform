@@ -23,6 +23,7 @@ from .routers import (
     agent_prefs,
     agents,
     auth,
+    case_reviews,
     cases,
     collaborations,
     dataset_catalog,
@@ -33,6 +34,8 @@ from .routers import (
     mcp,
     profiles,
     reports,
+    requirements,
+    search,
     sessions,
     tasks,
     user_workspaces,
@@ -232,6 +235,9 @@ app.include_router(datasets.router)
 app.include_router(datasets.folders_router)
 app.include_router(dataset_catalog.router)
 app.include_router(cases.router)
+app.include_router(case_reviews.router)
+app.include_router(requirements.router)
+app.include_router(search.router)
 app.include_router(collaborations.router)
 app.include_router(cases.folders_router)
 app.include_router(admin.router)
