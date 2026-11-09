@@ -1,5 +1,5 @@
 <template>
-  <n-drawer :show="show" width="min(1020px, 96vw)" @update:show="emit('update:show', $event)">
+  <n-drawer :show="show" width="min(1240px, 97vw)" @update:show="emit('update:show', $event)">
     <n-drawer-content :title="`知识图谱 · ${kbName || '当前知识库'}`" closable>
       <div v-if="loading" class="graph-state">正在读取实体关系…</div>
 
@@ -11,14 +11,25 @@
       <template v-else>
         <div class="graph-meta">
           <span class="small muted">
-            {{ graph?.nodes.length || 0 }} 个实体 · {{ graph?.edges.length || 0 }} 条关系
-            <template v-if="graph?.truncated">（已按关联度截断，仅展示最强的节点）</template>
+            {{ viewGraph?.nodes.length || 0 }} 个实体 · {{ viewGraph?.edges.length || 0 }} 条关系
+            <template
+              v-if="graph?.truncated || (graph && graph.nodes.length > (viewGraph?.nodes.length || 0))"
+            >
+              （已按关联度截断，仅展示最强的一批）
+            </template>
           </span>
           <div class="row" style="gap: 8px">
             <span v-for="item in legend" :key="item.type" class="legend-item small">
               <i :style="{ background: item.color }"></i>{{ item.label }}
               <b class="legend-count">{{ item.count }}</b>
             </span>
+            <button
+              v-if="graph && graph.nodes.length > VISIBLE_LIMIT"
+              class="btn btn-secondary btn-sm"
+              @click="showAll = !showAll; resetView()"
+            >
+              {{ showAll ? '只看核心' : `显示全部 ${graph.nodes.length}` }}
+            </button>
             <button class="btn btn-secondary btn-sm" @click="resetView">重置视图</button>
             <button class="btn btn-secondary btn-sm" @click="load">刷新</button>
           </div>
@@ -58,18 +69,6 @@
             </defs>
             <g :transform="layerTransform">
             <!-- 簇底色：同类型的节点落在同一片淡色区域里，读图时先看"团"再看点。 -->
-            <g class="graph-clusters">
-              <ellipse
-                v-for="cluster in clusters"
-                :key="`cluster-${cluster.type}`"
-                :cx="cluster.x"
-                :cy="cluster.y"
-                :rx="cluster.radius * 1.12"
-                :ry="cluster.radius * 0.84"
-                :fill="cluster.color"
-                opacity="0.06"
-              />
-            </g>
             <!-- 基础关系合并成 3 条 path：1800+ 条 <line> 会让 Vue 与浏览器都很吃力。 -->
             <g class="graph-edges" :opacity="selectedId ? 0.18 : 1">
               <path
@@ -101,25 +100,14 @@
                 <title>{{ line.description || '关系' }}</title>
               </line>
             </g>
-            <g class="graph-cluster-labels">
-              <text
-                v-for="cluster in clusters"
-                :key="`cluster-label-${cluster.type}`"
-                :x="cluster.x"
-                :y="cluster.labelY"
-                text-anchor="middle"
-                class="cluster-label"
-                :style="{ fill: cluster.color }"
-              >
-                {{ cluster.label }} · {{ cluster.count }}
-              </text>
-            </g>
             <g
               v-for="item in placed"
               :key="item.node.id"
               class="graph-node"
               :class="{ dimmed: isDimmed(item.node.id), active: item.node.id === selectedId }"
               @click="onNodeClick(item.node.id)"
+              @pointerenter="hoverId = item.node.id"
+              @pointerleave="hoverId = ''"
             >
               <title>{{ item.node.id }} · {{ typeLabel(item.node.entity_type) }} · {{ item.node.degree }} 条关系</title>
               <!-- 透明热区：节点圆较小，点到标签与圆之间的缝隙也该选中。 -->
@@ -218,7 +206,7 @@
 import { computed, ref, watch } from 'vue'
 
 import { api } from '../../api/http'
-import type { KbGraph, KbGraphNode } from '../../api/types'
+import type { KbGraph, KbGraphEdge, KbGraphNode } from '../../api/types'
 
 const props = defineProps<{
   show: boolean
@@ -305,133 +293,225 @@ interface PlacedNode {
   labelAnchor: 'start' | 'middle' | 'end'
 }
 
-// 分簇用网格铺排：簇多、单簇节点多时，环形分布会互相重叠，网格最稳。
-interface ClusterInfo {
-  type: string
-  label: string
-  color: string
-  count: number
-  x: number
-  y: number
-  radius: number
-  labelY: number
+// ─── 力导向布局（参考 HKUDS/LightRAG 的 ForceAtlas2 用法）──────────────
+// LightRAG 的做法：一图只跑一次力导向、按时间预算收敛、节点数大时用空间网格
+// 近似斥力（等价 Barnes-Hut 的效果）。这里用同样思路自实现，避免引入 sigma/graphology。
+const LAYOUT_BUDGET_MS = 420
+const REPULSION = 12000
+const SPRING = 0.006
+const GRAVITY = 0.0002
+// 同类实体的向心引力：形成可分瓣的"社区"，避免 1000 节点糊成一个球。
+const TYPE_GRAVITY = 0.02
+const CELL = 80
+
+/** 度数 → 半径：对数压缩；节点越多整体越小，避免糊成一片。 */
+function nodeRadius(degree: number, total: number) {
+  const shrink = Math.max(0.55, Math.min(1, Math.sqrt(260 / Math.max(1, total))))
+  return Math.min(13, (3 + Math.log2(1 + Math.max(0, degree)) * 2.6) * shrink)
 }
 
 /**
- * 类型分簇 + 网格铺排：每个实体类型占一个格子，簇内沿黄金角螺旋展开。
+ * 力导向布局：斥力（空间网格近似）+ 边弹簧 + 向心引力，按时间预算迭代。
  *
- * 500 节点时（概念 115 / 产物 106 …）环形簇心距离不够，大簇必然互相压；
- * 改成网格后每个簇有独立空间，簇内步长按格子大小自适应，重叠问题消失。
+ * 网格分簇虽然整齐，但节点像"珠子串"、边跨簇全挤在中间；力导向更接近
+ * LightRAG 的观感：同类实体自然聚成团，长尾散在外围。
  */
-function layout(nodes: KbGraphNode[]): { nodes: PlacedNode[]; clusters: ClusterInfo[] } {
+function layout(nodes: KbGraphNode[], edges: KbGraphEdge[]): PlacedNode[] {
   const total = nodes.length
-  if (!total) return { nodes: [], clusters: [] }
+  if (!total) return []
 
-  const byType = new Map<string, KbGraphNode[]>()
-  for (const node of nodes) {
-    const key = (node.entity_type || 'other').toLowerCase()
-    const bucket = byType.get(key) ?? []
-    bucket.push(node)
-    byType.set(key, bucket)
-  }
-  const groups = [...byType.entries()].sort(
-    (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]),
-  )
+  const index = new Map<string, number>()
+  nodes.forEach((node, i) => index.set(node.id, i))
 
-  const cols = Math.ceil(Math.sqrt(groups.length))
-  const rows = Math.ceil(groups.length / cols)
-  const cellW = CANVAS_WIDTH / cols
-  const cellH = CANVAS_HEIGHT / rows
+  const px = new Float64Array(total)
+  const py = new Float64Array(total)
+  const vx = new Float64Array(total)
+  const vy = new Float64Array(total)
+  const radius = new Float64Array(total)
 
-  const placedNodes: PlacedNode[] = []
-  const clusters: ClusterInfo[] = []
-  const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
-
-  groups.forEach(([type, bucket], groupIndex) => {
-    bucket.sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
-    const col = groupIndex % cols
-    const row = Math.floor(groupIndex / cols)
-    const cellX = col * cellW
-    const cellY = row * cellH
-    const cx = cellX + cellW / 2
-    const cy = cellY + cellH / 2 + 10
-    const n = bucket.length
-    // 步长同时受簇规模与格子尺寸约束，保证不越出本格。
-    const step = n <= 1 ? 0 : Math.min(11 + 7.4 * Math.sqrt(n - 1), Math.min(cellW, cellH) * 0.34)
-    const shrink = Math.max(0.55, Math.min(1, step / 62))
-
-    bucket.forEach((node, index) => {
-      const ratio = n <= 1 ? 0 : Math.sqrt(index / (n - 1))
-      const spread = step * ratio
-      const angle = index === 0 ? 0 : index * GOLDEN_ANGLE
-      const x = cx + Math.cos(angle) * spread * 1.08
-      const y = cy + Math.sin(angle) * spread * 0.86
-      const radius =
-        (3.8 + Math.min(7.2, Math.sqrt(Math.max(0, node.degree)) * 1.35)) * shrink
-
-      const outward =
-        Math.cos(angle) * Math.cos(-Math.PI / 2) + Math.sin(angle) * Math.sin(-Math.PI / 2) >= 0
-      const anchor: 'start' | 'middle' | 'end' =
-        index === 0 ? 'middle' : outward ? 'start' : 'end'
-      placedNodes.push({
-        node,
-        x,
-        y,
-        radius,
-        angle,
-        ring: index,
-        labelX: index === 0 ? x : x + (outward ? radius + 7 : -(radius + 7)),
-        labelY: index === 0 ? y - radius - 10 : y + 3.5,
-        labelAnchor: anchor,
-      })
-    })
-
-    clusters.push({
-      type,
-      label: typeLabel(type),
-      color: typeColor(type),
-      count: n,
-      x: cx,
-      y: cy,
-      radius: step + 16,
-      // 标签固定在格子顶部，避免被簇内节点盖住。
-      labelY: cellY + 18,
-    })
+  // 初始位置：黄金角螺旋 + 按 id 的稳定抖动，保证每次打开布局一致。
+  nodes.forEach((node, i) => {
+    const angle = i * 2.399963229728653
+    const spread = 26 * Math.sqrt(i + 1)
+    px[i] = Math.cos(angle) * spread
+    py[i] = Math.sin(angle) * spread * 0.86
+    radius[i] = nodeRadius(node.degree, total)
   })
 
-  return { nodes: placedNodes, clusters }
+  const links: Array<[number, number]> = []
+  for (const edge of edges) {
+    const a = index.get(edge.source)
+    const b = index.get(edge.target)
+    if (a === undefined || b === undefined || a === b) continue
+    links.push([a, b])
+  }
+
+  const started = performance.now()
+  let alpha = 1
+  for (let iter = 0; iter < 600; iter += 1) {
+    // 空间网格：只和相邻 9 个格子里的节点算斥力。
+    const grid = new Map<string, number[]>()
+    for (let i = 0; i < total; i += 1) {
+      const key = `${Math.floor(px[i] / CELL)}:${Math.floor(py[i] / CELL)}`
+      const bucket = grid.get(key)
+      if (bucket) bucket.push(i)
+      else grid.set(key, [i])
+    }
+
+    for (let i = 0; i < total; i += 1) {
+      const cx = Math.floor(px[i] / CELL)
+      const cy = Math.floor(py[i] / CELL)
+      for (let gx = cx - 1; gx <= cx + 1; gx += 1) {
+        for (let gy = cy - 1; gy <= cy + 1; gy += 1) {
+          const bucket = grid.get(`${gx}:${gy}`)
+          if (!bucket) continue
+          for (const j of bucket) {
+            if (j <= i) continue
+            let dx = px[i] - px[j]
+            let dy = py[i] - py[j]
+            let dist2 = dx * dx + dy * dy
+            if (dist2 < 1) {
+              dx = (i - j) * 0.01
+              dy = 0.01
+              dist2 = dx * dx + dy * dy
+            }
+            const minGap = radius[i] + radius[j] + 10
+            const dist = Math.sqrt(dist2)
+            // 斥力：近距离时退化为碰撞分离，远距离按 k^2/d 衰减。
+            const strength = dist < minGap ? (minGap - dist) * 6 : REPULSION / dist2
+            const fx = (dx / dist) * strength * alpha
+            const fy = (dy / dist) * strength * alpha
+            vx[i] += fx
+            vy[i] += fy
+            vx[j] -= fx
+            vy[j] -= fy
+          }
+        }
+      }
+    }
+
+    for (const [a, b] of links) {
+      const dx = px[b] - px[a]
+      const dy = py[b] - py[a]
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1
+      const force = (dist - 90) * SPRING * alpha
+      const fx = (dx / dist) * force
+      const fy = (dy / dist) * force
+      vx[a] += fx
+      vy[a] += fy
+      vx[b] -= fx
+      vy[b] -= fy
+    }
+
+    // 每轮重算各类型质心，把所有节点往自己类型的质心拉一点。
+    const centroids = new Map<string, { x: number; y: number; n: number }>()
+    for (let i = 0; i < total; i += 1) {
+      const key = (nodes[i].entity_type || 'other').toLowerCase()
+      const item = centroids.get(key) ?? { x: 0, y: 0, n: 0 }
+      item.x += px[i]
+      item.y += py[i]
+      item.n += 1
+      centroids.set(key, item)
+    }
+    for (let i = 0; i < total; i += 1) {
+      const key = (nodes[i].entity_type || 'other').toLowerCase()
+      const item = centroids.get(key)
+      if (!item || item.n < 2) continue
+      vx[i] += (item.x / item.n - px[i]) * TYPE_GRAVITY * alpha
+      vy[i] += (item.y / item.n - py[i]) * TYPE_GRAVITY * alpha
+    }
+
+    for (let i = 0; i < total; i += 1) {
+      vx[i] -= px[i] * GRAVITY * alpha
+      vy[i] -= py[i] * GRAVITY * alpha
+      px[i] += vx[i] * 0.55
+      py[i] += vy[i] * 0.55
+      vx[i] *= 0.35
+      vy[i] *= 0.35
+    }
+
+    alpha *= 0.985
+    if (performance.now() - started > LAYOUT_BUDGET_MS) break
+  }
+
+  // 归一化到画布：算包围盒后等比缩放，留 60px 边距。
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (let i = 0; i < total; i += 1) {
+    minX = Math.min(minX, px[i] - radius[i])
+    maxX = Math.max(maxX, px[i] + radius[i])
+    minY = Math.min(minY, py[i] - radius[i])
+    maxY = Math.max(maxY, py[i] + radius[i])
+  }
+  const spanX = Math.max(1, maxX - minX)
+  const spanY = Math.max(1, maxY - minY)
+  const scale = Math.min((CANVAS_WIDTH - 120) / spanX, (CANVAS_HEIGHT - 120) / spanY)
+  const offsetX = (CANVAS_WIDTH - spanX * scale) / 2 - minX * scale
+  const offsetY = (CANVAS_HEIGHT - spanY * scale) / 2 - minY * scale
+
+  return nodes.map((node, i) => {
+    const x = px[i] * scale + offsetX
+    const y = py[i] * scale + offsetY
+    const r = Math.max(3, Math.min(16, radius[i] * Math.max(0.75, scale)))
+    return {
+      node,
+      x,
+      y,
+      radius: r,
+      angle: Math.atan2(py[i], px[i]),
+      ring: 0,
+      labelX: x,
+      labelY: y - r - 7,
+      labelAnchor: 'middle' as const,
+    }
+  })
 }
 
-const layoutResult = computed(() => layout(graph.value?.nodes ?? []))
-const placed = computed(() => layoutResult.value.nodes)
-const clusters = computed(() => layoutResult.value.clusters)
+// 大图默认只渲染关联度最高的一批：1000 节点/3300 边在抽屉里会糊成噪点，
+// LightRAG 也是靠"按规模降级 + 用户主动放大"来处理这种情况。
+const VISIBLE_LIMIT = 400
+const showAll = ref(false)
+
+const viewGraph = computed(() => {
+  const g = graph.value
+  if (!g) return null
+  if (showAll.value || g.nodes.length <= VISIBLE_LIMIT) return g
+  const nodes = [...g.nodes]
+    .sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
+    .slice(0, VISIBLE_LIMIT)
+  const keep = new Set(nodes.map((node) => node.id))
+  return { ...g, nodes, edges: g.edges.filter((e) => keep.has(e.source) && keep.has(e.target)) }
+})
+
+const placed = computed(() => layout(viewGraph.value?.nodes ?? [], viewGraph.value?.edges ?? []))
 
 const positions = computed(() => new Map(placed.value.map((item) => [item.node.id, item])))
-
-/** 基础关系：按两端较弱度数分三档，每档合并成一条 path。 */
+/** 基础关系：按权重平方根分三档合并成 path（参考 LightRAG 的边宽策略）。 */
 const baseEdgeBuckets = computed(() => {
   const buckets = [
-    { key: 'weak', d: [] as string[], width: 0.6, opacity: 0.035 },
-    { key: 'mid', d: [] as string[], width: 0.8, opacity: 0.08 },
-    { key: 'strong', d: [] as string[], width: 1.1, opacity: 0.16 },
+    { key: 'thin', d: [] as string[], width: 0.7, opacity: 0.09 },
+    { key: 'mid', d: [] as string[], width: 1.1, opacity: 0.16 },
+    { key: 'thick', d: [] as string[], width: 1.6, opacity: 0.26 },
   ]
-  for (const edge of graph.value?.edges ?? []) {
+  for (const edge of viewGraph.value?.edges ?? []) {
     const from = positions.value.get(edge.source)
     const to = positions.value.get(edge.target)
     if (!from || !to) continue
-    const weak = Math.min(from.node.degree, to.node.degree)
-    const bucket = weak >= 12 ? buckets[2] : weak >= 4 ? buckets[1] : buckets[0]
+    const weight = Math.max(0, Number(edge.weight ?? 1))
+    const bucket = weight >= 4 ? buckets[2] : weight >= 1.5 ? buckets[1] : buckets[0]
     bucket.d.push(`M${from.x.toFixed(1)} ${from.y.toFixed(1)}L${to.x.toFixed(1)} ${to.y.toFixed(1)}`)
   }
   return buckets.map((bucket) => ({ ...bucket, d: bucket.d.join('') }))
 })
 
-/** 选中节点的一跳关系：单独绘制，带箭头与关系描述 tooltip。 */
 const highlightEdges = computed(() => {
-  if (!selectedId.value) return []
+  const focus = selectedId.value
+  if (!focus) return []
   const lines: Array<{ key: string; x1: number; y1: number; x2: number; y2: number; description: string }> = []
-  for (const edge of graph.value?.edges ?? []) {
-    if (edge.source !== selectedId.value && edge.target !== selectedId.value) continue
+  for (const edge of viewGraph.value?.edges ?? []) {
+    if (edge.source !== focus && edge.target !== focus) continue
     const from = positions.value.get(edge.source)
     const to = positions.value.get(edge.target)
     if (!from || !to) continue
@@ -447,13 +527,13 @@ const highlightEdges = computed(() => {
   return lines
 })
 
-const selected = computed(() => (graph.value?.nodes ?? []).find((node) => node.id === selectedId.value) ?? null)
+const selected = computed(() => (viewGraph.value?.nodes ?? []).find((node) => node.id === selectedId.value) ?? null)
 
 const selectedRelations = computed(() => {
   const node = selected.value
   if (!node) return []
   const rows: Array<{ dir: string; other: string; description: string }> = []
-  for (const edge of graph.value?.edges ?? []) {
+  for (const edge of viewGraph.value?.edges ?? []) {
     if (edge.source === node.id) {
       rows.push({ dir: '→', other: edge.target, description: (edge.description || '').trim() })
     } else if (edge.target === node.id) {
@@ -464,24 +544,29 @@ const selectedRelations = computed(() => {
 })
 
 const topNodes = computed(() =>
-  [...(graph.value?.nodes ?? [])]
+  [...(viewGraph.value?.nodes ?? [])]
     .sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
     .slice(0, 6),
 )
 
+const hoverId = ref('')
+/** 悬停优先于选中：LightRAG 是 hover 即聚焦、点击才持久选中。 */
+const focusId = computed(() => hoverId.value || selectedId.value)
+
 const neighbours = computed(() => {
   const ids = new Set<string>()
-  if (!selected.value) return ids
-  for (const edge of graph.value?.edges ?? []) {
-    if (edge.source === selected.value.id) ids.add(edge.target)
-    if (edge.target === selected.value.id) ids.add(edge.source)
+  const id = focusId.value
+  if (!id) return ids
+  for (const edge of viewGraph.value?.edges ?? []) {
+    if (edge.source === id) ids.add(edge.target)
+    else if (edge.target === id) ids.add(edge.source)
   }
   return ids
 })
 
 const legend = computed(() => {
   const counts = new Map<string, number>()
-  for (const node of graph.value?.nodes ?? []) {
+  for (const node of viewGraph.value?.nodes ?? []) {
     const type = (node.entity_type || 'other').toLowerCase()
     counts.set(type, (counts.get(type) ?? 0) + 1)
   }
@@ -580,27 +665,18 @@ function onNodeClick(nodeId: string) {
   selectedId.value = selectedId.value === nodeId ? '' : nodeId
 }
 
-/** 标签上限 14 个：节点多时只标度数最高的实体，否则长实体名会互相压住。 */
+const LABEL_LIMIT = 12
+
+/** 参考 LightRAG：大图硬性限制标签数量，只标度数最高的一批，聚焦时补邻居。 */
 const labelIds = computed(() => {
   const ids = new Set<string>()
-  // 每簇只标「度数最高」的那个（簇心）：两个标签一定会在簇内重叠。
-  const perCluster = new Set<string>()
-  for (const item of placed.value) {
-    const key = (item.node.entity_type || 'other').toLowerCase()
-    if (perCluster.has(key)) continue
-    perCluster.add(key)
+  const ranked = [...placed.value].sort((a, b) => b.node.degree - a.node.degree)
+  for (const item of ranked) {
+    if (ids.size >= LABEL_LIMIT) break
     ids.add(item.node.id)
   }
-  // 选中节点与它的一跳邻居补标签，方便顺着关系看。
-  if (selectedId.value) {
-    ids.add(selectedId.value)
-    let extra = 0
-    for (const id of neighbours.value) {
-      if (extra >= 12) break
-      ids.add(id)
-      extra += 1
-    }
-  }
+  for (const id of neighbours.value) ids.add(id)
+  if (focusId.value) ids.add(focusId.value)
   return ids
 })
 
@@ -614,8 +690,9 @@ function shortLabel(name: string) {
 }
 
 function isDimmed(nodeId: string) {
-  if (!selectedId.value) return false
-  return nodeId !== selectedId.value && !neighbours.value.has(nodeId)
+  const focus = focusId.value
+  if (!focus) return false
+  return nodeId !== focus && !neighbours.value.has(nodeId)
 }
 
 // LightRAG 的实体类型枚举是英文，界面上给出中文名，避免中英混排。

@@ -115,5 +115,5 @@ test('节点过多时按关联度截断提示可见', async ({ page }) => {
 
   await page.getByRole('button', { name: '知识图谱' }).click()
 
-  await expect(page.getByText('已按关联度截断，仅展示最强的节点')).toBeVisible()
+  await expect(page.getByText('已按关联度截断，仅展示最强的一批')).toBeVisible()
 })
