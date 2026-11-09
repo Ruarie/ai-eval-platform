@@ -1,0 +1,39 @@
+name: Export memory WIP from deploy host
+
+on:
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Pack untracked files on deploy host
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+          SSH_USER: ${{ secrets.SSH_USER || 'deploy' }}
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/k"
+          chmod 600 "$HOME/.ssh/k"
+          ssh -i "$HOME/.ssh/k" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$SSH_USER@$SSH_HOST" 'cd /opt/ai-eval-platform && tar czf - \
+              .deploy-mode \
+              backend/api/app/harness/memory/eval.py \
+              backend/api/app/harness/memory/extract.py \
+              backend/api/app/llm/embeddings.py \
+              "backend/api/migrations/versions/c7a1e93d2f60_记忆向量索引表.py" \
+              backend/api/tests/test_llm_embeddings.py \
+              backend/api/tests/test_memory_recall_eval.py \
+              backend/api/tests/test_personal_memory_extract.py \
+              backend/api/tests/test_personal_memory_semantic.py \
+              tools/memory-recall-eval.py' > /tmp/memory-wip.tgz
+          tar tzf /tmp/memory-wip.tgz
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-wip
+          path: /tmp/memory-wip.tgz
+          retention-days: 3
