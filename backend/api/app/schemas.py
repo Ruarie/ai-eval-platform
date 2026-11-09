@@ -1477,6 +1477,66 @@ class CoverageModuleOut(ApiModel):
     coverage_percent: float
 
 
+class UsageSeriesOut(ApiModel):
+    """按天用量。"""
+
+    day: str
+    calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+class UsageModelOut(ApiModel):
+    """按模型/协议档用量。"""
+
+    profile_id: str = ""
+    model_name: str = "未记录"
+    calls: int = 0
+    sessions: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+class UsageUserOut(ApiModel):
+    """按会话属主用量。"""
+
+    user_id: str = ""
+    username: str = "未记录"
+    calls: int = 0
+    total_tokens: int = 0
+
+
+class UsageRecentOut(ApiModel):
+    """最近一次模型调用用量。"""
+
+    created_at: Any | None = None
+    session_id: str = ""
+    session_title: str = ""
+    model_name: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+class UsageSummaryOut(ApiModel):
+    """Token 用量中心响应；未配置单价时不做费用估算。"""
+
+    days: int
+    generated_at: Any | None = None
+    calls: int = 0
+    sessions: int = 0
+    users: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    series: list[UsageSeriesOut] = Field(default_factory=list)
+    by_model: list[UsageModelOut] = Field(default_factory=list)
+    by_user: list[UsageUserOut] = Field(default_factory=list)
+    recent: list[UsageRecentOut] = Field(default_factory=list)
+
+
 class TraceTurnOut(ApiModel):
     """一个用户回合的轨迹摘要。"""
 

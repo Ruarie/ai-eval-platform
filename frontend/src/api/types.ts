@@ -909,6 +909,58 @@ export interface RequirementAutoLinkResult {
   matched_case_count: number
 }
 
+// ─── Token 用量中心（N-10） ────────────────────────────────────────
+
+export interface UsageSeries {
+  day: string
+  calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export interface UsageModel {
+  profile_id: string
+  model_name: string
+  calls: number
+  sessions: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export interface UsageUser {
+  user_id: string
+  username: string
+  calls: number
+  total_tokens: number
+}
+
+export interface UsageRecent {
+  created_at?: string | null
+  session_id: string
+  session_title: string
+  model_name: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export interface UsageSummary {
+  days: number
+  generated_at?: string | null
+  calls: number
+  sessions: number
+  users: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  series: UsageSeries[]
+  by_model: UsageModel[]
+  by_user: UsageUser[]
+  recent: UsageRecent[]
+}
+
 // ─── 历史轨迹（N-09） ─────────────────────────────────────────────
 
 export interface TraceTurn {

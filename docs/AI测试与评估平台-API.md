@@ -6,10 +6,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.58 |
-| 本轮审查日期 | 2026-11-09（Agent 历史轨迹查询 MVP：回合摘要与脱敏事件时间线） |
+| 文档版本 | V2.59 |
+| 本轮审查日期 | 2026-11-09（Token 用量中心 MVP：按天/模型/成员聚合用量） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
-| 对应 PRD | V1.67（功能唯一权威） |
+| 对应 PRD | V1.68（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
 | 对应 Agent 说明书 | `AI测试与评估平台-Agent开发文档.md` V1.7.15（AgentLoop 单入口；JSON 仍以本文为准） |
 | 对应前端计划 | AgentLoop 前端计划 V0.5 |
@@ -4980,3 +4980,68 @@ diff 响应：
 - `backend/api/tests/test_traces.py`：回合聚合、脱敏与权限回归。
 - `frontend/src/components/drawers/TraceHistoryDrawer.vue`、`views/Agent.vue`：历史轨迹抽屉与入口。
 - `frontend/src/api/types.ts`、`http.ts`：轨迹类型与客户端。
+
+## V2.59 Token 用量中心（N-10 MVP，2026-11-09）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/usage/summary?days=30` | 聚合 assistant 消息的 token 用量 |
+
+响应：
+
+```json
+{
+  "days": 30,
+  "generated_at": "2026-11-09T08:00:00Z",
+  "calls": 120,
+  "sessions": 18,
+  "users": 4,
+  "prompt_tokens": 1200000,
+  "completion_tokens": 180000,
+  "total_tokens": 1380000,
+  "series": [
+    { "day": "2026-11-09", "calls": 8, "prompt_tokens": 12000, "completion_tokens": 1800, "total_tokens": 13800 }
+  ],
+  "by_model": [
+    {
+      "profile_id": "profile-a",
+      "model_name": "model-a",
+      "calls": 60,
+      "sessions": 10,
+      "prompt_tokens": 600000,
+      "completion_tokens": 90000,
+      "total_tokens": 690000
+    }
+  ],
+  "by_user": [
+    { "user_id": "user-1", "username": "member", "calls": 60, "total_tokens": 690000 }
+  ],
+  "recent": [
+    {
+      "created_at": "2026-11-09T07:00:00Z",
+      "session_id": "session-1",
+      "session_title": "登录会话",
+      "model_name": "model-a",
+      "prompt_tokens": 1000,
+      "completion_tokens": 120,
+      "total_tokens": 1120
+    }
+  ]
+}
+```
+
+边界：
+
+- 只统计 `role=assistant` 且 `turn_stats` 非空的消息；用户消息不计；
+- `usage` 缺失时用 prompt+completion 兜底；全缺失不计入 calls；
+- 时间窗按消息 `created_at`；最多扫描 5000 条，超出只统计最近窗口；
+- 共享会话归会话创建者；成员名缺失显示“未记录”；
+- 只读聚合，不返回正文/提示词/工具结果/凭据；
+- 当前不返回费用字段；单价与预算告警后续登记。
+
+### 修改代码文件与作用清单
+
+- `backend/api/app/routers/usage.py`、`app/schemas.py`、`app/main.py`：用量接口与路由。
+- `backend/api/tests/test_usage.py`：聚合、兜底与参数边界。
+- `frontend/src/views/UsageCenter.vue`、`router/index.ts`、`layouts/MainLayout.vue`：用量页、路由与导航。
+- `frontend/src/api/types.ts`、`http.ts`：用量类型与客户端。

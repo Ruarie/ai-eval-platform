@@ -90,6 +90,7 @@ import {
   type NotificationList,
   type TraceTurn,
   type TraceTurnDetail,
+  type UsageSummary,
   type GlobalSearchResult,
 } from './types'
 import {
@@ -1201,6 +1202,30 @@ export const api = {
     async deleteFolder(id: string): Promise<void> {
       if (getDataMode() === 'mock') return
       await http.delete(`/api/case-folders/${id}`)
+    },
+  },
+
+  // 6.9 Token 用量中心（N-10）
+  usage: {
+    async summary(days = 30): Promise<UsageSummary> {
+      if (getDataMode() === 'mock') {
+        return {
+          days,
+          generated_at: new Date().toISOString(),
+          calls: 0,
+          sessions: 0,
+          users: 0,
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 0,
+          series: [],
+          by_model: [],
+          by_user: [],
+          recent: [],
+        }
+      }
+      const { data } = await http.get('/api/usage/summary', { params: { days } })
+      return data
     },
   },
 

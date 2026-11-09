@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.38 ｜ 审查日期：2026-11-09（N-10 Token 用量中心 MVP：新增 `GET /api/usage/summary`，按天/模型/会话属主聚合 assistant 消息 `turn_stats.usage`；只读、不返回正文；未配置逐模型单价，不展示费用；前端新增 `/usage` 与「用量中心」导航。门禁：用量 2 项 + 轨迹/通知/评审/搜索 10 项通过、ruff、前端 typecheck/build、单测 123/123。契约见 API V2.59、PRD V1.68。）
+>
 > 版本：V2.37 ｜ 审查日期：2026-11-09（N-09 历史轨迹查询 MVP：新增 `/api/sessions/{id}/trace/turns` 与 `.../turns/{turn}`，按回合聚合已持久化 `agent_events`，只返回时间/状态/工具/模型/token 等元数据，不返回正文、工具参数/结果、提示词；私有会话仅属主/管理员可见。前端新增 `TraceHistoryDrawer` 与 Agent 顶栏「历史轨迹」。本期不新增结构化轨迹表，`harness_turns/spans` 仍留后续。门禁：轨迹 3 项 + 通知/评审/搜索 13 项通过、ruff、前端 typecheck/build、单测 123/123。契约见 API V2.58、PRD V1.67。）
 >
 > 版本：V2.36 ｜ 审查日期：2026-11-09（N-08 站内通知 MVP：新增 `notifications`（迁移 `b8e4d2f7c1a3`），任务生成完成/失败与评审指派/结论写入通知；`dedupe_key` 按用户唯一，重复写入跳过；新增 `/api/notifications` 列表/未读/已读接口与 `NotificationBell`、`/notifications` 页面；通知不含密钥/上游原文，无邮件/Webhook 外发。门禁：通知 2 项 + 评审/资产/用例/需求/质量/搜索 74 项、Worker 13 项通过，ruff、前端 typecheck/build、单测 123/123。契约见 API V2.57、PRD V1.66。）
@@ -163,6 +165,7 @@
 | 用例资产库 | MVP 已交付：确认物化、跨集合检索、标签、文本查重、历史回填；不做自动合并/复制 | `backend/api/app/case_asset_service.py`、`frontend/src/views/CaseAssets.vue` |
 | 站内通知 | MVP 已交付：任务生成/失败、评审指派/结论通知；顶栏未读与通知页；无外发渠道 | `backend/api/app/notification_service.py`、`frontend/src/components/notifications/NotificationBell.vue` |
 | 历史轨迹 | MVP 已交付：按回合聚合 AgentEvent，展示计时/工具/模型/token 与脱敏事件；无正文与工具结果 | `backend/api/app/routers/traces.py`、`frontend/src/components/drawers/TraceHistoryDrawer.vue` |
+| 用量中心 | MVP 已交付：按天/模型/成员聚合 token 与调用；只读、无费用估算 | `backend/api/app/routers/usage.py`、`frontend/src/views/UsageCenter.vue` |
 | 全局搜索 | MVP 已交付：八类实体只读检索，私有会话/工作区/记忆按属主过滤 | `backend/api/app/routers/search.py`、`frontend/src/components/search/GlobalSearch.vue` |
 | rag 知识库评测 | 已停用；保留历史报告只读 | `backend/worker/app/rag.py`、`backend/shared/kb.py` |
 | stress 压测 | 已停用；不再派生，运行中的旧任务取消并请求引擎停止 | `backend/worker/app/stress.py` |

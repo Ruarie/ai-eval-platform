@@ -42,6 +42,7 @@ from .routers import (
     sessions,
     tasks,
     traces,
+    usage,
     user_workspaces,
     users,
     workspace_guards,
@@ -232,6 +233,7 @@ app.include_router(users.router)
 app.include_router(files.router)
 app.include_router(sessions.router)
 app.include_router(traces.router)
+app.include_router(usage.router)
 app.include_router(agent_prefs.router)
 app.include_router(agent_memories.router)
 app.include_router(tasks.router)
