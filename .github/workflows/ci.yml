@@ -137,7 +137,10 @@ jobs:
         run: PYTHONPATH=.:.. pytest
 
   frontend:
-    runs-on: ubuntu-latest
+    # runner 已升级到 ubuntu-26.04，Playwright 1.58 不支持：
+    # `playwright install --with-deps chromium` 会直接报 "does not support chromium on ubuntu26.04-x64"。
+    # 固定到 24.04（Playwright 官方支持矩阵内的最新 LTS）。
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
