@@ -914,41 +914,30 @@ import { useRoute } from 'vue-router'
 import { useMessage, useDialog, type DropdownOption } from 'naive-ui'
 import { api } from '../api/http'
 import type { CaseSet, TestCase, TestCaseInput, TestCaseCheck, CaseCompareResult, CaseCoverageResult, ColumnSchemaItem, Profile, TaskStatus } from '../api/types'
-import { escapeHtml, escapeRegex, renderIcon } from '../utils/render'
+import { renderIcon } from '../utils/render'
+import {
+  CASE_PRIORITIES as PRIORITIES,
+  CASE_STRATEGIES as STRATEGIES,
+  casePayload,
+  caseSetStatusLabel,
+  editableCase,
+  getCaseExtra,
+  highlightText,
+  normalizeCaseStrategy,
+  type CasePriority,
+  type CaseStrategy,
+  type ExtendedTestCase,
+} from '../utils/caseWorkbench'
 import CaseReviewDrawer from '../components/drawers/CaseReviewDrawer.vue'
 import CaseReviewFlowDrawer from '../components/drawers/CaseReviewFlowDrawer.vue'
 import RequirementCoverageDrawer from '../components/drawers/RequirementCoverageDrawer.vue'
 import ImportCasesExcelModal from '../components/modals/ImportCasesExcelModal.vue'
-
-type CaseStrategy = '正向' | '反向' | '边界' | '状态迁移' | '场景' | '等价类'
-type CasePriority = 'HX' | 'FHX' | 'BJ' | 'YC' | 'ZD' | 'BL'
-
-/** 页面编辑字段与服务端原始行并存，保存时保留未直接展示的固定字段。 */
-interface ExtendedTestCase {
-  id: string
-  set_id?: string
-  code: string
-  name: string
-  module: string
-  feature_point: string
-  strategy: CaseStrategy
-  priority: CasePriority
-  preconditions: string
-  expected_result: string
-  steps?: string[]
-  target_dataset_id?: string
-  checked?: boolean
-  extras?: Record<string, unknown>
-  source?: TestCase
-}
 
 /** 扩展列沿用服务端完整定义，包含排序和必填属性。 */
 type CustomColumn = ColumnSchemaItem
 
 type CtxMenuType = 'file' | 'folder' | 'row'
 
-const STRATEGIES: CaseStrategy[] = ['正向', '反向', '边界', '等价类', '状态迁移', '场景']
-const PRIORITIES: CasePriority[] = ['HX', 'FHX', 'BJ', 'YC', 'ZD', 'BL']
 const STRATEGY_OPTIONS = [
   { label: '正向', key: 'positive', weight: 40 },
   { label: '反向', key: 'negative', weight: 25 },
@@ -1081,9 +1070,6 @@ const missingTaskDescription = computed(() => {
   if (['succeeded', 'awaiting_case_confirm'].includes(missingTaskStatus.value || '')) return `任务 ${id} 没有可访问的用例集。`
   return `任务 ${id} 尚未生成对应用例集，完成后刷新即可查看草稿。`
 })
-function caseSetStatusLabel(status: CaseSet['status']): string {
-  return status === 'confirmed' ? '已入库' : status === 'cancelled' ? '已废弃' : '草稿'
-}
 const canEditCases = computed(() => currentSet.value?.status === 'generated'
   && loadedSetId.value === activeSetId.value && !loadingCases.value && !confirmingSet.value)
 
@@ -1166,10 +1152,7 @@ function checkAllDisplayedCases() {
 }
 
 function highlightMatch(text: string): string {
-  const q = gridSearch.value.trim()
-  if (!q || !text) return escapeHtml(text)
-  const regex = new RegExp(`(${escapeRegex(q)})`, 'gi')
-  return escapeHtml(text).replace(regex, '<mark class="highlight-match">$1</mark>')
+  return highlightText(text, gridSearch.value)
 }
 
 // ─── 键盘流网格导航 (Keyboard Flow) ───
@@ -1320,10 +1303,6 @@ const customCols = computed<CustomColumn[]>(() => {
   const s = currentSet.value
   return s ? customColsMap.value[s.id] || [] : []
 })
-
-function getCaseExtra(c: ExtendedTestCase, key: string): string {
-  return String(c.extras?.[key] ?? '')
-}
 
 // 批量勾选
 const isCurrentPageAllChecked = computed(() => pagedCases.value.length > 0 && pagedCases.value.every(c => isCaseChecked(c)))
@@ -1534,25 +1513,6 @@ function deleteCase(idx: number) {
   message.info('已删除用例行，保存后生效')
 }
 
-/** 固定字段使用契约名称；扩展键与未展示的固定字段完整保留。 */
-function casePayload(c: ExtendedTestCase): TestCaseInput {
-  return {
-    ...c.source,
-    ...c.extras,
-    id: c.id.startsWith('temp-') ? undefined : c.id,
-    code: c.code,
-    name: c.name,
-    module: c.module,
-    feature_point: c.feature_point,
-    strategy: c.strategy,
-    priority: c.priority,
-    precondition: c.preconditions,
-    steps: c.steps?.join('\n') || '',
-    expected: c.expected_result,
-    ...(c.target_dataset_id ? { target_dataset_id: c.target_dataset_id } : {}),
-  }
-}
-
 /** 保存使用提交时快照；并发调用共享结果，迟到响应仅更新相同视图。 */
 async function persistCases(): Promise<boolean> {
   if (saveRequest) return saveRequest
@@ -1665,34 +1625,6 @@ function exportXMind() {
 }
 
 /** 旧别名只在读取边界兼容，页面筛选和保存统一使用服务端规范名称。 */
-function normalizeCaseStrategy(strategy: TestCase['strategy']): CaseStrategy {
-  if (strategy === '等价') return '等价类'
-  if (strategy === '状态') return '状态迁移'
-  return strategy || '正向'
-}
-
-/** 服务端将扩展字段平铺；固定字段之外的值进入页面扩展列，不丢弃未知数据。 */
-function editableCase(c: TestCase, setId: string, index: number): ExtendedTestCase {
-  const fixed = new Set(['id', 'code', 'name', 'module', 'strategy', 'priority', 'precondition',
-    'steps', 'expected', 'submodule', 'feature_point', 'test_type', 'mapped', 'pending_complete'])
-  return {
-    id: c.id || `temp-${Date.now()}-${index}`,
-    set_id: setId,
-    code: c.code || `TC-${String(index + 1).padStart(3, '0')}`,
-    name: c.name || '',
-    module: c.module || '通用',
-    feature_point: c.feature_point || '',
-    strategy: normalizeCaseStrategy(c.strategy),
-    priority: c.priority || 'HX',
-    preconditions: c.precondition || '',
-    expected_result: c.expected || '',
-    steps: typeof c.steps === 'string' ? c.steps.split('\n') : [],
-    target_dataset_id: typeof c.target_dataset_id === 'string' ? c.target_dataset_id : undefined,
-    extras: Object.fromEntries(Object.entries(c).filter(([key]) => !fixed.has(key))),
-    source: { ...c },
-  }
-}
-
 /** 只有最后一次选择可提交读取结果，失败或旧响应不得覆盖当前草稿。 */
 async function loadCases(setId: string) {
   const version = ++loadVersion
