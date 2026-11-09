@@ -1,0 +1,36 @@
+name: Opt server diagnostics
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    # 一次性诊断：通过部署 secrets 连到目标机，读取 /opt 部署目录的 git 状态。
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Inspect deployment checkout
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+          SSH_USER: ${{ secrets.SSH_USER || 'deploy' }}
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/k"
+          chmod 600 "$HOME/.ssh/k"
+          ssh -i "$HOME/.ssh/k" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -e
+          cd /opt/ai-eval-platform
+          echo "== branch =="
+          git symbolic-ref --short -q HEAD || echo "(detached)"
+          echo "== status =="
+          git status --short | head -20
+          echo "== reflog =="
+          git reflog -25
+          echo "== branches =="
+          git branch -avv | head -20
+          echo "== dangling commits =="
+          git fsck --no-reflogs --unreachable 2>/dev/null | grep commit | head -20
+          REMOTE
