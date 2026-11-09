@@ -2,11 +2,11 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.7 |
-| 文档状态 | 提案稿（Phase 1/2 已启动；N-01/N-02/N-03/N-04/N-05/N-07/N-08/O-01/O-02 已交付 MVP）。不改变 PRD、API.md、AGENTS.md 的现行效力 |
+| 文档版本 | V1.8 |
+| 文档状态 | 提案稿（Phase 1/2 已启动；N-01/N-02/N-03/N-04/N-05/N-07/N-08/N-09/O-01/O-02 已交付 MVP）。不改变 PRD、API.md、AGENTS.md 的现行效力 |
 | 撰写日期 | 2026-11-09 |
-| 代码基线 | 工作区当前代码（分支 `feat/notification-center`，基于 `99ba320`） |
-| 契约基线 | PRD V1.66、AGENTS V2.36、API.md V2.57 |
+| 代码基线 | 工作区当前代码（分支 `feat/agent-trace-history`，基于 `71934df`） |
+| 契约基线 | PRD V1.67、AGENTS V2.37、API.md V2.58 |
 | 适用范围 | 产品、前端、后端、Worker、测试、运维 |
 | 核对方式 | 代码检索 + 文档核对，证据见附录 A |
 
@@ -1283,9 +1283,10 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 | N-04 需求变更分析 MVP | 已完成 | 基线版本链、版本 diff、受影响用例集/用例；只读分析；见 PRD V1.64、API V2.55 |
 | N-05 用例资产库 MVP | 已完成 | 确认物化、跨集合检索、标签、文本查重、历史回填；见 PRD V1.65、API V2.56 |
 | N-08 站内通知 MVP | 已完成 | 任务生成/失败、评审指派/结论通知；顶栏未读与通知页；见 PRD V1.66、API V2.57 |
+| N-09 历史轨迹查询 MVP | 已完成 | 按回合聚合 AgentEvent，展示计时/工具/模型/token 与脱敏事件；见 PRD V1.67、API V2.58 |
 | O-03 用例页拆分 | 未开始 | 仍为后续；N-01/N-02 抽屉已独立组件化，避免继续增大 `Cases.vue` |
 | O-09 报告分享死代码 | 未开始 | 需先确认是恢复入口还是下线 share API |
-| O-18 文档契约治理 | 部分完成 | PRD V1.66、API V2.57、AGENTS V2.36 已登记；Harness 正文与双圆环废弃标注仍待处理 |
+| O-18 文档契约治理 | 部分完成 | PRD V1.67、API V2.58、AGENTS V2.37 已登记；Harness 正文与双圆环废弃标注仍待处理 |
 
 ---
 
@@ -1357,7 +1358,7 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 
 | 文档 | 关系 | 使用方式 |
 | --- | --- | --- |
-| PRD V1.66 | 产品范围唯一权威 | 本文只是候选池；批准后回写 PRD，再排期 |
+| PRD V1.67 | 产品范围唯一权威 | 本文只是候选池；批准后回写 PRD，再排期 |
 | API.md | 接口契约唯一权威 | 本文提到的端点均为建议；实现前先改 API.md |
 | AGENTS.md | 工程规范与状态地图 | 拆分、迁移、测试、提交按 AGENTS 执行 |
 | Harness 需求/六层 | 运行时能力基线 | N-09/N-11 承接其 P2/演进项 |
@@ -1395,6 +1396,8 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 | `backend/api/app/notification_service.py`、`routers/notifications.py`、`routers/case_reviews.py`、迁移 `b8e4d2f7c1a3` | N-08：通知服务、接口与评审接线 |
 | `backend/worker/app/testcase.py`、`tests/conftest.py`、`backend/api/tests/test_notifications.py` | N-08：任务通知与回归 |
 | `frontend/src/components/notifications/NotificationBell.vue`、`views/NotificationCenter.vue` | N-08：顶栏铃铛与通知页 |
-| `docs/AI测试与评估平台-PRD.md`、`docs/AI测试与评估平台-API.md`、`AGENTS.md` | 登记 PRD V1.66、API V2.57、AGENTS V2.36 |
+| `backend/api/app/routers/traces.py`、`tests/test_traces.py`、`app/schemas.py` | N-09：轨迹摘要/详情接口、脱敏与权限回归 |
+| `frontend/src/components/drawers/TraceHistoryDrawer.vue`、`views/Agent.vue` | N-09：历史轨迹抽屉与入口 |
+| `docs/AI测试与评估平台-PRD.md`、`docs/AI测试与评估平台-API.md`、`AGENTS.md` | 登记 PRD V1.67、API V2.58、AGENTS V2.37 |
 
-> 2026-11-09 Phase 1/2 实施：O-01、O-02 已完成；N-01、N-02、N-03、N-04、N-05、N-07、N-08 MVP 已完成并通过 74 项用例/需求/评审/质量/搜索测试、通知 2 项、Worker 13 项，ruff、前端 typecheck/build、单测 123/123。O-03 用例页拆分、O-09 分享死代码清理、O-18 Harness 文档回写仍待后续。本文其余条目仍为候选，不构成已批准需求。
+> 2026-11-09 Phase 1/2 实施：O-01、O-02 已完成；N-01、N-02、N-03、N-04、N-05、N-07、N-08、N-09 MVP 已完成并通过 13 项轨迹/通知/评审/搜索测试、ruff、前端 typecheck/build、单测 123/123。O-03 用例页拆分、O-09 分享死代码清理、O-18 Harness 文档回写仍待后续。本文其余条目仍为候选，不构成已批准需求。

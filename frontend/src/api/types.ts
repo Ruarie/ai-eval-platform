@@ -909,6 +909,40 @@ export interface RequirementAutoLinkResult {
   matched_case_count: number
 }
 
+// ─── 历史轨迹（N-09） ─────────────────────────────────────────────
+
+export interface TraceTurn {
+  turn: number
+  started_at?: number | null
+  finished_at?: number | null
+  status: string
+  event_count: number
+  tool_calls: number
+  model_attempts: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export interface TraceEvent {
+  seq: number
+  type: string
+  ts?: number | null
+  turn?: number | null
+  name: string
+  status: string
+  duration_ms?: number | null
+  error_code: string
+  prompt_tokens: number
+  completion_tokens: number
+}
+
+export interface TraceTurnDetail {
+  turn: number
+  summary: TraceTurn
+  events: TraceEvent[]
+}
+
 // ─── 站内通知（N-08） ─────────────────────────────────────────────
 
 export interface NotificationItem {

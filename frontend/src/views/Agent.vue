@@ -138,6 +138,14 @@
         >
         <span class="grow"></span>
         <button
+          v-if="currentSessionId"
+          class="btn btn-sm btn-ghost"
+          title="查看已持久化的历史回合轨迹"
+          @click="traceOpen = true"
+        >
+          历史轨迹
+        </button>
+        <button
           v-if="currentSession?.can_manage"
           class="btn btn-sm btn-ghost"
           :title="currentSession.visibility === 'team' ? '收回团队共享' : '向团队共享此会话'"
@@ -149,6 +157,12 @@
 
       <AgentWorkspace :session-id="currentSessionId" :session="currentSession" :store="loopStore" :create-session="createLoopSession" />
     </section>
+
+    <TraceHistoryDrawer
+      v-model:show="traceOpen"
+      :session-id="currentSessionId"
+      :session-name="displaySessionTitle(currentSession)"
+    />
 
     <!-- 移动端侧边栏抽屉遮罩层 (点击遮罩收起所有侧边栏) -->
     <div
@@ -167,6 +181,7 @@ import { api } from '../api/http'
 import type { AgentSession } from '../api/types'
 import { useAuthStore } from '../stores/auth'
 import AgentWorkspace from '../components/agent/loop/AgentWorkspace.vue'
+import TraceHistoryDrawer from '../components/drawers/TraceHistoryDrawer.vue'
 import { createLoopStore } from '../agent/loop/store'
 import { filterSessionsByStatus, loopSessionDot, loopSessionTooltip, sessionStatusFilterLabel } from '../agent/sessionList'
 
@@ -236,6 +251,7 @@ const filteredSessions = computed(() => filterSessionsByStatus(sessions.value, s
 const selectedSessionIds = ref<string[]>([])
 const deletingSessionIds = new Set<string>()
 const currentSessionId = ref<string>('')
+const traceOpen = ref(false)
 // 未绑定服务端会话时保持草稿态，不得用列表首项冒充当前会话。
 const currentSession = computed(() => sessions.value.find(s => s.id === currentSessionId.value) || null)
 const loopStore = createLoopStore(id => removeInaccessibleSession(id))

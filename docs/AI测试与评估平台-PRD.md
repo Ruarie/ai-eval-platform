@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.66 |
-| 本轮审查日期 | 2026-11-09（需求覆盖、搜索、评审、质量、变更分析、资产库与通知中心 MVP 交付） |
+| 文档版本 | V1.67 |
+| 本轮审查日期 | 2026-11-09（新增 Agent 历史轨迹查询 MVP；基于已持久化 AgentEvent，只读脱敏） |
 | 文档状态 | V1.31 已实现三类准备专家与受控草稿；V1.30 的完整计划/报告连接仍待实现，后台恢复与专家通讯仍待 P2/P3 |
 | 撰写日期 | 2026-08-17 |
 | 本轮修订 | 2026-09-26：V1.47 新增“我的记忆”，支持个人／个人工作区范围的主动保存、更正、撤回及私有主会话按预算召回；语义向量检索和自动抽取仍未交付。 |
@@ -50,6 +50,7 @@
 | V1.64 | 2026-11-09 | 需求变更分析 MVP：需求基线版本链、版本差异、受影响用例集/用例清单；只做分析，不自动修改用例 |
 | V1.65 | 2026-11-09 | 用例资产库 MVP：确认入库物化、跨集合检索、标签、文本查重与历史回填；不做自动合并或复制 |
 | V1.66 | 2026-11-09 | 站内通知中心 MVP：任务生成完成/失败、评审指派/结论通知；顶栏未读徽标与通知列表；不做邮件/Webhook 外发 |
+| V1.67 | 2026-11-09 | Agent 历史轨迹查询 MVP：按回合聚合计时/工具/模型/token，事件级脱敏展示；只读已持久化 AgentEvent，不新增结构化轨迹表 |
 
 ---
 
@@ -1608,3 +1609,42 @@ Excel 同一批次内的重复用例编号按最后一条更新，不重复创�
 - `backend/api/tests/test_notifications.py`、`worker/tests/conftest.py`：通知回归与测试表。
 - `frontend/src/components/notifications/NotificationBell.vue`、`views/NotificationCenter.vue`、`layouts/MainLayout.vue`、`router/index.ts`：铃铛、通知页与路由。
 - `frontend/src/api/types.ts`、`api/http.ts`：通知类型与客户端。
+
+## V1.67 Agent 历史轨迹查询（N-09 MVP，2026-11-09）
+
+### 范围
+
+Agent 会话顶栏新增「历史轨迹」：读取已持久化的 `agent_events`，按回合聚合展示：
+
+- 每轮开始/结束时间、状态、事件数、工具调用数、模型尝试数；
+- 每轮 prompt/completion/total token 汇总；
+- 事件级时间线：模型、工具、审批、问题、运行时错误等类型与状态；
+- 工具耗时、错误码、token 片段。
+
+本期只读查询，不新增结构化轨迹表，不返回消息正文、工具参数/结果、提示词或凭据；`harness_turns/spans/diagnostics` 的正式落库仍属后续批次。
+
+### 功能需求
+
+| 编号 | 功能 | 优先级 | 说明 |
+| --- | --- | --- | --- |
+| F-TRC-01 | 回合列表 | P0 | 最近 30 轮，按回合号倒序；显示状态/时间/事件数/工具数/token |
+| F-TRC-02 | 回合详情 | P0 | 按 seq 正序返回事件元数据；最多 500 条 |
+| F-TRC-03 | 脱敏 | P0 | 只返回 type/seq/ts/name/status/duration/error_code/token；不含正文、参数、结果、提示词 |
+| F-TRC-04 | 权限 | P0 | 私有会话仅属主/管理员可见；他人会话统一 404 |
+| F-TRC-05 | 长会话窗口 | P1 | 最多读取最近 5000 条事件，避免超大会话拖垮接口 |
+| F-TRC-06 | 页面入口 | P0 | Agent 会话顶栏「历史轨迹」打开抽屉；左侧回合、右侧事件时间线 |
+
+### 业务规则
+
+- 轨迹是诊断辅助，不替代审计；事件事实以 `agent_events` 为准。
+- 事件名称与状态只做白名单式投影；未知字段一律不返回。
+- 没有 turn 号的事件不进入回合聚合。
+- 工具失败只展示错误码/状态，不展示上游原文。
+- 轨迹查询只读，不写库、不改会话状态。
+
+### 修改代码文件与作用清单
+
+- `backend/api/app/routers/traces.py`、`app/schemas.py`、`app/main.py`：轨迹摘要/详情接口与路由。
+- `backend/api/tests/test_traces.py`：回合聚合、脱敏与权限回归。
+- `frontend/src/components/drawers/TraceHistoryDrawer.vue`、`views/Agent.vue`：历史轨迹抽屉与入口。
+- `frontend/src/api/types.ts`、`api/http.ts`：轨迹类型与客户端。

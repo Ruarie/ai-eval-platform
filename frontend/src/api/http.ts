@@ -88,6 +88,8 @@ import {
   type CaseAssetStats,
   type CaseAssetBackfill,
   type NotificationList,
+  type TraceTurn,
+  type TraceTurnDetail,
   type GlobalSearchResult,
 } from './types'
 import {
@@ -1199,6 +1201,22 @@ export const api = {
     async deleteFolder(id: string): Promise<void> {
       if (getDataMode() === 'mock') return
       await http.delete(`/api/case-folders/${id}`)
+    },
+  },
+
+  // 7.0 历史轨迹（N-09）
+  traces: {
+    async turns(sessionId: string, limit = 20): Promise<TraceTurn[]> {
+      if (getDataMode() === 'mock') return []
+      const { data } = await http.get(`/api/sessions/${sessionId}/trace/turns`, { params: { limit } })
+      return Array.isArray(data) ? data : []
+    },
+    async turn(sessionId: string, turn: number): Promise<TraceTurnDetail> {
+      if (getDataMode() === 'mock') {
+        return { turn, summary: { turn, status: '', event_count: 0, tool_calls: 0, model_attempts: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, events: [] }
+      }
+      const { data } = await http.get(`/api/sessions/${sessionId}/trace/turns/${turn}`)
+      return data
     },
   },
 
