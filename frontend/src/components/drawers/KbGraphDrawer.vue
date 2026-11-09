@@ -33,7 +33,7 @@
           <svg
             class="graph-canvas"
             :class="{ dragging }"
-            :viewBox="viewBoxAttr"
+            :viewBox="`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`"
             preserveAspectRatio="xMidYMid meet"
             role="img"
             aria-label="知识图谱实体关系图"
@@ -56,6 +56,7 @@
                 <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
               </marker>
             </defs>
+            <g :transform="layerTransform">
             <!-- 簇底色：同类型的节点落在同一片淡色区域里，读图时先看"团"再看点。 -->
             <g class="graph-clusters">
               <ellipse
@@ -69,21 +70,34 @@
                 opacity="0.06"
               />
             </g>
-            <g class="graph-edges">
+            <!-- 基础关系合并成 3 条 path：1800+ 条 <line> 会让 Vue 与浏览器都很吃力。 -->
+            <g class="graph-edges" :opacity="selectedId ? 0.18 : 1">
+              <path
+                v-for="bucket in baseEdgeBuckets"
+                :key="bucket.key"
+                :d="bucket.d"
+                fill="none"
+                stroke="#7c8798"
+                :stroke-width="bucket.width"
+                :opacity="bucket.opacity"
+                stroke-linecap="round"
+              />
+            </g>
+            <!-- 选中节点时才逐条画高亮，数量只有它的度数，带箭头与关系提示。 -->
+            <g v-if="selectedId" class="graph-edges-highlight">
               <line
-                v-for="line in renderedEdges"
+                v-for="line in highlightEdges"
                 :key="line.key"
                 :x1="line.x1"
                 :y1="line.y1"
                 :x2="line.x2"
                 :y2="line.y2"
-                stroke="#7c8798"
-                :stroke-width="line.width"
-                :opacity="line.opacity"
+                stroke="#4a7dfc"
+                stroke-width="1.4"
+                opacity="0.55"
                 stroke-linecap="round"
-                :marker-end="line.highlight ? 'url(#kb-graph-arrow)' : undefined"
+                marker-end="url(#kb-graph-arrow)"
               >
-                <!-- 悬停显示关系描述：边太多不可能全标，靠 tooltip 按需看。 -->
                 <title>{{ line.description || '关系' }}</title>
               </line>
             </g>
@@ -138,6 +152,7 @@
               >
                 {{ shortLabel(item.node.id) }}
               </text>
+            </g>
             </g>
           </svg>
 
@@ -395,36 +410,40 @@ const clusters = computed(() => layoutResult.value.clusters)
 
 const positions = computed(() => new Map(placed.value.map((item) => [item.node.id, item])))
 
-const renderedEdges = computed(() => {
-  const lines: Array<{
-    key: string
-    x1: number
-    y1: number
-    x2: number
-    y2: number
-    opacity: number
-    width: number
-    description: string
-    highlight: boolean
-  }> = []
+/** 基础关系：按两端较弱度数分三档，每档合并成一条 path。 */
+const baseEdgeBuckets = computed(() => {
+  const buckets = [
+    { key: 'weak', d: [] as string[], width: 0.6, opacity: 0.035 },
+    { key: 'mid', d: [] as string[], width: 0.8, opacity: 0.08 },
+    { key: 'strong', d: [] as string[], width: 1.1, opacity: 0.16 },
+  ]
   for (const edge of graph.value?.edges ?? []) {
     const from = positions.value.get(edge.source)
     const to = positions.value.get(edge.target)
     if (!from || !to) continue
-    const touch = edge.source === selectedId.value || edge.target === selectedId.value
     const weak = Math.min(from.node.degree, to.node.degree)
-    // 两端都弱的边几乎看不见：几百条边全画成实线就是"蜘蛛网"的主因。
-    const base = 0.025 + Math.min(0.14, (weak / 40) * 0.14)
+    const bucket = weak >= 12 ? buckets[2] : weak >= 4 ? buckets[1] : buckets[0]
+    bucket.d.push(`M${from.x.toFixed(1)} ${from.y.toFixed(1)}L${to.x.toFixed(1)} ${to.y.toFixed(1)}`)
+  }
+  return buckets.map((bucket) => ({ ...bucket, d: bucket.d.join('') }))
+})
+
+/** 选中节点的一跳关系：单独绘制，带箭头与关系描述 tooltip。 */
+const highlightEdges = computed(() => {
+  if (!selectedId.value) return []
+  const lines: Array<{ key: string; x1: number; y1: number; x2: number; y2: number; description: string }> = []
+  for (const edge of graph.value?.edges ?? []) {
+    if (edge.source !== selectedId.value && edge.target !== selectedId.value) continue
+    const from = positions.value.get(edge.source)
+    const to = positions.value.get(edge.target)
+    if (!from || !to) continue
     lines.push({
       key: `${edge.source}->${edge.target}`,
       x1: from.x,
       y1: from.y,
       x2: to.x,
       y2: to.y,
-      opacity: selectedId.value ? (touch ? 0.62 : 0.035) : base,
-      width: selectedId.value ? (touch ? 1.5 : 0.7) : 0.6 + Math.min(0.5, weak / 90),
       description: (edge.description || '').trim(),
-      highlight: Boolean(selectedId.value) && touch,
     })
   }
   return lines
@@ -474,41 +493,48 @@ const legend = computed(() => {
     .map(([type, count]) => ({ type, count, label: typeLabel(type), color: typeColor(type) }))
 })
 
-// ─── 视图缩放 / 平移：150 个节点在固定画布里会挤成一团，必须能放大看局部 ───
-const viewBox = ref({ x: 0, y: 0, w: CANVAS_WIDTH, h: CANVAS_HEIGHT })
-const viewBoxAttr = computed(
-  () => `${viewBox.value.x} ${viewBox.value.y} ${viewBox.value.w} ${viewBox.value.h}`,
+// ─── 视图缩放 / 平移：用 transform 作用在内容组上 ───
+// 之前改 viewBox，每帧都会触发整棵 SVG 重算；改 transform 后拖拽/滚轮只动一个属性，
+// 500 节点 / 1800 边的场景下差别非常明显。
+const view = ref({ scale: 1, x: 0, y: 0 })
+const layerTransform = computed(
+  () => `translate(${view.value.x.toFixed(2)} ${view.value.y.toFixed(2)}) scale(${view.value.scale.toFixed(3)})`,
 )
 const dragging = ref(false)
 let dragOrigin: { x: number; y: number; vx: number; vy: number } | null = null
 let moved = false
+let frame = 0
+let pendingView: { scale: number; x: number; y: number } | null = null
 
 function resetView() {
-  viewBox.value = { x: 0, y: 0, w: CANVAS_WIDTH, h: CANVAS_HEIGHT }
+  view.value = { scale: 1, x: 0, y: 0 }
 }
 
-/** 限制平移范围：允许看到画布外一圈，但不能把内容整个拖出视野。 */
-function clampViewBox(next: { x: number; y: number; w: number; h: number }) {
-  return {
-    w: next.w,
-    h: next.h,
-    x: Math.min(CANVAS_WIDTH - next.w / 2, Math.max(-next.w / 2, next.x)),
-    y: Math.min(CANVAS_HEIGHT - next.h / 2, Math.max(-next.h / 2, next.y)),
-  }
+/** 合并同一帧内的多次缩放/平移，指针事件密集时不再逐条触发渲染。 */
+function scheduleView(next: { scale: number; x: number; y: number }) {
+  pendingView = next
+  if (frame) return
+  frame = requestAnimationFrame(() => {
+    frame = 0
+    if (pendingView) view.value = pendingView
+    pendingView = null
+  })
 }
 
 function onWheel(event: WheelEvent) {
   const rect = (event.currentTarget as SVGSVGElement).getBoundingClientRect()
   const factor = event.deltaY > 0 ? 1.12 : 0.89
-  const nextW = Math.min(CANVAS_WIDTH * 2.5, Math.max(CANVAS_WIDTH / 5, viewBox.value.w * factor))
-  const nextH = (nextW * CANVAS_HEIGHT) / CANVAS_WIDTH
+  const nextScale = Math.min(5, Math.max(0.5, view.value.scale * factor))
+  // 以光标为锚点缩放：光标下的内容保持不动。
   const ratioX = (event.clientX - rect.left) / rect.width
   const ratioY = (event.clientY - rect.top) / rect.height
-  viewBox.value = clampViewBox({
-    x: viewBox.value.x + (viewBox.value.w - nextW) * ratioX,
-    y: viewBox.value.y + (viewBox.value.h - nextH) * ratioY,
-    w: nextW,
-    h: nextH,
+  const anchorX = ratioX * CANVAS_WIDTH
+  const anchorY = ratioY * CANVAS_HEIGHT
+  const k = nextScale / view.value.scale
+  scheduleView({
+    scale: nextScale,
+    x: anchorX - (anchorX - view.value.x) * k,
+    y: anchorY - (anchorY - view.value.y) * k,
   })
 }
 
@@ -518,8 +544,8 @@ function onPointerDown(event: PointerEvent) {
   dragOrigin = {
     x: event.clientX,
     y: event.clientY,
-    vx: viewBox.value.x,
-    vy: viewBox.value.y,
+    vx: view.value.x,
+    vy: view.value.y,
   }
   // 不在这里 capture：pointer capture 会把后续事件重定向到 svg，
   // 节点上的 click 就收不到了（表现为「点节点没反应」）。拖动超过阈值再 capture。
@@ -535,10 +561,10 @@ function onPointerMove(event: PointerEvent) {
     moved = true
     ;(event.currentTarget as SVGSVGElement).setPointerCapture?.(event.pointerId)
   }
-  viewBox.value = clampViewBox({
-    ...viewBox.value,
-    x: dragOrigin.vx - ((event.clientX - dragOrigin.x) * viewBox.value.w) / rect.width,
-    y: dragOrigin.vy - ((event.clientY - dragOrigin.y) * viewBox.value.h) / rect.height,
+  scheduleView({
+    scale: view.value.scale,
+    x: dragOrigin.vx + ((event.clientX - dragOrigin.x) * CANVAS_WIDTH) / rect.width,
+    y: dragOrigin.vy + ((event.clientY - dragOrigin.y) * CANVAS_HEIGHT) / rect.height,
   })
 }
 
@@ -692,6 +718,15 @@ function docName(docId: string) {
 
 .graph-canvas.dragging {
   cursor: grabbing;
+}
+
+/* 画布内部独立成层：拖动时只重绘这一块，不牵连外层列表与侧栏。 */
+.graph-canvas {
+  contain: layout paint;
+}
+
+.graph-canvas > g[transform] {
+  will-change: transform;
 }
 
 .graph-node {
