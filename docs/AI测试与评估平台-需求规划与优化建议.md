@@ -2,11 +2,11 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.5 |
-| 文档状态 | 提案稿（Phase 1/2 已启动；N-01/N-02/N-03/N-04/N-07/O-01/O-02 已交付 MVP）。不改变 PRD、API.md、AGENTS.md 的现行效力 |
+| 文档版本 | V1.6 |
+| 文档状态 | 提案稿（Phase 1/2 已启动；N-01/N-02/N-03/N-04/N-05/N-07/O-01/O-02 已交付 MVP）。不改变 PRD、API.md、AGENTS.md 的现行效力 |
 | 撰写日期 | 2026-11-09 |
-| 代码基线 | 工作区当前代码（分支 `feat/case-quality-metrics`，基于 `017c0d5`） |
-| 契约基线 | PRD V1.64、AGENTS V2.34、API.md V2.55 |
+| 代码基线 | 工作区当前代码（分支 `feat/case-quality-metrics`，基于 `0a7c611`） |
+| 契约基线 | PRD V1.65、AGENTS V2.35、API.md V2.56 |
 | 适用范围 | 产品、前端、后端、Worker、测试、运维 |
 | 核对方式 | 代码检索 + 文档核对，证据见附录 A |
 
@@ -1281,9 +1281,10 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 | N-02 评审工作流 MVP | 已完成 | 发起/决策/评论、AI 评审历史、版本快照/字段 diff/回滚新草稿；见 PRD V1.62、API V2.53 |
 | N-03 质量看板 MVP | 已完成 | 运行/生成/确认/采纳率/成功率/AI 均分与按天/模型/状态/模块分布；见 PRD V1.63、API V2.54 |
 | N-04 需求变更分析 MVP | 已完成 | 基线版本链、版本 diff、受影响用例集/用例；只读分析；见 PRD V1.64、API V2.55 |
+| N-05 用例资产库 MVP | 已完成 | 确认物化、跨集合检索、标签、文本查重、历史回填；见 PRD V1.65、API V2.56 |
 | O-03 用例页拆分 | 未开始 | 仍为后续；N-01/N-02 抽屉已独立组件化，避免继续增大 `Cases.vue` |
 | O-09 报告分享死代码 | 未开始 | 需先确认是恢复入口还是下线 share API |
-| O-18 文档契约治理 | 部分完成 | PRD V1.64、API V2.55、AGENTS V2.34 已登记；Harness 正文与双圆环废弃标注仍待处理 |
+| O-18 文档契约治理 | 部分完成 | PRD V1.65、API V2.56、AGENTS V2.35 已登记；Harness 正文与双圆环废弃标注仍待处理 |
 
 ---
 
@@ -1355,7 +1356,7 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 
 | 文档 | 关系 | 使用方式 |
 | --- | --- | --- |
-| PRD V1.64 | 产品范围唯一权威 | 本文只是候选池；批准后回写 PRD，再排期 |
+| PRD V1.65 | 产品范围唯一权威 | 本文只是候选池；批准后回写 PRD，再排期 |
 | API.md | 接口契约唯一权威 | 本文提到的端点均为建议；实现前先改 API.md |
 | AGENTS.md | 工程规范与状态地图 | 拆分、迁移、测试、提交按 AGENTS 执行 |
 | Harness 需求/六层 | 运行时能力基线 | N-09/N-11 承接其 P2/演进项 |
@@ -1387,6 +1388,9 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 | `backend/shared/requirements.py`、`requirement_change_service.py`、`routers/requirements.py`、迁移 `e2a6b9c4d7f1` | N-04：版本链、diff 与影响分析 |
 | `backend/api/tests/test_requirements.py`、`test_requirements_route.py` | N-04：差异纯函数与改版链路回归 |
 | `frontend/src/components/drawers/RequirementCoverageDrawer.vue`、`api/types.ts`、`api/http.ts` | N-04：需求变更分析交互与客户端 |
-| `docs/AI测试与评估平台-PRD.md`、`docs/AI测试与评估平台-API.md`、`AGENTS.md` | 登记 PRD V1.64、API V2.55、AGENTS V2.34 |
+| `backend/api/app/case_asset_service.py`、`routers/case_assets.py`、`routers/cases.py`、迁移 `f5c1d8a3b6e2` | N-05：资产物化、检索、标签、查重与回填 |
+| `backend/api/tests/test_case_assets.py` | N-05：服务与路由回归 |
+| `frontend/src/views/CaseAssets.vue`、`router/index.ts`、`layouts/MainLayout.vue` | N-05：资产库页面、路由与导航 |
+| `docs/AI测试与评估平台-PRD.md`、`docs/AI测试与评估平台-API.md`、`AGENTS.md` | 登记 PRD V1.65、API V2.56、AGENTS V2.35 |
 
-> 2026-11-09 Phase 1/2 实施：O-01、O-02 已完成；N-01、N-02、N-03、N-04、N-07 MVP 已完成并通过 29 项需求/搜索/评审/质量测试、ruff、前端 typecheck/build。O-03 用例页拆分、O-09 分享死代码清理、O-18 Harness 文档回写仍待后续。本文其余条目仍为候选，不构成已批准需求。
+> 2026-11-09 Phase 1/2 实施：O-01、O-02 已完成；N-01、N-02、N-03、N-04、N-05、N-07 MVP 已完成并通过 76 项用例/需求/评审/质量/搜索测试、ruff、前端 typecheck/build、单测 123/123。O-03 用例页拆分、O-09 分享死代码清理、O-18 Harness 文档回写仍待后续。本文其余条目仍为候选，不构成已批准需求。

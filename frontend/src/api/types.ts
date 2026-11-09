@@ -909,6 +909,57 @@ export interface RequirementAutoLinkResult {
   matched_case_count: number
 }
 
+// ─── 用例资产库（N-05） ───────────────────────────────────────────
+
+export interface CaseAsset {
+  id: string
+  source_case_set_id?: string | null
+  source_set_name: string
+  source_case_item_id?: string | null
+  name: string
+  module: string
+  submodule: string
+  feature_point: string
+  strategy: string
+  priority: string
+  precondition: string
+  steps: string
+  expected: string
+  tags: string[]
+  source_version: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface CaseAssetList {
+  items: CaseAsset[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface CaseAssetSimilarItem {
+  id: string
+  name: string
+  score: number
+  module: string
+  priority: string
+  source_case_set_id?: string | null
+  source_set_name: string
+}
+
+export interface CaseAssetStats {
+  total: number
+  source_sets: number
+  modules: Array<{ module: string; count: number }>
+  tags: Array<{ tag: string; count: number }>
+}
+
+export interface CaseAssetBackfill {
+  scanned_sets: number
+  created_assets: number
+}
+
 // ─── 用例生成质量看板（N-03） ─────────────────────────────────────
 
 export interface CasegenRun {

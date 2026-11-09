@@ -6,10 +6,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.55 |
-| 本轮审查日期 | 2026-11-09（需求变更分析 MVP：基线版本链、版本 diff 与受影响用例分析） |
+| 文档版本 | V2.56 |
+| 本轮审查日期 | 2026-11-09（用例资产库 MVP：确认物化、检索、标签、文本查重与历史回填） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
-| 对应 PRD | V1.64（功能唯一权威） |
+| 对应 PRD | V1.65（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
 | 对应 Agent 说明书 | `AI测试与评估平台-Agent开发文档.md` V1.7.15（AgentLoop 单入口；JSON 仍以本文为准） |
 | 对应前端计划 | AgentLoop 前端计划 V0.5 |
@@ -4786,3 +4786,81 @@ diff 响应：
 - `backend/api/app/routers/requirements.py`、`app/schemas.py`：接口与契约。
 - `backend/api/tests/test_requirements.py`、`test_requirements_route.py`：差异与改版链路回归。
 - `frontend/src/components/drawers/RequirementCoverageDrawer.vue`、`api/types.ts`、`http.ts`：改版分析交互与客户端。
+
+## V2.56 用例资产库（N-05 MVP，2026-11-09）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/case-assets?q=&module=&strategy=&priority=&tag=&offset=&limit=` | 检索未撤回资产 |
+| GET | `/api/case-assets/stats` | 总数、来源集合、模块/标签分布 |
+| GET | `/api/case-assets/{asset_id}` | 资产详情 |
+| PUT | `/api/case-assets/{asset_id}/tags` | 覆盖式更新标签 |
+| POST | `/api/case-assets/similar` | 文本查重候选，不落库 |
+| POST | `/api/case-assets/backfill` | 回填最近 100 个已确认用例集 |
+
+检索响应：
+
+```json
+{
+  "items": [
+    {
+      "id": "asset-1",
+      "source_case_set_id": "set-1",
+      "source_set_name": "登录用例集",
+      "source_case_item_id": "case-1",
+      "name": "手机号登录成功",
+      "module": "登录",
+      "submodule": "",
+      "feature_point": "FR-101",
+      "strategy": "正向",
+      "priority": "P0",
+      "precondition": "已注册用户",
+      "steps": "1. 输入手机号\n2. 输入密码\n3. 点击登录",
+      "expected": "进入首页",
+      "tags": ["冒烟"],
+      "source_version": 2,
+      "created_at": "2026-11-09T06:00:00Z",
+      "updated_at": "2026-11-09T06:00:00Z"
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 20
+}
+```
+
+标签请求：
+
+```json
+{ "tags": ["冒烟", "登录"] }
+```
+
+查重请求：
+
+```json
+{ "name": "手机号登录成功", "expected": "进入首页", "steps": "输入手机号和密码后登录", "limit": 5 }
+```
+
+查重响应 `{ "items": [{ "id": "...", "name": "...", "score": 0.93, "module": "登录", "priority": "P0", "source_case_set_id": "...", "source_set_name": "登录用例集" }] }`。
+
+回填响应 `{ "scanned_sets": 12, "created_assets": 86 }`。
+
+边界：
+
+- 资产在用例集确认入库时物化；同一 `source_case_item_id` 唯一，重复物化幂等且不覆盖标签；
+- 来源用例集删除后 `source_case_set_id` 置空，资产仍可读；
+- 关键词命中名称/功能点/预期/前置/步骤；标签为精确匹配；
+- 标签最多 10 个、单标签 20 字；去重、去空白；空数组表示清空；
+- 查重只返回候选，最低分 0.2，不自动合并/删除；
+- 回填只处理 `status=confirmed` 的最近 100 个用例集；
+- 资产是确认时点快照，资产修改不反向影响用例集。
+
+### 修改代码文件与作用清单
+
+- `backend/shared/models.py`、`backend/api/app/models.py`：`case_assets`。
+- `backend/api/migrations/versions/f5c1d8a3b6e2_用例资产库.py`：迁移。
+- `backend/api/app/case_asset_service.py`：物化/回填/检索/标签/统计/查重。
+- `backend/api/app/routers/case_assets.py`、`routers/cases.py`、`app/schemas.py`：接口与确认物化。
+- `backend/api/tests/test_case_assets.py`：服务与路由回归。
+- `frontend/src/views/CaseAssets.vue`、`router/index.ts`、`layouts/MainLayout.vue`：资产库页面、路由与导航。
+- `frontend/src/api/types.ts`、`http.ts`：资产类型与客户端。

@@ -46,6 +46,7 @@ from shared.casegen import (
 )
 from sqlalchemy.orm import Session
 
+from ..case_asset_service import materialize_case_set
 from ..case_excel import (
     EXPORT_FIXED_COLUMNS,
     IMPORT_MAX_BYTES,
@@ -1042,6 +1043,8 @@ def confirm_case_set(
         case_set.status = "confirmed"
         case_set.confirmed_count = case_set.generated_count
         case_set.review_state = "approved"
+        # N-05：确认入库即物化为跨用例集资产；重复确认幂等。
+        materialize_case_set(db, case_set, user_id=user.id)
         task_status = "succeeded"
     else:
         case_set.status = "cancelled"

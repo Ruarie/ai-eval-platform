@@ -82,6 +82,11 @@ import {
   type CaseVersionDiff,
   type CaseVersionRestore,
   type CasegenMetrics,
+  type CaseAsset,
+  type CaseAssetList,
+  type CaseAssetSimilarItem,
+  type CaseAssetStats,
+  type CaseAssetBackfill,
   type GlobalSearchResult,
 } from './types'
 import {
@@ -1193,6 +1198,40 @@ export const api = {
     async deleteFolder(id: string): Promise<void> {
       if (getDataMode() === 'mock') return
       await http.delete(`/api/case-folders/${id}`)
+    },
+  },
+
+  // 7.2 用例资产库（N-05）
+  caseAssets: {
+    async list(params: { q?: string; module?: string; strategy?: string; priority?: string; tag?: string; offset?: number; limit?: number } = {}): Promise<CaseAssetList> {
+      if (getDataMode() === 'mock') return { items: [], total: 0, offset: 0, limit: 20 }
+      const { data } = await http.get('/api/case-assets', { params })
+      return data
+    },
+    async get(id: string): Promise<CaseAsset> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持用例资产', ErrorCode.NOT_FOUND, 404)
+      const { data } = await http.get(`/api/case-assets/${id}`)
+      return data
+    },
+    async updateTags(id: string, tags: string[]): Promise<CaseAsset> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持用例资产', ErrorCode.VALIDATION, 400)
+      const { data } = await http.put(`/api/case-assets/${id}/tags`, { tags })
+      return data
+    },
+    async similar(payload: { name: string; expected?: string; steps?: string; limit?: number }): Promise<CaseAssetSimilarItem[]> {
+      if (getDataMode() === 'mock') return []
+      const { data } = await http.post('/api/case-assets/similar', payload)
+      return data.items || []
+    },
+    async stats(): Promise<CaseAssetStats> {
+      if (getDataMode() === 'mock') return { total: 0, source_sets: 0, modules: [], tags: [] }
+      const { data } = await http.get('/api/case-assets/stats')
+      return data
+    },
+    async backfill(): Promise<CaseAssetBackfill> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持资产回填', ErrorCode.VALIDATION, 400)
+      const { data } = await http.post('/api/case-assets/backfill')
+      return data
     },
   },
 

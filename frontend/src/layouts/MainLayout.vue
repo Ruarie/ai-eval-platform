@@ -219,6 +219,13 @@ const IconProfiles = () =>
     h('path', { d: 'M7 10h4M7 14h7' }),
   ])
 
+// 用例资产：归档盒 + 标签。
+const IconAsset = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { d: 'M4 7h16v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z' }),
+    h('path', { d: 'M4 7 6 3h12l2 4M9 11h6' }),
+  ])
+
 // 质量看板：柱状图 + 上升趋势。
 const IconQuality = () =>
   h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
@@ -290,6 +297,7 @@ const navGroups = [
   {
     title: '资产与历史',
     items: [
+      { path: '/case-assets', label: '用例资产', icon: IconAsset, t: 'var(--t-cases)', c: 'var(--c-cases)' },
       // 历史数据集与模型对比仍可进入，但只做只读查询/维护，不再作为新建评测入口。
       { path: '/datasets', label: '历史数据集', icon: IconDatasets, t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
       // PRD 5.8 路由表包含 /kb；RAG 评测停用后仍保留检索与图谱能力。
