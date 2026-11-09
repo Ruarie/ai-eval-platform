@@ -24,7 +24,7 @@ jobs:
               backend/api/app/harness/memory/eval.py \
               backend/api/app/harness/memory/extract.py \
               backend/api/app/llm/embeddings.py \
-              "backend/api/migrations/versions/c7a1e93d2f60_记忆向量索引表.py" \
+              backend/api/migrations/versions/c7a1e93d2f60_*.py \
               backend/api/tests/test_llm_embeddings.py \
               backend/api/tests/test_memory_recall_eval.py \
               backend/api/tests/test_personal_memory_extract.py \
