@@ -165,7 +165,6 @@ const emit = defineEmits<{
 
 const CANVAS_WIDTH = 840
 const CANVAS_HEIGHT = 600
-const PADDING = 44
 const LEGEND_LIMIT = 6
 // 与图例、节点、圆点共用一套定性色板：同类同色、跨类区分度高。
 const TYPE_COLORS: Record<string, string> = {
