@@ -98,6 +98,8 @@ CURRENT_BRANCH=$(git symbolic-ref --short -q HEAD 2>/dev/null || true)
 if [ -n "$CURRENT_BRANCH" ] && [ "$CURRENT_BRANCH" != "main" ]; then
     echo "==> 当前分支 ${CURRENT_BRANCH} 不是 main：跳过 git reset，按工作区现有代码部署"
     echo "    （保护未推送的开发提交；切回 main 后恢复自动同步）"
+    # 跳过脚本 reload：工作区里的 deploy.sh 可能是旧版本，reload 会把刚跳过的 reset 又做一次。
+    export DEPLOY_SCRIPT_RELOADED=1
 else
     if [ -n "$DEPLOY_COMMIT" ] && git cat-file -e "${DEPLOY_COMMIT}^{commit}" 2>/dev/null \
         && [ "$(git rev-parse HEAD 2>/dev/null || true)" = "$(git rev-parse "$DEPLOY_COMMIT")" ]; then
