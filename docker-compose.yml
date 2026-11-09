@@ -330,6 +330,8 @@ services:
       LIGHTRAG_API_KEY: ${LIGHTRAG_API_KEY:-}
       # 待索引队列上限：排队文档的正文驻留内存，超限返回 429 由平台落 failed。
       LIGHTRAG_MAX_QUEUE_DOCUMENTS: ${LIGHTRAG_MAX_QUEUE_DOCUMENTS:-64}
+      # 单文档索引并发：1=串行最稳；批量导入时调到 3 可显著提速（内存随之上涨）。
+      LIGHTRAG_MAX_PARALLEL_INSERT: ${LIGHTRAG_MAX_PARALLEL_INSERT:-1}
       # 停机宽限期：给在建索引任务收尾时间，避免 doc_status 停在 processing。
       LIGHTRAG_SHUTDOWN_GRACE_SECONDS: ${LIGHTRAG_SHUTDOWN_GRACE_SECONDS:-30}
     ports:
