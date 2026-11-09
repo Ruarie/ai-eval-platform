@@ -207,10 +207,8 @@ const targetTotal = computed(() =>
   (data.value?.recent || []).reduce((sum, run) => sum + (run.target_count || 0), 0),
 )
 
-const visibleSeries = computed(() => {
-  const series = data.value?.series || []
-  return series.length > 30 ? series.slice(-30) : series
-})
+// 90 天窗口保留完整序列，横向滚动查看；不悄悄截成 30 天。
+const visibleSeries = computed(() => data.value?.series || [])
 
 const hasSeries = computed(() => visibleSeries.value.some((point) => point.generated > 0 || point.confirmed > 0))
 
