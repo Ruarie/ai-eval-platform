@@ -17,6 +17,7 @@
           <div class="row" style="gap: 8px">
             <span v-for="item in legend" :key="item.type" class="legend-item small">
               <i :style="{ background: item.color }"></i>{{ item.label }}
+              <b class="legend-count">{{ item.count }}</b>
             </span>
             <button class="btn btn-secondary btn-sm" @click="resetView">重置视图</button>
             <button class="btn btn-secondary btn-sm" @click="load">刷新</button>
@@ -42,7 +43,7 @@
             @pointerup="onPointerUp"
             @pointerleave="onPointerUp"
           >
-            <g>
+            <g class="graph-edges">
               <line
                 v-for="line in renderedEdges"
                 :key="line.key"
@@ -50,33 +51,45 @@
                 :y1="line.y1"
                 :x2="line.x2"
                 :y2="line.y2"
-                stroke="var(--border-strong, #d8dce3)"
-                :stroke-width="line.dimmed ? 0.6 : 1.2"
-                :opacity="line.dimmed ? 0.25 : 0.75"
+                stroke="#7c8798"
+                :stroke-width="line.width"
+                :opacity="line.opacity"
+                stroke-linecap="round"
               />
             </g>
             <g
               v-for="item in placed"
               :key="item.node.id"
               class="graph-node"
-              :class="{ dimmed: isDimmed(item.node.id) }"
+              :class="{ dimmed: isDimmed(item.node.id), active: item.node.id === selectedId }"
               @click="onNodeClick(item.node.id)"
             >
+              <title>{{ item.node.id }} · {{ typeLabel(item.node.entity_type) }} · {{ item.node.degree }} 条关系</title>
               <!-- 透明热区：节点圆较小，点到标签与圆之间的缝隙也该选中。 -->
-              <circle :cx="item.x" :cy="item.y" :r="item.radius + 9" fill="transparent" />
+              <circle :cx="item.x" :cy="item.y" :r="item.radius + 10" fill="transparent" />
+              <!-- 选中态：外扩一圈细环，比改描边颜色更醒目。 -->
+              <circle
+                v-if="item.node.id === selectedId"
+                :cx="item.x"
+                :cy="item.y"
+                :r="item.radius + 5"
+                fill="none"
+                stroke="rgba(74,125,252,0.55)"
+                stroke-width="2"
+              />
               <circle
                 :cx="item.x"
                 :cy="item.y"
                 :r="item.radius"
                 :fill="typeColor(item.node.entity_type)"
-                :stroke="item.node.id === selectedId ? 'var(--text-primary, #1f2430)' : 'rgba(0,0,0,0.18)'"
-                :stroke-width="item.node.id === selectedId ? 2.4 : 1"
+                stroke="#ffffff"
+                stroke-width="1.6"
               />
               <text
                 v-if="showLabel(item.node)"
-                :x="item.x"
-                :y="item.y - item.radius - 5"
-                text-anchor="middle"
+                :x="item.labelX"
+                :y="item.labelY"
+                :text-anchor="item.labelAnchor"
                 class="graph-label"
                 :class="{ strong: item.node.id === selectedId }"
               >
@@ -108,8 +121,22 @@
                 </ul>
               </div>
             </template>
-            <div v-else class="small tertiary side-hint">
-              点击节点查看实体类型、描述与来源文档；节点大小表示库内关联度。
+            <div v-else class="side-hint">
+              <p class="small tertiary">
+                点击节点或下方实体查看类型、描述与来源文档；节点大小表示库内关联度。
+              </p>
+              <div class="small tertiary mb8">关联度最高的实体</div>
+              <button
+                v-for="node in topNodes"
+                :key="node.id"
+                type="button"
+                class="top-chip"
+                @click="selectedId = node.id"
+              >
+                <i :style="{ background: typeColor(node.entity_type) }"></i>
+                <span>{{ node.id }}</span>
+                <b>{{ node.degree }}</b>
+              </button>
             </div>
           </aside>
         </div>
@@ -136,11 +163,26 @@ const emit = defineEmits<{
   (event: 'upload'): void
 }>()
 
-const CANVAS_WIDTH = 820
-const CANVAS_HEIGHT = 520
+const CANVAS_WIDTH = 840
+const CANVAS_HEIGHT = 600
 const PADDING = 44
 const LEGEND_LIMIT = 6
-const TYPE_COLORS = ['#5b8def', '#e8894a', '#3fae8f', '#9b6be0', '#d0a03a', '#5aa9c9']
+// 与图例、节点、圆点共用一套定性色板：同类同色、跨类区分度高。
+const TYPE_COLORS: Record<string, string> = {
+  artifact: '#4a7dfc',
+  concept: '#8b5cf6',
+  content: '#0ea5a4',
+  data: '#f0a13c',
+  method: '#22a06b',
+  event: '#e4568b',
+  person: '#f97316',
+  organization: '#6366f1',
+  location: '#0ea5e9',
+  activity: '#a3a847',
+  category: '#7c8798',
+  other: '#94a3b8',
+}
+const TYPE_FALLBACK = ['#4a7dfc', '#8b5cf6', '#0ea5a4', '#f0a13c', '#22a06b', '#e4568b']
 
 const graph = ref<KbGraph | null>(null)
 const loading = ref(false)
@@ -187,14 +229,26 @@ interface PlacedNode {
   x: number
   y: number
   radius: number
+  /** 节点在环上的极角，用于把外圈标签甩到圆外侧。 */
+  angle: number
+  ring: number
+  labelX: number
+  labelY: number
+  labelAnchor: 'start' | 'middle' | 'end'
 }
 
+// 画布可用半径与簇心分布半径：簇心均匀落在一个椭圆上。
+const MAX_RADIUS_Y = CANVAS_HEIGHT / 2 - 30
+const MAX_RADIUS_X = (MAX_RADIUS_Y * CANVAS_WIDTH) / CANVAS_HEIGHT
+const CLUSTER_RX = MAX_RADIUS_X * 0.7
+const CLUSTER_RY = MAX_RADIUS_Y * 0.74
+
 /**
- * 分层环形布局（按度数分环 + 环内均匀分布）。
+ * 类型分簇布局：每个实体类型占一个"海岛"，簇内沿黄金角螺旋展开。
  *
- * 之前用力导向：150 个节点时斥力把大半节点推到画布边界并被钳制成"边框一圈球"，
- * 中间只剩交叉的边。环形布局稳定、有层次，也不会随数据量抖动；缩放/拖拽负责
- * 看局部细节。
+ * 试过两种都不理想：力导向会把节点推到边界、环形会把节点排成"项链"且中间空洞。
+ * 分簇的好处是同类节点成团、跨类型边只发生在簇之间，画面饱满且一眼能看出
+ * "这类实体大概有哪些"；簇内用黄金角螺旋保证不重叠。
  */
 function layout(nodes: KbGraphNode[]): PlacedNode[] {
   const total = nodes.length
@@ -202,38 +256,51 @@ function layout(nodes: KbGraphNode[]): PlacedNode[] {
 
   const centerX = CANVAS_WIDTH / 2
   const centerY = CANVAS_HEIGHT / 2
-  const maxRadiusY = Math.min(CANVAS_HEIGHT / 2 - PADDING, CANVAS_HEIGHT * 0.42)
-  const maxRadiusX = maxRadiusY * (CANVAS_WIDTH / CANVAS_HEIGHT)
-  const sorted = [...nodes].sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
 
-  // 内圈放度数最高的实体，外圈放长尾；数量按环周长近似分配。
-  const ringSizes = [
-    Math.min(12, total),
-    Math.min(40, Math.max(0, total - 12)),
-    Math.max(0, total - 52),
-  ]
-  const ringRadius = [0.36, 0.68, 1]
+  const byType = new Map<string, KbGraphNode[]>()
+  for (const node of nodes) {
+    const key = (node.entity_type || 'other').toLowerCase()
+    const bucket = byType.get(key) ?? []
+    bucket.push(node)
+    byType.set(key, bucket)
+  }
+  const groups = [...byType.entries()].sort(
+    (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]),
+  )
+
   const placedNodes: PlacedNode[] = []
-  let cursor = 0
+  const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
 
-  ringSizes.forEach((size, ringIndex) => {
-    const count = Math.min(size, total - cursor)
-    if (count <= 0) return
-    const rx = maxRadiusX * ringRadius[ringIndex]
-    const ry = maxRadiusY * ringRadius[ringIndex]
-    // 每环错开半个扇区，避免不同环的节点在视觉上连成直线。
-    const offset = ringIndex === 0 ? -Math.PI / 2 : -Math.PI / 2 + Math.PI / count
-    for (let i = 0; i < count; i += 1) {
-      const angle = offset + (i / count) * Math.PI * 2
-      const node = sorted[cursor + i]
+  groups.forEach(([, bucket], groupIndex) => {
+    bucket.sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
+    const baseAngle = -Math.PI / 2 + (groupIndex / groups.length) * Math.PI * 2
+    const clusterX = centerX + Math.cos(baseAngle) * CLUSTER_RX
+    const clusterY = centerY + Math.sin(baseAngle) * CLUSTER_RY
+
+    bucket.forEach((node, index) => {
+      // 第一个节点占簇心，其余按 sqrt 递增的半径绕开，避免挤成一点。
+      const spread = index === 0 ? 0 : 13 + 9.2 * Math.sqrt(index)
+      const angle = index === 0 ? 0 : index * GOLDEN_ANGLE
+      const x = clusterX + Math.cos(angle) * spread * 1.12
+      const y = clusterY + Math.sin(angle) * spread * 0.82
+      const radius = 4.6 + Math.min(8.4, Math.sqrt(Math.max(0, node.degree)) * 1.7)
+
+      // 每个簇只给度数最高的两个节点挂标签，其余靠 hover 详情看。
+      const outward = Math.cos(angle) * Math.cos(baseAngle) + Math.sin(angle) * Math.sin(baseAngle) >= 0
+      const anchor: 'start' | 'middle' | 'end' =
+        index === 0 ? 'middle' : outward ? 'start' : 'end'
       placedNodes.push({
         node,
-        x: centerX + Math.cos(angle) * rx,
-        y: centerY + Math.sin(angle) * ry,
-        radius: (ringIndex === 0 ? 8 : ringIndex === 1 ? 5.5 : 4) + Math.min(6, node.degree * 0.5),
+        x,
+        y,
+        radius,
+        angle,
+        ring: index,
+        labelX: index === 0 ? x : x + (outward ? radius + 7 : -(radius + 7)),
+        labelY: index === 0 ? y - radius - 10 : y + 3.5,
+        labelAnchor: anchor,
       })
-    }
-    cursor += count
+    })
   })
 
   return placedNodes
@@ -244,24 +311,43 @@ const placed = computed(() => layout(graph.value?.nodes ?? []))
 const positions = computed(() => new Map(placed.value.map((item) => [item.node.id, item])))
 
 const renderedEdges = computed(() => {
-  const lines: Array<{ key: string; x1: number; y1: number; x2: number; y2: number; dimmed: boolean }> = []
+  const lines: Array<{
+    key: string
+    x1: number
+    y1: number
+    x2: number
+    y2: number
+    opacity: number
+    width: number
+  }> = []
   for (const edge of graph.value?.edges ?? []) {
     const from = positions.value.get(edge.source)
     const to = positions.value.get(edge.target)
     if (!from || !to) continue
+    const touch = edge.source === selectedId.value || edge.target === selectedId.value
+    const weak = Math.min(from.node.degree, to.node.degree)
+    // 两端都弱的边几乎看不见：274 条边全画成实线就是"蜘蛛网"的主因。
+    const base = 0.05 + Math.min(0.24, (weak / 40) * 0.24)
     lines.push({
       key: `${edge.source}->${edge.target}`,
       x1: from.x,
       y1: from.y,
       x2: to.x,
       y2: to.y,
-      dimmed: Boolean(selectedId.value) && selectedId.value !== edge.source && selectedId.value !== edge.target,
+      opacity: selectedId.value ? (touch ? 0.62 : 0.035) : base,
+      width: selectedId.value ? (touch ? 1.5 : 0.7) : 0.7 + Math.min(0.8, weak / 60),
     })
   }
   return lines
 })
 
 const selected = computed(() => (graph.value?.nodes ?? []).find((node) => node.id === selectedId.value) ?? null)
+
+const topNodes = computed(() =>
+  [...(graph.value?.nodes ?? [])]
+    .sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
+    .slice(0, 6),
+)
 
 const neighbours = computed(() => {
   const ids = new Set<string>()
@@ -274,13 +360,15 @@ const neighbours = computed(() => {
 })
 
 const legend = computed(() => {
-  const types: string[] = []
+  const counts = new Map<string, number>()
   for (const node of graph.value?.nodes ?? []) {
-    const type = node.entity_type || 'other'
-    if (!types.includes(type)) types.push(type)
-    if (types.length >= LEGEND_LIMIT) break
+    const type = (node.entity_type || 'other').toLowerCase()
+    counts.set(type, (counts.get(type) ?? 0) + 1)
   }
-  return types.map((type) => ({ type, label: typeLabel(type), color: typeColor(type) }))
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, LEGEND_LIMIT)
+    .map(([type, count]) => ({ type, count, label: typeLabel(type), color: typeColor(type) }))
 })
 
 // ─── 视图缩放 / 平移：150 个节点在固定画布里会挤成一团，必须能放大看局部 ───
@@ -368,12 +456,23 @@ function onNodeClick(nodeId: string) {
 /** 标签上限 14 个：节点多时只标度数最高的实体，否则长实体名会互相压住。 */
 const labelIds = computed(() => {
   const ids = new Set<string>()
-  if (selectedId.value) ids.add(selectedId.value)
-  const total = placed.value.length
-  const threshold = total > 80 ? 8 : total > 40 ? 4 : 2
+  // 每簇只标「度数最高」的那个（簇心）：两个标签一定会在簇内重叠。
+  const perCluster = new Set<string>()
   for (const item of placed.value) {
-    if (ids.size >= 14) break
-    if (item.node.degree >= threshold) ids.add(item.node.id)
+    const key = (item.node.entity_type || 'other').toLowerCase()
+    if (perCluster.has(key)) continue
+    perCluster.add(key)
+    ids.add(item.node.id)
+  }
+  // 选中节点与它的一跳邻居补标签，方便顺着关系看。
+  if (selectedId.value) {
+    ids.add(selectedId.value)
+    let extra = 0
+    for (const id of neighbours.value) {
+      if (extra >= 12) break
+      ids.add(id)
+      extra += 1
+    }
   }
   return ids
 })
@@ -415,11 +514,13 @@ function typeLabel(type: string) {
   return TYPE_LABELS[key] || type || '未标注'
 }
 
-/** 按实体类型稳定取色，同一类型在刷新前后保持一致。 */
+/** 按实体类型取色：已知类型走固定色板，未知类型用稳定 hash 兜底。 */
 function typeColor(type: string) {
+  const key = (type || 'other').toLowerCase()
+  if (TYPE_COLORS[key]) return TYPE_COLORS[key]
   let hash = 0
-  for (const char of type || 'other') hash = (hash * 31 + char.charCodeAt(0)) % 9973
-  return TYPE_COLORS[hash % TYPE_COLORS.length]
+  for (const char of key) hash = (hash * 31 + char.charCodeAt(0)) % 9973
+  return TYPE_FALLBACK[hash % TYPE_FALLBACK.length]
 }
 
 function docName(docId: string) {
@@ -475,9 +576,13 @@ function docName(docId: string) {
 .graph-canvas {
   flex: 1 1 auto;
   min-width: 0;
-  height: calc(100vh - 280px);
-  min-height: 380px;
-  background: var(--bg-elevated, #f7f8fa);
+  width: 100%;
+  height: auto;
+  aspect-ratio: 840 / 600;
+  max-height: calc(100vh - 300px);
+  /* 极浅的径向渐变把视觉重心收到中心，比纯灰底更像「图」而不是「表格」。 */
+  background:
+    radial-gradient(circle at 50% 46%, #ffffff 0%, #f6f8fc 62%, #eef2f8 100%);
   border: 1px solid var(--border, #e5e7eb);
   border-radius: 12px;
 }
@@ -491,6 +596,10 @@ function docName(docId: string) {
   transition: opacity 0.15s ease;
 }
 
+.graph-node.active circle {
+  filter: drop-shadow(0 1px 3px rgba(31, 41, 55, 0.24));
+}
+
 .graph-label.strong {
   font-weight: 600;
   fill: var(--text-primary, #1f2430);
@@ -502,8 +611,19 @@ function docName(docId: string) {
 
 .graph-label {
   font-size: 11px;
-  fill: var(--text-secondary, #4b5563);
+  fill: #3d4657;
   pointer-events: none;
+  /* 白色描边做光晕：标签压在连线上也能读清。 */
+  paint-order: stroke;
+  stroke: #f7f9fc;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.legend-count {
+  margin-left: 2px;
+  font-weight: 500;
+  color: var(--text-quaternary, #9aa3b2);
 }
 
 .graph-side {
@@ -527,6 +647,46 @@ function docName(docId: string) {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.top-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary, #4b5563);
+  text-align: left;
+}
+
+.top-chip:hover {
+  border-color: var(--accent, #4a7dfc);
+  color: var(--text-primary, #1f2430);
+}
+
+.top-chip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.top-chip span {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-chip b {
+  font-weight: 500;
+  color: var(--text-quaternary, #9aa3b2);
 }
 
 .side-desc {
