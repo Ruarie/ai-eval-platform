@@ -1477,6 +1477,34 @@ class CoverageModuleOut(ApiModel):
     coverage_percent: float
 
 
+class NotificationOut(ApiModel):
+    """站内通知响应。"""
+
+    id: str
+    type: str
+    title: str
+    body: str = ""
+    link: str = ""
+    read_at: Any | None = None
+    created_at: Any | None = None
+
+
+class NotificationListOut(ApiModel):
+    """通知分页响应。"""
+
+    items: list[NotificationOut] = Field(default_factory=list)
+    total: int = 0
+    unread: int = 0
+    offset: int = 0
+    limit: int = 20
+
+
+class NotificationUnreadOut(ApiModel):
+    """未读计数。"""
+
+    unread: int = 0
+
+
 class CaseAssetOut(ApiModel):
     """跨用例集复用的用例资产。"""
 

@@ -825,6 +825,28 @@ class Setting(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
 
+class Notification(Base):
+    """站内通知：任务终态、评审指派/结论等；按用户隔离。"""
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("user_id", "dedupe_key", name="uq_notifications_user_dedupe"),
+        Index("ix_notifications_user_read_created", "user_id", "read_at", "created_at"),
+    )
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # task_ready/task_failed/review_requested/review_approved/review_changes
+    type = Column(String, nullable=False, default="system")
+    title = Column(String, nullable=False, default="")
+    body = Column(Text, nullable=False, default="")
+    link = Column(String, nullable=False, default="")
+    # 同一用户同一事件只保留一条；为空时默认按 ID 去重。
+    dedupe_key = Column(String, nullable=False, default="")
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class AuditLog(Base):
     """安全与配置变更审计；明文凭据禁止写入 detail。"""
 

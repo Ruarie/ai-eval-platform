@@ -27,6 +27,7 @@ from shared.models import (  # noqa: F401
     GoldQaItem,
     KbDocument,
     KnowledgeBase,
+    Notification,
     ProtocolProfile,
     Report,
     Session,

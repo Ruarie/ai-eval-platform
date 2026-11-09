@@ -6,10 +6,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.56 |
-| 本轮审查日期 | 2026-11-09（用例资产库 MVP：确认物化、检索、标签、文本查重与历史回填） |
+| 文档版本 | V2.57 |
+| 本轮审查日期 | 2026-11-09（站内通知中心 MVP：任务/评审通知、未读与已读接口） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
-| 对应 PRD | V1.65（功能唯一权威） |
+| 对应 PRD | V1.66（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
 | 对应 Agent 说明书 | `AI测试与评估平台-Agent开发文档.md` V1.7.15（AgentLoop 单入口；JSON 仍以本文为准） |
 | 对应前端计划 | AgentLoop 前端计划 V0.5 |
@@ -4864,3 +4864,56 @@ diff 响应：
 - `backend/api/tests/test_case_assets.py`：服务与路由回归。
 - `frontend/src/views/CaseAssets.vue`、`router/index.ts`、`layouts/MainLayout.vue`：资产库页面、路由与导航。
 - `frontend/src/api/types.ts`、`http.ts`：资产类型与客户端。
+
+## V2.57 站内通知中心（N-08 MVP，2026-11-09）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/notifications?unread=&offset=&limit=` | 当前成员通知列表 |
+| GET | `/api/notifications/unread-count` | 未读计数 |
+| POST | `/api/notifications/{notification_id}/read` | 标记单条已读 |
+| POST | `/api/notifications/read-all` | 全部标为已读 |
+
+列表响应：
+
+```json
+{
+  "items": [
+    {
+      "id": "notif-1",
+      "type": "task_ready",
+      "title": "用例已生成，等待确认",
+      "body": "已生成 42 条用例，请在 72 小时内审核确认。",
+      "link": "/cases?set_id=set-1",
+      "read_at": null,
+      "created_at": "2026-11-09T07:00:00Z"
+    }
+  ],
+  "total": 1,
+  "unread": 1,
+  "offset": 0,
+  "limit": 20
+}
+```
+
+未读/已读响应：`{ "unread": 0 }`。
+
+边界：
+
+- 只能读取和标记自己的通知；他人通知返回 `NOT_FOUND`；
+- `unread=true` 只返回未读；默认按创建时间倒序；
+- 同一用户同一 `dedupe_key` 只保留一条，重复写入跳过；
+- 通知类型当前为 `task_ready` / `task_failed` / `review_requested` / `review_approved` / `review_changes`；
+- 通知正文不包含密钥、上游原文或完整提示词；通知不代表任务最终状态；
+- 当前无外发渠道（邮件/Webhook/企业微信），后续批次再开放。
+
+### 修改代码文件与作用清单
+
+- `backend/shared/models.py`、`backend/api/app/models.py`：`notifications`。
+- `backend/api/migrations/versions/b8e4d2f7c1a3_通知中心.py`：迁移。
+- `backend/api/app/notification_service.py`：追加/去重/列表/未读/已读。
+- `backend/api/app/routers/notifications.py`、`routers/case_reviews.py`、`app/main.py`：接口与评审接线。
+- `backend/worker/app/testcase.py`、`models.py`：任务完成/失败通知。
+- `backend/api/tests/test_notifications.py`、`worker/tests/conftest.py`：通知回归与测试表。
+- `frontend/src/components/notifications/NotificationBell.vue`、`views/NotificationCenter.vue`、`layouts/MainLayout.vue`、`router/index.ts`：铃铛、通知页与路由。
+- `frontend/src/api/types.ts`、`http.ts`：通知类型与客户端。

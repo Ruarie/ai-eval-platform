@@ -23,6 +23,7 @@ from app.models import (
     CaseReviewRun,
     CaseSet,
     CaseSetVersion,
+    Notification,
     User,
 )
 
@@ -34,6 +35,7 @@ _NEEDED_MODELS = (
     CaseReviewComment,
     CaseReviewRun,
     CaseSetVersion,
+    Notification,
     AuditLog,
 )
 

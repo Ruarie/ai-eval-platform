@@ -45,6 +45,7 @@ from .events import push_ws
 from .models import (
     CaseItem,
     CaseSet,
+    Notification,
     ProtocolProfile,
     Setting,
     StoredFile,
@@ -76,6 +77,17 @@ def _fail(db: Session, task: Task, code: str, message: str) -> None:
     task.finished_at = utcnow()
     task.result = {**(task.result or {}), "error_code": code, "error_message": message}
     db.add(TaskEvent(task_id=task.id, event="error", level="error", message=message, payload={"code": code}))
+    # N-08：失败通知只带任务 ID、错误码与安全文案，不复制上游原文。
+    db.add(
+        Notification(
+            user_id=task.created_by,
+            type="task_failed",
+            title="用例生成失败",
+            body=str(message or "任务执行失败")[:1000],
+            link=f"/tasks?task_id={task.id}",
+            dedupe_key=f"task:{task.id}:failed",
+        )
+    )
     db.commit()
     push_ws(task.session_id, "error", {"code": code, "message": message}, task_id=task.id)
     logger.warning("testcase task %s failed (%s): %s", task.id, code, message)
@@ -458,6 +470,17 @@ def run_testcase(task_id: str) -> None:
                 event="awaiting_case_confirm",
                 message=f"已生成 {len(cases)} 条用例，等待确认入库（72h 内有效）",
                 payload={"case_set_id": case_set.id},
+            )
+        )
+        # N-08：生成完成通知直达用例集，避免用户只能轮询任务页。
+        db.add(
+            Notification(
+                user_id=task.created_by,
+                type="task_ready",
+                title="用例已生成，等待确认",
+                body=f"已生成 {len(cases)} 条用例，请在 72 小时内审核确认。",
+                link=f"/cases?set_id={case_set.id}",
+                dedupe_key=f"task:{task.id}:ready",
             )
         )
         db.commit()

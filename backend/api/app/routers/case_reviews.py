@@ -34,6 +34,7 @@ from ..models import (
     User,
     utcnow,
 )
+from ..notification_service import add_notification
 from ..schemas import (
     CaseReviewCommentIn,
     CaseReviewCommentOut,
@@ -265,6 +266,16 @@ def create_review_request(
             ip=client_ip(request),
         )
     )
+    if assignee_id != user.id:
+        add_notification(
+            db,
+            user_id=assignee_id,
+            type="review_requested",
+            title="有一份用例集待评审",
+            body=f"{case_set.name} 已提交评审，请在截止时间前处理。",
+            link=f"/cases?set_id={case_set.id}",
+            dedupe_key=f"review:{review.id}:requested",
+        )
     db.commit()
     db.refresh(case_set)
     return _workspace(db, case_set)
@@ -314,6 +325,17 @@ def decide_review_request(
             ip=client_ip(request),
         )
     )
+    if review.created_by and review.created_by != user.id:
+        approved = body.decision == "approved"
+        add_notification(
+            db,
+            user_id=review.created_by,
+            type="review_approved" if approved else "review_changes",
+            title="用例评审已通过" if approved else "用例评审要求修改",
+            body=f"{case_set.name}：{note or ('评审通过' if approved else '请按意见修改')}",
+            link=f"/cases?set_id={case_set.id}",
+            dedupe_key=f"review:{review.id}:decided",
+        )
     db.commit()
     db.refresh(case_set)
     return _workspace(db, case_set)

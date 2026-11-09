@@ -2,7 +2,7 @@
 
 import pytest
 from app import main, stress, task_state, testcase
-from app.models import CaseItem, CaseSet, ProtocolProfile, Setting, StoredFile, Task, TaskEvent
+from app.models import CaseItem, CaseSet, Notification, ProtocolProfile, Setting, StoredFile, Task, TaskEvent
 from sqlalchemy import BigInteger, create_engine
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
@@ -25,7 +25,7 @@ def _sqlite_integer(_type, _compiler, **_kwargs):
 def worker_db_factory(tmp_path, monkeypatch):
     """创建可跨线程访问的临时数据库；供应商和 WS 均不在夹具中调用。"""
     engine = create_engine(f"sqlite:///{tmp_path / 'worker.db'}")
-    for model in (Task, TaskEvent, CaseSet, CaseItem, Setting, StoredFile, ProtocolProfile):
+    for model in (Task, TaskEvent, CaseSet, CaseItem, Setting, StoredFile, ProtocolProfile, Notification):
         model.__table__.create(engine)
     factory = sessionmaker(engine, autoflush=False)
     for module in (main, stress, task_state, testcase):
