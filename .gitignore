@@ -52,3 +52,4 @@ artifacts/
 
 # Agent 全量测试产物（本地留存，不入库）
 tools/agent-eval/reports/
+\n# 56MB 原始用例表，只用于一次性导入，不进仓库\n造化插件+资产库前端-测试用例.xlsx
