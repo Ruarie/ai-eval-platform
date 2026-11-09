@@ -69,6 +69,17 @@ import {
   type AgentCollaborationDetail,
   type AgentCollaborationSummary,
   type KbGraph,
+  type RequirementBaseline,
+  type RequirementBaselineDetail,
+  type RequirementItem,
+  type CaseCoverage,
+  type RequirementAutoLinkResult,
+  type CaseReviewWorkspace,
+  type CaseReviewRun,
+  type CaseSetVersion,
+  type CaseVersionDiff,
+  type CaseVersionRestore,
+  type GlobalSearchResult,
 } from './types'
 import {
   MOCK_PROFILES,
@@ -1179,6 +1190,142 @@ export const api = {
     async deleteFolder(id: string): Promise<void> {
       if (getDataMode() === 'mock') return
       await http.delete(`/api/case-folders/${id}`)
+    },
+  },
+
+  // 7.4 用例评审工作流与版本历史（N-02）
+  caseReviews: {
+    async get(setId: string): Promise<CaseReviewWorkspace> {
+      if (getDataMode() === 'mock') {
+        return {
+          case_set_id: setId,
+          review_state: 'draft',
+          review_assignee_name: '',
+          active_request: null,
+          comments: [],
+          ai_runs: [],
+          versions: [],
+        }
+      }
+      const { data } = await http.get(`/api/case-sets/${setId}/review`)
+      return data
+    },
+    async createRequest(setId: string, payload: { assignee_id?: string; due_at?: string; note?: string }): Promise<CaseReviewWorkspace> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持人工评审', ErrorCode.VALIDATION, 400)
+      const { data } = await http.post(`/api/case-sets/${setId}/review-requests`, payload)
+      return data
+    },
+    async decide(setId: string, requestId: string, payload: { decision: 'approved' | 'changes_requested'; note?: string }): Promise<CaseReviewWorkspace> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持人工评审', ErrorCode.VALIDATION, 400)
+      const { data } = await http.post(`/api/case-sets/${setId}/review-requests/${requestId}/decision`, payload)
+      return data
+    },
+    async addComment(setId: string, payload: { body: string; case_item_id?: string }): Promise<CaseReviewWorkspace> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持评审评论', ErrorCode.VALIDATION, 400)
+      const { data } = await http.post(`/api/case-sets/${setId}/comments`, payload)
+      return data
+    },
+    async aiRuns(setId: string): Promise<CaseReviewRun[]> {
+      if (getDataMode() === 'mock') return []
+      const { data } = await http.get(`/api/case-sets/${setId}/ai-reviews`)
+      return Array.isArray(data) ? data : []
+    },
+    async versions(setId: string): Promise<CaseSetVersion[]> {
+      if (getDataMode() === 'mock') return []
+      const { data } = await http.get(`/api/case-sets/${setId}/versions`)
+      return Array.isArray(data) ? data : []
+    },
+    async createVersion(setId: string, reason = ''): Promise<CaseSetVersion> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持版本快照', ErrorCode.VALIDATION, 400)
+      const { data } = await http.post(`/api/case-sets/${setId}/versions`, { reason })
+      return data
+    },
+    async diff(setId: string, version: number, baseVersion?: number): Promise<CaseVersionDiff> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持版本对比', ErrorCode.VALIDATION, 400)
+      const { data } = await http.get(`/api/case-sets/${setId}/versions/${version}/diff`, {
+        params: baseVersion ? { base_version: baseVersion } : {},
+      })
+      return data
+    },
+    async restore(setId: string, version: number): Promise<CaseVersionRestore> {
+      if (getDataMode() === 'mock') throw new ApiError('Mock 模式不支持版本回滚', ErrorCode.VALIDATION, 400)
+      const { data } = await http.post(`/api/case-sets/${setId}/versions/${version}/restore`)
+      return data
+    },
+  },
+
+  // 7.5 需求基线与用例覆盖（N-01）
+  requirements: {
+    async listBaselines(): Promise<RequirementBaseline[]> {
+      if (getDataMode() === 'mock') return []
+      const { data } = await http.get('/api/requirement-baselines')
+      return Array.isArray(data) ? data : []
+    },
+    async createBaseline(payload: { name: string; source_text: string; source_kind?: 'text' | 'file'; source_name?: string }): Promise<RequirementBaselineDetail> {
+      if (getDataMode() === 'mock') {
+        throw new ApiError('Mock 模式不支持需求解析，请切换到实时 API', ErrorCode.VALIDATION, 400)
+      }
+      const { data } = await http.post('/api/requirement-baselines', payload)
+      return data
+    },
+    async getBaseline(id: string): Promise<RequirementBaselineDetail> {
+      if (getDataMode() === 'mock') {
+        throw new ApiError('Mock 模式不支持需求基线', ErrorCode.NOT_FOUND, 404)
+      }
+      const { data } = await http.get(`/api/requirement-baselines/${id}`)
+      return data
+    },
+    async updateItem(baselineId: string, itemId: string, payload: Partial<Pick<RequirementItem, 'title' | 'description' | 'priority' | 'module'>>): Promise<RequirementItem> {
+      if (getDataMode() === 'mock') {
+        throw new ApiError('Mock 模式不支持需求校对', ErrorCode.VALIDATION, 400)
+      }
+      const { data } = await http.put(`/api/requirement-baselines/${baselineId}/requirements/${itemId}`, payload)
+      return data
+    },
+    async confirmBaseline(id: string): Promise<RequirementBaselineDetail> {
+      if (getDataMode() === 'mock') {
+        throw new ApiError('Mock 模式不支持需求基线确认', ErrorCode.VALIDATION, 400)
+      }
+      const { data } = await http.post(`/api/requirement-baselines/${id}/confirm`)
+      return data
+    },
+    async bind(caseSetId: string, baselineId: string): Promise<CaseCoverage> {
+      if (getDataMode() === 'mock') {
+        throw new ApiError('Mock 模式不支持需求覆盖', ErrorCode.VALIDATION, 400)
+      }
+      const { data } = await http.post(`/api/case-sets/${caseSetId}/requirement-baseline`, { baseline_id: baselineId })
+      return data
+    },
+    async coverage(caseSetId: string): Promise<CaseCoverage> {
+      if (getDataMode() === 'mock') {
+        throw new ApiError('Mock 模式不支持需求覆盖', ErrorCode.VALIDATION, 400)
+      }
+      const { data } = await http.get(`/api/case-sets/${caseSetId}/coverage`)
+      return data
+    },
+    async autoLink(caseSetId: string, baselineId: string, threshold = 0.34): Promise<RequirementAutoLinkResult> {
+      if (getDataMode() === 'mock') {
+        throw new ApiError('Mock 模式不支持自动关联', ErrorCode.VALIDATION, 400)
+      }
+      const { data } = await http.post(`/api/case-sets/${caseSetId}/requirements/auto-link`, { baseline_id: baselineId, threshold })
+      return data
+    },
+    async link(caseSetId: string, baselineId: string, links: Array<{ case_item_id: string; requirement_ids: string[] }>): Promise<void> {
+      if (getDataMode() === 'mock') {
+        throw new ApiError('Mock 模式不支持需求关联', ErrorCode.VALIDATION, 400)
+      }
+      await http.post(`/api/case-sets/${caseSetId}/requirements/link`, { baseline_id: baselineId, links })
+    },
+  },
+
+  // 7.6 全局搜索（N-07 MVP）
+  search: {
+    async query(q: string, limit = 5): Promise<GlobalSearchResult> {
+      const term = q.trim()
+      if (!term) return { query: '', groups: [] }
+      if (getDataMode() === 'mock') return { query: term, groups: [] }
+      const { data } = await http.get('/api/search', { params: { q: term, limit } })
+      return data
     },
   },
 

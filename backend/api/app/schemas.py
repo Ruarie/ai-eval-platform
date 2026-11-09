@@ -865,6 +865,9 @@ class CaseSetOut(OrmOut):
     confirmed_count: int = 0
     revision: int = 0
     folder_id: str | None = None
+    requirement_baseline_id: str | None = None
+    review_state: str = "draft"
+    review_assignee_id: str | None = None
     column_schema: list[dict[str, Any]] = Field(default_factory=list)
     checks: list[dict[str, Any]] = Field(default_factory=list)
     expires_at: Any | None = None
@@ -1150,6 +1153,134 @@ class KbGraphOut(ApiModel):
     engine: str = "lightrag"
 
 
+# ─── 用例评审工作流与版本 ─────────────────────────────────────────────
+
+
+class CaseReviewRequestIn(ApiModel):
+    """发起评审：负责人缺省为当前成员，截止时间可选。"""
+
+    assignee_id: str | None = Field(default=None, max_length=64)
+    due_at: Any | None = None
+    note: str = Field(default="", max_length=2000)
+
+
+class CaseReviewDecisionIn(ApiModel):
+    """评审结论；要求修改必须给出原因。"""
+
+    decision: Literal["approved", "changes_requested"]
+    note: str = Field(default="", max_length=2000)
+
+
+class CaseReviewCommentIn(ApiModel):
+    """新增评审评论；case_item_id 为空表示整体评论。"""
+
+    body: str = Field(min_length=1, max_length=2000)
+    case_item_id: str | None = Field(default=None, max_length=64)
+
+
+class CaseReviewCommentOut(ApiModel):
+    """评论响应。"""
+
+    id: str
+    case_item_id: str | None = None
+    author_id: str | None = None
+    author_name: str = ""
+    body: str
+    created_at: Any | None = None
+
+
+class CaseReviewRequestOut(ApiModel):
+    """评审请求响应。"""
+
+    id: str
+    status: str
+    note: str = ""
+    decision_note: str = ""
+    assignee_id: str | None = None
+    assignee_name: str = ""
+    due_at: Any | None = None
+    created_by: str | None = None
+    created_by_name: str = ""
+    created_at: Any | None = None
+    decided_at: Any | None = None
+
+
+class CaseReviewRunOut(ApiModel):
+    """AI 评审历史行。"""
+
+    id: str
+    score: int = 0
+    verdict: str = ""
+    summary: str = ""
+    dimensions: dict[str, Any] = Field(default_factory=dict)
+    issues: list[dict[str, Any]] = Field(default_factory=list)
+    case_count: int = 0
+    source_truncated: bool = False
+    created_at: Any | None = None
+
+
+class CaseSetVersionOut(ApiModel):
+    """版本快照元信息。"""
+
+    id: str
+    version: int
+    reason: str = ""
+    case_count: int = 0
+    created_by: str | None = None
+    created_by_name: str = ""
+    created_at: Any | None = None
+
+
+class CaseSetVersionDetailOut(CaseSetVersionOut):
+    """版本详情：含完整快照。"""
+
+    snapshot: dict[str, Any] = Field(default_factory=dict)
+
+
+class CaseVersionDiffOut(ApiModel):
+    """两个版本的字段级差异。"""
+
+    base_version: int
+    target_version: int
+    base_count: int
+    target_count: int
+    added_count: int
+    removed_count: int
+    changed_count: int
+    added: list[dict[str, Any]] = Field(default_factory=list)
+    removed: list[dict[str, Any]] = Field(default_factory=list)
+    changed: list[dict[str, Any]] = Field(default_factory=list)
+    truncated: bool = False
+
+
+class CaseReviewWorkspaceOut(ApiModel):
+    """评审工作台聚合响应：状态、请求、评论、AI 历史与版本列表。"""
+
+    case_set_id: str
+    review_state: str = "draft"
+    review_assignee_id: str | None = None
+    review_assignee_name: str = ""
+    active_request: CaseReviewRequestOut | None = None
+    latest_request: CaseReviewRequestOut | None = None
+    comments: list[CaseReviewCommentOut] = Field(default_factory=list)
+    ai_runs: list[CaseReviewRunOut] = Field(default_factory=list)
+    versions: list[CaseSetVersionOut] = Field(default_factory=list)
+
+
+class CaseVersionCreateIn(ApiModel):
+    """手动创建版本快照。"""
+
+    reason: str = Field(default="", max_length=200)
+
+
+class CaseVersionRestoreOut(ApiModel):
+    """回滚结果：返回新建草稿的 ID 与名称。"""
+
+    case_set_id: str
+    name: str
+    source_version: int
+
+
 class GoldQaOut(ApiModel):
     """黄金 QA 集响应。"""
 
@@ -1160,3 +1291,164 @@ class GoldQaOut(ApiModel):
     row_count: int
     owner: str = ""
     created_at: Any | None = None
+
+
+# ─── 需求基线与用例覆盖 ───────────────────────────────────────────────
+
+
+class RequirementBaselineCreate(ApiModel):
+    """创建需求基线：只接收原文，解析由服务端完成。"""
+
+    name: str = Field(min_length=1, max_length=120)
+    source_text: str = Field(min_length=1, max_length=500_000)
+    source_kind: Literal["text", "file"] = "text"
+    source_name: str = Field(default="", max_length=255)
+
+
+class RequirementItemOut(ApiModel):
+    """需求条目响应。"""
+
+    id: str
+    req_no: str
+    title: str
+    description: str = ""
+    priority: str = ""
+    module: str = ""
+    source_ref: str = ""
+    sort_order: int = 0
+
+
+class RequirementBaselineOut(ApiModel):
+    """需求基线列表项。"""
+
+    id: str
+    name: str
+    source_kind: str
+    source_name: str
+    status: str
+    revision: int = 1
+    requirement_count: int
+    created_by: str | None = None
+    created_at: Any | None = None
+    updated_at: Any | None = None
+
+
+class RequirementBaselineDetailOut(RequirementBaselineOut):
+    """需求基线详情：含全部条目。"""
+
+    requirements: list[RequirementItemOut] = Field(default_factory=list)
+
+
+class RequirementItemUpdate(ApiModel):
+    """人工校对单条需求；只允许改文本字段，不允许改编号与基线。"""
+
+    title: str | None = Field(default=None, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
+    priority: str | None = Field(default=None, max_length=8)
+    module: str | None = Field(default=None, max_length=40)
+
+
+class CaseRequirementBindIn(ApiModel):
+    """把用例集绑定到一份已确认的需求基线。"""
+
+    baseline_id: str = Field(min_length=1, max_length=64)
+
+
+class CaseRequirementLinkItem(ApiModel):
+    """一条用例到需求的关联输入。"""
+
+    case_item_id: str = Field(min_length=1, max_length=64)
+    requirement_ids: list[str] = Field(default_factory=list)
+
+
+class CaseRequirementLinkIn(ApiModel):
+    """人工确认的批量关联；空数组表示解除该用例关联。"""
+
+    baseline_id: str = Field(min_length=1, max_length=64)
+    links: list[CaseRequirementLinkItem] = Field(default_factory=list)
+
+
+class CaseAutoLinkIn(ApiModel):
+    """自动关联候选请求；阈值只影响候选，不直接落库。"""
+
+    baseline_id: str = Field(min_length=1, max_length=64)
+    threshold: float = Field(default=0.34, ge=0.0, le=1.0)
+
+
+class CaseAutoLinkOut(ApiModel):
+    """自动关联结果：返回候选数量与明细，供前端人工确认。"""
+
+    links: list[dict[str, Any]] = Field(default_factory=list)
+    matched_case_count: int = 0
+
+
+class CoverageRequirementOut(ApiModel):
+    """覆盖率明细行。"""
+
+    id: str
+    req_no: str
+    title: str
+    priority: str = ""
+    module: str = ""
+    covered: bool
+    case_count: int = 0
+    case_ids: list[str] = Field(default_factory=list)
+    case_names: list[str] = Field(default_factory=list)
+
+
+class CoverageModuleOut(ApiModel):
+    """按模块聚合的覆盖率。"""
+
+    module: str
+    total: int
+    covered: int
+    coverage_percent: float
+
+
+class CaseCoverageOut(ApiModel):
+    """用例集需求覆盖率响应。"""
+
+    baseline_id: str
+    baseline_name: str = ""
+    baseline_version: int = 1
+    total: int
+    covered: int
+    coverage_percent: float
+    p0_total: int
+    p0_covered: int
+    p0_percent: float
+    requirements: list[CoverageRequirementOut] = Field(default_factory=list)
+    uncovered: list[CoverageRequirementOut] = Field(default_factory=list)
+    modules: list[CoverageModuleOut] = Field(default_factory=list)
+    linked_case_count: int = 0
+    unlinked_case_count: int = 0
+
+
+# ─── 全局搜索（N-07 MVP） ────────────────────────────────────────────
+
+
+class SearchItemOut(ApiModel):
+    """全局搜索单条结果；url 必须是前端可直接跳转的相对地址。"""
+
+    id: str
+    type: str
+    title: str
+    subtitle: str = ""
+    status: str = ""
+    url: str
+    updated_at: str | None = None
+
+
+class SearchGroupOut(ApiModel):
+    """按实体类型分组的结果。"""
+
+    type: str
+    label: str
+    items: list[SearchItemOut] = Field(default_factory=list)
+
+
+class SearchResultOut(ApiModel):
+    """全局搜索响应；只返回有命中的分组。"""
+
+    query: str
+    groups: list[SearchGroupOut] = Field(default_factory=list)

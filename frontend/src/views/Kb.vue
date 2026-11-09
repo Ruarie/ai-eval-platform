@@ -418,6 +418,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useDialog, useMessage } from 'naive-ui'
 import { api } from '../api/http'
 import type { KnowledgeBase, KbChunk, KbDoc, GoldQA, Profile } from '../api/types'
@@ -425,6 +426,7 @@ import KbGraphDrawer from '../components/drawers/KbGraphDrawer.vue'
 import UploadKbDocModal from '../components/modals/UploadKbDocModal.vue'
 import UploadGoldQaModal from '../components/modals/UploadGoldQaModal.vue'
 
+const route = useRoute()
 const message = useMessage()
 const dialog = useDialog()
 
@@ -772,8 +774,10 @@ async function loadKnowledgeBases() {
   try {
     const list = await api.kb.list()
     kbs.value = list
-    const first = list[0]
-    if (first) await selectKb(first)
+    // 全局搜索直达：优先打开指定知识库，失效时回落第一个。
+    const targetId = String(route.query.kb_id || '')
+    const target = list.find((item) => item.id === targetId) || list[0]
+    if (target) await selectKb(target)
   } catch (err: any) {
     message.error(err.message || '加载知识库失败')
   }
@@ -781,6 +785,12 @@ async function loadKnowledgeBases() {
 
 onMounted(() => {
   void loadKnowledgeBases()
+})
+
+// 同一页面内再次从搜索面板跳转时，需要响应查询参数切换知识库。
+watch(() => route.query.kb_id, (value) => {
+  const target = kbs.value.find((item) => item.id === String(value || ''))
+  if (target) void selectKb(target)
 })
 </script>
 

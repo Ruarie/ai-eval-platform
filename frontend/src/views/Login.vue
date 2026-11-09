@@ -186,42 +186,10 @@
           <p class="right-subtitle">登录您的 AI 测试与评估平台账号</p>
         </div>
 
-        <!-- 登录模式切换 Tab -->
-        <div class="tab-switch-container">
-          <div
-            class="tab-slider-indicator"
-            :style="{ transform: activeTab === 'account' ? 'translateX(0%)' : 'translateX(100%)' }"
-          ></div>
-          <button
-            class="tab-switch-btn"
-            :class="{ 'is-active': activeTab === 'account' }"
-            type="button"
-            @click="switchTab('account')"
-          >
-            <svg class="tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-              <circle cx="12" cy="7" r="4"></circle>
-            </svg>
-            <span>账号密码登录</span>
-          </button>
-          <button
-            class="tab-switch-btn"
-            :class="{ 'is-active': activeTab === 'sso' }"
-            type="button"
-            @click="switchTab('sso')"
-          >
-            <svg class="tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-            </svg>
-            <span>SSO 登录</span>
-          </button>
-        </div>
-
-        <!-- Tab 内容切换过渡容器 -->
+        <!-- 账号密码登录：平台当前仅提供本地账号，不展示未接入的 SSO 入口。 -->
         <div class="tab-content-wrapper">
           <!-- 账号密码表单视图 -->
-          <div v-show="activeTab === 'account'" class="tab-panel tab-panel-enter">
+          <div class="tab-panel tab-panel-enter">
             <form class="login-form" @submit.prevent="submitLogin">
               <!-- 用户名输入框 -->
               <div class="form-field" :class="{ 'has-error': inputErrors.username }">
@@ -364,81 +332,6 @@
             </form>
           </div>
 
-          <!-- SSO 登录视图 -->
-          <div v-show="activeTab === 'sso'" class="tab-panel tab-panel-enter">
-            <div class="sso-panel-content">
-              <div class="sso-icon-badge">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                  <circle cx="12" cy="11" r="3"></circle>
-                </svg>
-              </div>
-              <h3 class="sso-title">企业统一身份认证</h3>
-              <p class="sso-desc">支持企业 OAuth2.0 / SAML 2.0 / 飞书 / 企业微信 快速单点登录</p>
-              
-              <button
-                type="button"
-                class="sso-submit-btn"
-                :disabled="ssoLoading"
-                @click="handleSsoLogin('Enterprise')"
-              >
-                <span v-if="!ssoLoading">使用企业账号一键登录</span>
-                <span v-else class="btn-inner-loading">
-                  <svg class="spinner-icon" viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="12" r="10" stroke="rgba(255, 255, 255, 0.25)" stroke-width="3"></circle>
-                    <path d="M12 2a10 10 0 0 1 10 10" stroke="#ffffff" stroke-width="3" stroke-linecap="round"></path>
-                  </svg>
-                  <span>正在建立 SSO 安全连接...</span>
-                </span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 底部其他登录方式 -->
-        <div class="social-divider">
-          <span class="divider-line"></span>
-          <span class="divider-text">其他登录方式</span>
-          <span class="divider-line"></span>
-        </div>
-
-        <div class="social-login-row">
-          <button
-            type="button"
-            class="social-btn"
-            title="GitHub 登录"
-            @click="handleSsoLogin('GitHub')"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-            </svg>
-          </button>
-
-          <button
-            type="button"
-            class="social-btn social-telegram"
-            title="快捷协作接入"
-            @click="handleSsoLogin('Telegram')"
-          >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
-          </button>
-
-          <button
-            type="button"
-            class="social-btn"
-            title="Google 账号登录"
-            @click="handleSsoLogin('Google')"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24">
-              <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.3 9 5 12 5z" />
-              <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5.1 3.7-8.8z" />
-              <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3 0-.8.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12.3 0 15.2c0 2.8.7 5.5 1.9 7.8l3.7-2.9z" />
-              <path fill="#34A853" d="M12 23.5c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.3-6.4-5.2L1.9 16.5C3.7 20.2 7.5 23.5 12 23.5z" />
-            </svg>
-          </button>
         </div>
 
         <!-- 注册引导入口 -->
@@ -550,7 +443,6 @@ const username = ref(isDev ? 'admin' : '')
 const password = ref(isDev ? 'admin123' : '')
 const rememberMe = ref(true)
 const showPassword = ref(false)
-const activeTab = ref<'account' | 'sso'>('account')
 
 /** Focus 焦点状态 */
 const isUserFocused = ref(false)
@@ -563,7 +455,6 @@ const isShaking = ref(false)
 const isSuccessExit = ref(false)
 const globalErrorMsg = ref('')
 const aiStepText = ref('正在验证身份...')
-const ssoLoading = ref(false)
 
 /** 输入错误字段映射 */
 const inputErrors = reactive({
@@ -608,14 +499,6 @@ function handleMouseMove(e: MouseEvent) {
   const normY = (e.clientY - centerY) / centerY
   mouseX.value = Math.max(-1, Math.min(1, normX))
   mouseY.value = Math.max(-1, Math.min(1, normY))
-}
-
-/** 切换 Tab */
-function switchTab(tab: 'account' | 'sso') {
-  activeTab.value = tab
-  globalErrorMsg.value = ''
-  clearFieldError('username')
-  clearFieldError('password')
 }
 
 /** 焦点处理 */
@@ -734,14 +617,6 @@ function loginErrorMessage(error: unknown): string {
     return error.message || '登录失败，请稍后重试'
   }
   return '网络异常，无法连接服务端，请检查网络后重试'
-}
-
-/** 模拟 SSO 快捷登录交互 */
-async function handleSsoLogin(provider: string) {
-  ssoLoading.value = true
-  await wait(600)
-  ssoLoading.value = false
-  message.info(`已接收 ${provider} SSO 接入请求，请使用演示账号或联系管理员分配`)
 }
 
 onMounted(() => {
@@ -1234,61 +1109,6 @@ onUnmounted(() => {
   margin: 0;
 }
 
-/* Tab 切换容器 */
-.tab-switch-container {
-  position: relative;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  padding: 3px;
-  background: #f1f5f9;
-  border-radius: 12px;
-  margin-bottom: 22px;
-  border: 1px solid #e2e8f0;
-}
-
-.tab-slider-indicator {
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  left: 3px;
-  width: calc(50% - 3px);
-  background: #ffffff;
-  border-radius: 9px;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
-  transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: none;
-}
-
-.tab-switch-btn {
-  position: relative;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
-  min-height: 38px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #64748b;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  border-radius: 9px;
-  transition: color 180ms ease, font-weight 180ms ease;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.tab-switch-btn.is-active {
-  color: #059669;
-  font-weight: 600;
-}
-
-.tab-icon {
-  flex-shrink: 0;
-}
-
 .tab-content-wrapper {
   position: relative;
 }
@@ -1575,121 +1395,6 @@ onUnmounted(() => {
   100% { transform: scale(1); }
 }
 
-/* SSO 面板样式 */
-.sso-panel-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 16px 0;
-}
-
-.sso-icon-badge {
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  background: #e6f7f0;
-  border-radius: 50%;
-  margin-bottom: 12px;
-}
-
-.sso-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #0f172a;
-  margin: 0 0 6px 0;
-}
-
-.sso-desc {
-  font-size: 12px;
-  color: #64748b;
-  margin: 0 0 20px 0;
-  line-height: 1.5;
-  max-width: 280px;
-}
-
-.sso-submit-btn {
-  width: 100%;
-  height: 44px;
-  font-size: 14px;
-  font-weight: 600;
-  border-radius: 10px;
-  background: #10b981;
-  color: #ffffff;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
-  transition: background-color 160ms ease, transform 160ms ease;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.sso-submit-btn:hover:not(:disabled) {
-  background: #059669;
-  transform: translateY(-1px);
-}
-
-.sso-submit-btn:active:not(:disabled) {
-  transform: scale(0.985);
-}
-
-/* 社交登录分割线 */
-.social-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 22px 0 16px;
-}
-
-.divider-line {
-  flex: 1;
-  height: 1px;
-  background: #e2e8f0;
-}
-
-.divider-text {
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-.social-login-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-}
-
-.social-btn {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  color: #334155;
-  cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
-  transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1), border-color 180ms ease, box-shadow 180ms ease;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.social-btn:hover {
-  transform: translateY(-3px) scale(1.05);
-  border-color: #cbd5e1;
-  box-shadow: 0 6px 14px -2px rgba(15, 23, 42, 0.08);
-}
-
-.social-btn:active {
-  transform: scale(0.94);
-}
-
-.social-telegram {
-  color: #0284c7;
-}
 
 /* 注册引导行 */
 .register-prompt-row {
@@ -1854,33 +1559,15 @@ onUnmounted(() => {
   .right-title {
     font-size: 22px;
   }
-  .tab-switch-container {
-    margin-bottom: 18px;
-  }
-  .tab-switch-btn {
-    min-height: 40px;
-    font-size: 13px;
-  }
   .input-shell {
     height: 46px;
   }
   .native-input {
     font-size: 15px;
   }
-  .login-submit-btn,
-  .sso-submit-btn {
+  .login-submit-btn {
     height: 46px;
     font-size: 15px;
-  }
-  .social-divider {
-    margin: 18px 0 14px;
-  }
-  .social-login-row {
-    gap: 14px;
-  }
-  .social-btn {
-    width: 42px;
-    height: 42px;
   }
   .register-prompt-row {
     margin-top: 16px;
@@ -1904,11 +1591,6 @@ onUnmounted(() => {
   }
   .right-title {
     font-size: 20px;
-  }
-  .tab-switch-btn {
-    font-size: 12px;
-    gap: 4px;
-    padding: 6px 8px;
   }
   .account-pill-list {
     grid-template-columns: 1fr;
