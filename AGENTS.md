@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.39 ｜ 审查日期：2026-11-09（O-03 用例工作台拆分第一步：`Cases.vue` 的 1248 行 scoped 样式迁到 `frontend/src/styles/views/cases.css`，SFC 从 3885 行降到 2636 行；`<style scoped src>` 由 Vite 正常注入 data-v 作用域。仅结构调整，不改模板、交互与接口；组件级拆分（表格/生成向导/评审抽屉）仍待后续。门禁：前端 typecheck/build、单测 123/123 通过。）
+>
 > 版本：V2.38 ｜ 审查日期：2026-11-09（N-10 Token 用量中心 MVP：新增 `GET /api/usage/summary`，按天/模型/会话属主聚合 assistant 消息 `turn_stats.usage`；只读、不返回正文；未配置逐模型单价，不展示费用；前端新增 `/usage` 与「用量中心」导航。门禁：用量 2 项 + 轨迹/通知/评审/搜索 10 项通过、ruff、前端 typecheck/build、单测 123/123。契约见 API V2.59、PRD V1.68。）
 >
 > 版本：V2.37 ｜ 审查日期：2026-11-09（N-09 历史轨迹查询 MVP：新增 `/api/sessions/{id}/trace/turns` 与 `.../turns/{turn}`，按回合聚合已持久化 `agent_events`，只返回时间/状态/工具/模型/token 等元数据，不返回正文、工具参数/结果、提示词；私有会话仅属主/管理员可见。前端新增 `TraceHistoryDrawer` 与 Agent 顶栏「历史轨迹」。本期不新增结构化轨迹表，`harness_turns/spans` 仍留后续。门禁：轨迹 3 项 + 通知/评审/搜索 13 项通过、ruff、前端 typecheck/build、单测 123/123。契约见 API V2.58、PRD V1.67。）

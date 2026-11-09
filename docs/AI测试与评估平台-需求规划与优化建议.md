@@ -2,8 +2,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.9 |
-| 文档状态 | 提案稿（Phase 1/2 已启动；N-01/N-02/N-03/N-04/N-05/N-07/N-08/N-09/N-10/O-01/O-02 已交付 MVP）。不改变 PRD、API.md、AGENTS.md 的现行效力 |
+| 文档版本 | V1.10 |
+| 文档状态 | 提案稿（Phase 1/2 已启动；N-01/N-02/N-03/N-04/N-05/N-07/N-08/N-09/N-10/O-01/O-02 已交付 MVP；O-03 完成样式拆分第一步）。不改变 PRD、API.md、AGENTS.md 的现行效力 |
 | 撰写日期 | 2026-11-09 |
 | 代码基线 | 工作区当前代码（分支 `feat/usage-center`，基于 `68c5594`） |
 | 契约基线 | PRD V1.68、AGENTS V2.38、API.md V2.59 |
@@ -1285,7 +1285,7 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 | N-08 站内通知 MVP | 已完成 | 任务生成/失败、评审指派/结论通知；顶栏未读与通知页；见 PRD V1.66、API V2.57 |
 | N-09 历史轨迹查询 MVP | 已完成 | 按回合聚合 AgentEvent，展示计时/工具/模型/token 与脱敏事件；见 PRD V1.67、API V2.58 |
 | N-10 Token 用量中心 MVP | 已完成 | 按天/模型/成员聚合 token 与调用；无费用估算；见 PRD V1.68、API V2.59 |
-| O-03 用例页拆分 | 未开始 | 仍为后续；N-01/N-02 抽屉已独立组件化，避免继续增大 `Cases.vue` |
+| O-03 用例页拆分 | 部分完成 | 已将 1248 行 scoped 样式迁到 `styles/views/cases.css`，SFC 3885→2636 行；表格/生成向导/目录树组件化仍待后续 |
 | O-09 报告分享死代码 | 未开始 | 需先确认是恢复入口还是下线 share API |
 | O-18 文档契约治理 | 部分完成 | PRD V1.68、API V2.59、AGENTS V2.38 已登记；Harness 正文与双圆环废弃标注仍待处理 |
 
@@ -1401,6 +1401,7 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 | `frontend/src/components/drawers/TraceHistoryDrawer.vue`、`views/Agent.vue` | N-09：历史轨迹抽屉与入口 |
 | `backend/api/app/routers/usage.py`、`tests/test_usage.py`、`app/schemas.py` | N-10：用量聚合接口与回归 |
 | `frontend/src/views/UsageCenter.vue`、`router/index.ts`、`layouts/MainLayout.vue` | N-10：用量页、路由与导航 |
-| `docs/AI测试与评估平台-PRD.md`、`docs/AI测试与评估平台-API.md`、`AGENTS.md` | 登记 PRD V1.68、API V2.59、AGENTS V2.38 |
+| `frontend/src/views/Cases.vue`、`frontend/src/styles/views/cases.css` | O-03：样式拆分第一步，SFC 3885→2636 行 |
+| `docs/AI测试与评估平台-PRD.md`、`docs/AI测试与评估平台-API.md`、`AGENTS.md` | 登记 PRD V1.68、API V2.59、AGENTS V2.39 |
 
-> 2026-11-09 Phase 1/2 实施：O-01、O-02 已完成；N-01、N-02、N-03、N-04、N-05、N-07、N-08、N-09、N-10 MVP 已完成并通过 10 项用量/轨迹/通知/评审/搜索测试、ruff、前端 typecheck/build、单测 123/123。O-03 用例页拆分、O-09 分享死代码清理、O-18 Harness 文档回写仍待后续。本文其余条目仍为候选，不构成已批准需求。
+> 2026-11-09 Phase 1/2 实施：O-01、O-02 已完成；N-01、N-02、N-03、N-04、N-05、N-07、N-08、N-09、N-10 MVP 已完成，O-03 完成样式拆分第一步；相关测试、ruff、前端 typecheck/build、单测 123/123 通过。O-03 组件化（表格/生成向导/目录树）、O-09 分享死代码清理、O-18 Harness 文档回写仍待后续。本文其余条目仍为候选，不构成已批准需求。
