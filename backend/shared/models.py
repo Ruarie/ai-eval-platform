@@ -1197,6 +1197,40 @@ class CaseSetVersion(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class CaseAsset(Base):
+    """跨用例集复用的用例资产：确认入库时物化，源用例集删除后仍保留快照。"""
+
+    __tablename__ = "case_assets"
+    __table_args__ = (
+        UniqueConstraint("source_case_item_id", name="uq_case_assets_source_item"),
+        Index("ix_case_assets_module_strategy", "module", "strategy"),
+    )
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    source_case_set_id = Column(
+        String,
+        ForeignKey("case_sets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_case_item_id = Column(String, nullable=True)
+    name = Column(Text, nullable=False, default="")
+    module = Column(String, nullable=False, default="", index=True)
+    submodule = Column(String, nullable=False, default="")
+    feature_point = Column(String, nullable=False, default="")
+    strategy = Column(String, nullable=False, default="", index=True)
+    priority = Column(String, nullable=False, default="", index=True)
+    precondition = Column(Text, nullable=False, default="")
+    steps = Column(Text, nullable=False, default="")
+    expected = Column(Text, nullable=False, default="")
+    tags = Column(JSONB, nullable=False, default=list)
+    source_version = Column(Integer, nullable=False, default=1)
+    created_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
 class EvalItem(Base):
     """样本级评测结果：benchmark 任务按「profile × 行」落一行。
 
