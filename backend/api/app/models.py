@@ -14,6 +14,7 @@ from shared.models import (  # noqa: F401
     AgentRuntimeState,
     AuditLog,
     Base,
+    CaseAsset,
     CaseFolder,
     CaseItem,
     CaseRequirementLink,

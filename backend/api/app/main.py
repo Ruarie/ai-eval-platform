@@ -23,6 +23,7 @@ from .routers import (
     agent_prefs,
     agents,
     auth,
+    case_assets,
     case_reviews,
     cases,
     collaborations,
@@ -236,6 +237,7 @@ app.include_router(datasets.router)
 app.include_router(datasets.folders_router)
 app.include_router(dataset_catalog.router)
 app.include_router(cases.router)
+app.include_router(case_assets.router)
 app.include_router(case_reviews.router)
 app.include_router(requirements.router)
 app.include_router(search.router)

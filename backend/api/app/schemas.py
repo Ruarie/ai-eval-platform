@@ -1477,6 +1477,86 @@ class CoverageModuleOut(ApiModel):
     coverage_percent: float
 
 
+class CaseAssetOut(ApiModel):
+    """跨用例集复用的用例资产。"""
+
+    id: str
+    source_case_set_id: str | None = None
+    source_set_name: str = ""
+    source_case_item_id: str | None = None
+    name: str = ""
+    module: str = ""
+    submodule: str = ""
+    feature_point: str = ""
+    strategy: str = ""
+    priority: str = ""
+    precondition: str = ""
+    steps: str = ""
+    expected: str = ""
+    tags: list[str] = Field(default_factory=list)
+    source_version: int = 1
+    created_at: Any | None = None
+    updated_at: Any | None = None
+
+
+class CaseAssetListOut(ApiModel):
+    """资产检索分页响应。"""
+
+    items: list[CaseAssetOut] = Field(default_factory=list)
+    total: int = 0
+    offset: int = 0
+    limit: int = 20
+
+
+class CaseAssetTagsIn(ApiModel):
+    """人工标签；最多 10 个，单标签最多 20 字。"""
+
+    tags: list[str] = Field(default_factory=list, max_length=10)
+
+
+class CaseAssetSimilarIn(ApiModel):
+    """文本查重输入；不落库。"""
+
+    name: str = Field(min_length=1, max_length=300)
+    expected: str = Field(default="", max_length=2000)
+    steps: str = Field(default="", max_length=4000)
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+class CaseAssetSimilarItemOut(ApiModel):
+    """相似资产候选。"""
+
+    id: str
+    name: str = ""
+    score: float = 0.0
+    module: str = ""
+    priority: str = ""
+    source_case_set_id: str | None = None
+    source_set_name: str = ""
+
+
+class CaseAssetSimilarOut(ApiModel):
+    """查重结果。"""
+
+    items: list[CaseAssetSimilarItemOut] = Field(default_factory=list)
+
+
+class CaseAssetStatsOut(ApiModel):
+    """资产库概览。"""
+
+    total: int = 0
+    source_sets: int = 0
+    modules: list[dict[str, Any]] = Field(default_factory=list)
+    tags: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class CaseAssetBackfillOut(ApiModel):
+    """历史确认用例集回填结果。"""
+
+    scanned_sets: int = 0
+    created_assets: int = 0
+
+
 class CasegenRunOut(ApiModel):
     """一次用例生成运行的质量摘要。"""
 
