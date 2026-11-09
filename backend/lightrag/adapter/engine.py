@@ -7,7 +7,7 @@
    不支持按文档过滤，因此召回候选窗口在指定知识库时放大（见
    :func:`contract.chunk_top_k_for`）。
 2. **写入异步化**：实体/关系抽取需要多次 LLM 调用，单篇长文档可能耗时数分钟。
-   接口层只负责受理，真正的 ``ainsert`` 在后台任务里串行执行，状态通过
+   接口层只负责受理，真正的 ``ainsert`` 在后台任务里按配置并发执行，状态通过
    LightRAG 自己的 doc_status 回读，平台据此展示 indexing / indexed / failed。
 3. **诚实降级**：引擎未配置或调用失败时抛 :class:`EngineUnavailable`，由接口层
    返回 503；禁止返回空结果冒充「检索成功」。
@@ -106,7 +106,9 @@ class LightRAGEngine:
         self._rag: Any = None
         self._version: str = ""
         # LightRAG 的写入/删除共用同一条管线（busy 时直接拒绝），必须串行。
-        self._pipeline_lock = asyncio.Lock()
+        # 管线并发：LightRAG 的 max_parallel_insert 只有在多个 ainsert 并发时才生效，
+        # 旧实现用单把锁把文档串起来，配置调大也不会提速。用信号量按配置放行。
+        self._pipeline_slots = asyncio.Semaphore(max(1, int(self.config.max_parallel_insert)))
         # 已受理但尚未写入 doc_status 的文档，用于「受理后立刻查询」的状态兜底。
         self._queued: set[str] = set()
         # 后台任务引用集合，防止任务被 GC 提前回收。
@@ -273,7 +275,7 @@ class LightRAGEngine:
 
         async def _worker() -> None:
             try:
-                async with self._pipeline_lock:
+                async with self._pipeline_slots:
                     await rag.ainsert(
                         text,
                         ids=[doc_id],
@@ -303,7 +305,7 @@ class LightRAGEngine:
         """
         rag = self._require_rag()
         results: dict[str, str] = {}
-        async with self._pipeline_lock:
+        async with self._pipeline_slots:
             # 删除前核对来源前缀：平台侧已校验归属，这里再挡一次跨知识库误删。
             sources: dict[str, Any] = {}
             try:
