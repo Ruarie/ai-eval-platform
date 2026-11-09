@@ -43,6 +43,32 @@
             @pointerup="onPointerUp"
             @pointerleave="onPointerUp"
           >
+            <defs>
+              <marker
+                id="kb-graph-arrow"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+              </marker>
+            </defs>
+            <!-- 簇底色：同类型的节点落在同一片淡色区域里，读图时先看"团"再看点。 -->
+            <g class="graph-clusters">
+              <ellipse
+                v-for="cluster in clusters"
+                :key="`cluster-${cluster.type}`"
+                :cx="cluster.x"
+                :cy="cluster.y"
+                :rx="cluster.radius * 1.12"
+                :ry="cluster.radius * 0.84"
+                :fill="cluster.color"
+                opacity="0.06"
+              />
+            </g>
             <g class="graph-edges">
               <line
                 v-for="line in renderedEdges"
@@ -55,7 +81,24 @@
                 :stroke-width="line.width"
                 :opacity="line.opacity"
                 stroke-linecap="round"
-              />
+                :marker-end="line.highlight ? 'url(#kb-graph-arrow)' : undefined"
+              >
+                <!-- 悬停显示关系描述：边太多不可能全标，靠 tooltip 按需看。 -->
+                <title>{{ line.description || '关系' }}</title>
+              </line>
+            </g>
+            <g class="graph-cluster-labels">
+              <text
+                v-for="cluster in clusters"
+                :key="`cluster-label-${cluster.type}`"
+                :x="cluster.x"
+                :y="cluster.labelY"
+                text-anchor="middle"
+                class="cluster-label"
+                :style="{ fill: cluster.color }"
+              >
+                {{ cluster.label }} · {{ cluster.count }}
+              </text>
             </g>
             <g
               v-for="item in placed"
@@ -120,6 +163,17 @@
                   <li v-if="!selected.doc_ids.length" class="small tertiary">未记录来源文档</li>
                 </ul>
               </div>
+              <div class="side-row" style="display: block">
+                <div class="small tertiary mb8">关系（{{ selectedRelations.length }}）</div>
+                <div v-for="(rel, index) in selectedRelations" :key="`rel-${index}`" class="rel-row">
+                  <span class="rel-dir">{{ rel.dir }}</span>
+                  <div class="rel-main">
+                    <div class="rel-other">{{ rel.other }}</div>
+                    <div v-if="rel.description" class="rel-desc">{{ rel.description }}</div>
+                  </div>
+                </div>
+                <div v-if="!selectedRelations.length" class="small tertiary">该实体暂无关系</div>
+              </div>
             </template>
             <div v-else class="side-hint">
               <p class="small tertiary">
@@ -163,8 +217,8 @@ const emit = defineEmits<{
   (event: 'upload'): void
 }>()
 
-const CANVAS_WIDTH = 840
-const CANVAS_HEIGHT = 600
+const CANVAS_WIDTH = 1000
+const CANVAS_HEIGHT = 700
 const LEGEND_LIMIT = 6
 // 与图例、节点、圆点共用一套定性色板：同类同色、跨类区分度高。
 const TYPE_COLORS: Record<string, string> = {
@@ -195,8 +249,8 @@ async function load() {
   error.value = ''
   selectedId.value = ''
   try {
-    // 默认取 100 个实体：更多节点会让环形布局过密，图例与标签失去可读性。
-    const data = await api.kb.getGraph(kbId, 100)
+    // 不设人工上限：要多少由后端按引擎能力截断（truncated 会提示）。
+    const data = await api.kb.getGraph(kbId, 2000)
     // 请求期间切换了知识库：丢弃旧响应，避免把上一个库的图写到当前库上。
     if (kbId !== props.kbId) return
     graph.value = data
@@ -237,24 +291,35 @@ interface PlacedNode {
 }
 
 // 画布可用半径与簇心分布半径：簇心均匀落在一个椭圆上。
-const MAX_RADIUS_Y = CANVAS_HEIGHT / 2 - 30
+const MAX_RADIUS_Y = CANVAS_HEIGHT / 2 - 34
 const MAX_RADIUS_X = (MAX_RADIUS_Y * CANVAS_WIDTH) / CANVAS_HEIGHT
-const CLUSTER_RX = MAX_RADIUS_X * 0.7
-const CLUSTER_RY = MAX_RADIUS_Y * 0.74
+const CLUSTER_RX = MAX_RADIUS_X * 0.72
+const CLUSTER_RY = MAX_RADIUS_Y * 0.76
+
+interface ClusterInfo {
+  type: string
+  label: string
+  color: string
+  count: number
+  x: number
+  y: number
+  radius: number
+  labelY: number
+}
 
 /**
- * 类型分簇布局：每个实体类型占一个"海岛"，簇内沿黄金角螺旋展开。
+ * 类型分簇布局：每个实体类型占一个「海岛」，簇内沿黄金角螺旋展开。
  *
- * 试过两种都不理想：力导向会把节点推到边界、环形会把节点排成"项链"且中间空洞。
- * 分簇的好处是同类节点成团、跨类型边只发生在簇之间，画面饱满且一眼能看出
- * "这类实体大概有哪些"；簇内用黄金角螺旋保证不重叠。
+ * 节点不设上限后，簇内间距与节点半径都要随总量自适应：密度系数取
+ * sqrt(总数 / 120)，500 个节点时步长翻倍、半径缩小，否则会糊成一团。
  */
-function layout(nodes: KbGraphNode[]): PlacedNode[] {
+function layout(nodes: KbGraphNode[]): { nodes: PlacedNode[]; clusters: ClusterInfo[] } {
   const total = nodes.length
-  if (!total) return []
+  if (!total) return { nodes: [], clusters: [] }
 
   const centerX = CANVAS_WIDTH / 2
   const centerY = CANVAS_HEIGHT / 2
+  const density = Math.max(1, Math.min(2.2, Math.sqrt(total / 120)))
 
   const byType = new Map<string, KbGraphNode[]>()
   for (const node of nodes) {
@@ -268,9 +333,10 @@ function layout(nodes: KbGraphNode[]): PlacedNode[] {
   )
 
   const placedNodes: PlacedNode[] = []
+  const clusters: ClusterInfo[] = []
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
 
-  groups.forEach(([, bucket], groupIndex) => {
+  groups.forEach(([type, bucket], groupIndex) => {
     bucket.sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
     const baseAngle = -Math.PI / 2 + (groupIndex / groups.length) * Math.PI * 2
     const clusterX = centerX + Math.cos(baseAngle) * CLUSTER_RX
@@ -278,14 +344,15 @@ function layout(nodes: KbGraphNode[]): PlacedNode[] {
 
     bucket.forEach((node, index) => {
       // 第一个节点占簇心，其余按 sqrt 递增的半径绕开，避免挤成一点。
-      const spread = index === 0 ? 0 : 13 + 9.2 * Math.sqrt(index)
+      const spread = index === 0 ? 0 : (11 + 7.6 * Math.sqrt(index)) * density
       const angle = index === 0 ? 0 : index * GOLDEN_ANGLE
       const x = clusterX + Math.cos(angle) * spread * 1.12
       const y = clusterY + Math.sin(angle) * spread * 0.82
-      const radius = 4.6 + Math.min(8.4, Math.sqrt(Math.max(0, node.degree)) * 1.7)
+      const radius =
+        (3.6 + Math.min(7.4, Math.sqrt(Math.max(0, node.degree)) * 1.45)) / Math.sqrt(density)
 
-      // 每个簇只给度数最高的两个节点挂标签，其余靠 hover 详情看。
-      const outward = Math.cos(angle) * Math.cos(baseAngle) + Math.sin(angle) * Math.sin(baseAngle) >= 0
+      const outward =
+        Math.cos(angle) * Math.cos(baseAngle) + Math.sin(angle) * Math.sin(baseAngle) >= 0
       const anchor: 'start' | 'middle' | 'end' =
         index === 0 ? 'middle' : outward ? 'start' : 'end'
       placedNodes.push({
@@ -300,12 +367,29 @@ function layout(nodes: KbGraphNode[]): PlacedNode[] {
         labelAnchor: anchor,
       })
     })
+
+    // 簇的外接半径：用于画底色与放「类型 + 数量」标签。
+    const radius =
+      bucket.length === 1 ? 22 : (11 + 7.6 * Math.sqrt(bucket.length - 1)) * density + 14
+    const labelY = clusterY - radius * 0.82 - 8 < 14 ? clusterY + radius * 0.82 + 16 : clusterY - radius * 0.82 - 8
+    clusters.push({
+      type,
+      label: typeLabel(type),
+      color: typeColor(type),
+      count: bucket.length,
+      x: clusterX,
+      y: clusterY,
+      radius,
+      labelY,
+    })
   })
 
-  return placedNodes
+  return { nodes: placedNodes, clusters }
 }
 
-const placed = computed(() => layout(graph.value?.nodes ?? []))
+const layoutResult = computed(() => layout(graph.value?.nodes ?? []))
+const placed = computed(() => layoutResult.value.nodes)
+const clusters = computed(() => layoutResult.value.clusters)
 
 const positions = computed(() => new Map(placed.value.map((item) => [item.node.id, item])))
 
@@ -318,6 +402,8 @@ const renderedEdges = computed(() => {
     y2: number
     opacity: number
     width: number
+    description: string
+    highlight: boolean
   }> = []
   for (const edge of graph.value?.edges ?? []) {
     const from = positions.value.get(edge.source)
@@ -325,7 +411,7 @@ const renderedEdges = computed(() => {
     if (!from || !to) continue
     const touch = edge.source === selectedId.value || edge.target === selectedId.value
     const weak = Math.min(from.node.degree, to.node.degree)
-    // 两端都弱的边几乎看不见：274 条边全画成实线就是"蜘蛛网"的主因。
+    // 两端都弱的边几乎看不见：几百条边全画成实线就是"蜘蛛网"的主因。
     const base = 0.05 + Math.min(0.24, (weak / 40) * 0.24)
     lines.push({
       key: `${edge.source}->${edge.target}`,
@@ -335,12 +421,28 @@ const renderedEdges = computed(() => {
       y2: to.y,
       opacity: selectedId.value ? (touch ? 0.62 : 0.035) : base,
       width: selectedId.value ? (touch ? 1.5 : 0.7) : 0.7 + Math.min(0.8, weak / 60),
+      description: (edge.description || '').trim(),
+      highlight: Boolean(selectedId.value) && touch,
     })
   }
   return lines
 })
 
 const selected = computed(() => (graph.value?.nodes ?? []).find((node) => node.id === selectedId.value) ?? null)
+
+const selectedRelations = computed(() => {
+  const node = selected.value
+  if (!node) return []
+  const rows: Array<{ dir: string; other: string; description: string }> = []
+  for (const edge of graph.value?.edges ?? []) {
+    if (edge.source === node.id) {
+      rows.push({ dir: '→', other: edge.target, description: (edge.description || '').trim() })
+    } else if (edge.target === node.id) {
+      rows.push({ dir: '←', other: edge.source, description: (edge.description || '').trim() })
+    }
+  }
+  return rows.slice(0, 10)
+})
 
 const topNodes = computed(() =>
   [...(graph.value?.nodes ?? [])]
@@ -577,7 +679,7 @@ function docName(docId: string) {
   min-width: 0;
   width: 100%;
   height: auto;
-  aspect-ratio: 840 / 600;
+  aspect-ratio: 1000 / 700;
   max-height: calc(100vh - 300px);
   /* 极浅的径向渐变把视觉重心收到中心，比纯灰底更像「图」而不是「表格」。 */
   background:
@@ -646,6 +748,50 @@ function docName(docId: string) {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.graph-cluster-labels .cluster-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  opacity: 0.72;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: #f8fafc;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.rel-row {
+  display: flex;
+  gap: 6px;
+  padding: 6px 0;
+  border-top: 1px dashed var(--border, #eef1f5);
+}
+
+.rel-dir {
+  flex: 0 0 auto;
+  color: var(--text-quaternary, #9aa3b2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.rel-main {
+  min-width: 0;
+}
+
+.rel-other {
+  font-size: 12px;
+  color: var(--text-secondary, #4b5563);
+  word-break: break-word;
+}
+
+.rel-desc {
+  font-size: 11.5px;
+  color: var(--text-tertiary, #8b94a3);
+  line-height: 1.5;
+  margin-top: 2px;
+  word-break: break-word;
 }
 
 .top-chip {

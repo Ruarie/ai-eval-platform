@@ -41,7 +41,7 @@ LIGHTRAG_DELETE_TIMEOUT_S = 120.0
 # 图谱读取：只读子图，但大图序列化明显慢于状态查询，单独给一个超时。
 LIGHTRAG_GRAPH_TIMEOUT_S = 30.0
 # 单次图谱返回的节点上限（与 API 契约一致）。
-MAX_GRAPH_LIMIT = 500
+MAX_GRAPH_LIMIT = 2000
 # 单次请求携带的文档 ID 上限：避免整库删除/状态回读被服务端或代理截断。
 DOC_BATCH_SIZE = 50
 STATUS_BATCH_SIZE = 200
