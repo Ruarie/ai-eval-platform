@@ -139,11 +139,23 @@ drain_agent_turns() {
     started=$SECONDS
     echo "==> 已暂停新回合准入，等待现有 Agent 回合结束（最多 ${timeout_seconds}s）"
     while true; do
-        active=$(timeout 15 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atq -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM agent_runtime_state WHERE active_turn IS NOT NULL"') || {
-            echo "错误：无法读取活动回合，未更新容器" >&2
+        # 数据库偶发 load 高时 psql 会被 cancel，单次失败不代表读不到：重试几次再判定。
+        active=""
+        read_ok=0
+        for attempt in 1 2 3 4 5; do
+            if active=$(timeout 20 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atq -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM agent_runtime_state WHERE active_turn IS NOT NULL"' 2>/dev/null); then
+                active=${active//$'\r'/}
+                if [[ "$active" =~ ^[0-9]+$ ]]; then
+                    read_ok=1
+                    break
+                fi
+            fi
+            [ "$attempt" -lt 5 ] && sleep 3
+        done
+        if [ "$read_ok" != 1 ]; then
+            echo "错误：连续 5 次无法读取活动回合（数据库繁忙或连接中断），未更新容器" >&2
             return 1
-        }
-        active=${active//$'\r'/}
+        fi
         if ! [[ "$active" =~ ^[0-9]+$ ]]; then
             echo "错误：活动回合计数无效，未更新容器" >&2
             return 1
