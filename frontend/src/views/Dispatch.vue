@@ -254,8 +254,7 @@
                 <button
                   class="btn btn-secondary btn-xs"
                   style="flex: 1"
-                  :disabled="liveMode"
-                  :title="liveMode ? '调度暂停/恢复接口尚未在 API 契约中定义' : ''"
+                  :disabled="schedulerBusy"
                   @click="toggleScheduler"
                 >
                   {{ isRunning ? '⏸ 暂停' : '▶ 恢复' }}
@@ -611,6 +610,7 @@ const isRightDockCollapsed = ref(isMobileViewport)
 const isBottomDockCollapsed = ref(isMobileViewport)
 
 const isRunning = ref(true)
+const schedulerBusy = ref(false)
 const strategy = ref('负载均衡')
 const capacity = ref(4)
 // mock 演示计数只在演示模式预置；live 模式等 overview 返回后再展示。
@@ -675,7 +675,7 @@ interface WorkerNode {
   id: string
   name: string
   caps: string[]
-  state: 'idle' | 'busy' | 'offline' | 'draining'
+  state: 'idle' | 'busy' | 'offline' | 'draining' | 'restarting'
   load: number
   ram: string
   task: string | null
@@ -956,7 +956,7 @@ const assignedTodayNum = computed(() =>
 // live 模式在 overview 首次返回前没有任何真实大盘数据，KPI 必须显示占位符而不是 0/演示值。
 const overviewReady = computed(() => !liveMode || overviewData.value !== null)
 // live 模式的暂停/恢复能力未在 API 契约中定义，徽标只表达"实时接入"，不宣称可控制调度器。
-const kernelStateLabel = computed(() => (liveMode ? '实时接入' : isRunning.value ? '调度中' : '已暂停'))
+const kernelStateLabel = computed(() => (isRunning.value ? (liveMode ? '实时接入' : '调度中') : '已暂停'))
 
 // KPI 数字滚动显示值
 const onlineDisplay = useCountUp(onlineCount)
@@ -1067,7 +1067,7 @@ function hideTip() {
 }
 
 function stateLabel(s: string): string {
-  const map: Record<string, string> = { idle: '在线空闲', busy: '执行中', draining: '排空下线', offline: '离线维护' }
+  const map: Record<string, string> = { idle: '在线空闲', busy: '执行中', draining: '排空下线', offline: '离线维护', restarting: '等待重启' }
   return map[s] || s
 }
 
@@ -1280,11 +1280,17 @@ function openWorkerModal(w: WorkerNode) {
   showWorkerModal.value = true
 }
 
-function handleRebootWorker() {
+async function handleRebootWorker() {
   if (!selectedWorker.value) return
   if (liveMode) {
-    // 契约未定义节点重启接口，live 模式仅允许状态/权重/能力治理
-    message.warning('节点重启接口尚未在 API 契约中定义，可在本弹窗调整节点状态进行治理')
+    try {
+      await api.dispatch.restartWorker(selectedWorker.value.id)
+      message.success('已请求重启。当前任务会先跑完，然后进程退出并由容器重新拉起。')
+      showWorkerModal.value = false
+      await loadLiveAll()
+    } catch (err: any) {
+      message.error(err.message || '重启请求失败')
+    }
     return
   }
   const target = workerPool.value.find(w => w.id === selectedWorker.value?.id)
@@ -1373,7 +1379,7 @@ const nowTs = ref(Date.now())
 
 /** 按当前策略挑选可接单节点：离线/排空节点与满载（≥92%）节点不参与。 */
 function pickAgent(): WorkerNode | null {
-  const candidates = workerPool.value.filter(w => w.state !== 'offline' && w.state !== 'draining' && w.state !== 'busy' && w.load < 92)
+  const candidates = workerPool.value.filter(w => w.state !== 'offline' && w.state !== 'draining' && w.state !== 'restarting' && w.state !== 'busy' && w.load < 92)
   if (!candidates.length) return null
   if (strategy.value === '负载均衡') return candidates.sort((x, y) => x.load - y.load)[0]
   if (strategy.value === '优先级抢占') return candidates[Math.floor(Math.random() * candidates.length)]
@@ -1460,10 +1466,20 @@ function dispatchTick() {
   }
 }
 
-/** 暂停/恢复调度：暂停后已有任务继续执行，仅停止新任务入队与分发；契约未定义暂停接口，live 模式提示能力未启用 */
-function toggleScheduler() {
+/** 暂停/恢复调度：暂停后已有任务继续执行，只停止领取新的排队任务和导入。 */
+async function toggleScheduler() {
   if (liveMode) {
-    message.warning('调度暂停/恢复接口尚未在 API 契约中定义，当前仅演示模式可用')
+    schedulerBusy.value = true
+    const paused = isRunning.value
+    try {
+      await api.dispatch.updateConfig({ paused })
+      isRunning.value = !paused
+      message.success(paused ? '已暂停领取新任务，正在执行的任务会继续跑完' : '已恢复领取新任务')
+    } catch (err: any) {
+      message.error(err.message || '调度状态更新失败')
+    } finally {
+      schedulerBusy.value = false
+    }
     return
   }
   isRunning.value = !isRunning.value
@@ -1580,6 +1596,7 @@ async function loadLiveAll() {
       overviewData.value = ov
       strategy.value = ov.strategy
       capacity.value = ov.max_running_tasks
+      isRunning.value = ov.paused !== true
     }
     if (workers) workerPool.value = workers.map(mapWorker)
     liveRunningTotal.value = runningPage.total

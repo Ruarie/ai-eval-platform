@@ -15,7 +15,6 @@ import type {
   TestCase,
   Task,
   Report,
-  WhitelistItem,
   McpTool,
 } from './types'
 
@@ -188,11 +187,6 @@ export const MOCK_SETTINGS: AdminSettings = {
   },
   prod_approvers: ['admin', 'bob'],
 }
-
-export const MOCK_WHITELIST: WhitelistItem[] = [
-  { id: 'wl-1', host: '10.0.0.8', scope: 'test,staging', creator: 'admin', created_at: '2026-08-01', status: 'active' },
-  { id: 'wl-2', host: 'api.internal.eval', scope: 'test', creator: 'admin', created_at: '2026-08-05', status: 'active' },
-]
 
 // 全量工具清单 Mock（与后端 /api/mcp/all-tools 保持一致）
 // transport='native'：原生基础工具，NativeToolExecutor 直连执行

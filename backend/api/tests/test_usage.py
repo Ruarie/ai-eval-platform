@@ -21,10 +21,10 @@ from sqlalchemy.pool import StaticPool
 from app.db import get_db
 from app.deps import get_current_user
 from app.main import app
-from app.models import Message, User
+from app.models import AgentEvent, Message, User
 from app.models import Session as AgentSession
 
-_NEEDED_MODELS = (User, AgentSession, Message)
+_NEEDED_MODELS = (User, AgentSession, Message, AgentEvent)
 
 
 @pytest.fixture
@@ -212,6 +212,52 @@ def test_usage_summary_skips_message_body(usage_case):
     ]
     assert selects, "未捕获到用量消息查询"
     assert all(".content" not in statement and ".attachments" not in statement for statement in selects), selects
+
+
+def test_usage_summary_reads_loop_events_without_double_count(usage_case):
+    """当前 Agent 回合的 usage 在事实里；已投影到 turn_stats 的同一条不能再算一次。"""
+    now = datetime.now(UTC)
+    with usage_case.factory.begin() as db:
+        db.add_all(
+            [
+                AgentEvent(
+                    id="evt-new",
+                    session_id="session-1",
+                    seq=1,
+                    type="assistant/message",
+                    envelope={
+                        "event_id": "evt-loop-new",
+                        "data": {
+                            "usage": {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50},
+                            "message": {"source": {"model": "loop-model"}},
+                        },
+                    },
+                    created_at=now,
+                ),
+                AgentEvent(
+                    id="evt-old",
+                    session_id="session-1",
+                    seq=2,
+                    type="assistant/message",
+                    envelope={
+                        "event_id": "source-1",
+                        "data": {
+                            "usage": {"prompt_tokens": 999, "completion_tokens": 999, "total_tokens": 1998},
+                        },
+                    },
+                    created_at=now,
+                ),
+            ]
+        )
+
+    response = usage_case.client.get("/api/usage/summary", params={"days": 30})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    # 原有 280，加上尚未投影的 50；source-1 已在消息 turn_stats 里，不再加 1998。
+    assert data["total_tokens"] == 330
+    assert data["calls"] == 4
+    models = {item["model_name"]: item for item in data["by_model"]}
+    assert models["loop-model"]["total_tokens"] == 50
 
 
 def test_usage_summary_days_validation(usage_case):

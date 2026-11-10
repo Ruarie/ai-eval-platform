@@ -1,17 +1,19 @@
 """Token 用量中心（N-10 MVP）。
 
-只聚合已落库 assistant 消息的 ``turn_stats.usage``：
-- 不做费用估算（当前没有可信的逐模型单价）；
-- 不读取消息正文、提示词或工具结果；
-- 按天/模型/会话属主聚合，供容量与预算观察。
-
-费用配置与预算告警留到后续批次。
+用量依据是每次模型回复里上游返回的 token 数字：
+- 已写入 ``messages.turn_stats.usage`` 的 assistant 消息直接聚合；
+- 当前 Agent 回合把同一份数字放在 ``assistant/message`` 事实的 ``data.usage``。
+  历史消息若还没带 ``turn_stats``，从事实里只抽出 usage，不读正文；
+- 同一条事实已经投影进消息时只计一次；
+- 不做费用估算（当前没有可信的逐模型单价）。
 """
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -20,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import get_current_user
-from ..models import Message, User
+from ..models import AgentEvent, Message, User
 from ..models import Session as AgentSession
 from ..schemas import (
     UsageModelOut,
@@ -29,6 +31,7 @@ from ..schemas import (
     UsageSummaryOut,
     UsageUserOut,
 )
+from ..usage_facts import assistant_meter
 
 router = APIRouter(prefix="/api/usage", tags=["usage"])
 
@@ -48,6 +51,19 @@ def _usage(row: Any) -> tuple[int, int, int]:
     if total <= 0:
         total = prompt + completion
     return max(0, prompt), max(0, completion), max(0, total)
+
+
+def _parse_usage(value: Any) -> dict[str, Any]:
+    """把 JSON 文本或对象收成 usage 字典；坏数据当成没有用量。"""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _day(value: datetime | None) -> str:
@@ -83,13 +99,53 @@ def usage_summary(
             Message.turn_stats,
             Message.model_name,
             Message.profile_id,
+            Message.source_id,
         )
         .order_by(Message.created_at.desc())
         .limit(MAX_MESSAGES)
         .all()
     )
-    truncated = matched > MAX_MESSAGES
-    session_ids = {row.session_id for row in rows}
+    covered = {row.source_id for row in rows if row.source_id}
+    event_query = db.query(AgentEvent).filter(
+        AgentEvent.type == "assistant/message",
+        AgentEvent.created_at >= start_at,
+    )
+    event_matched = event_query.with_entities(func.count(AgentEvent.id)).scalar() or 0
+    # 只抽出 usage / 模型名 / 事件号。事实正文留在 envelope 里，不进这次查询。
+    event_id = AgentEvent.envelope["event_id"].as_string()
+    usage_text = AgentEvent.envelope["data"]["usage"].as_string()
+    model_text = AgentEvent.envelope["data"]["message"]["source"]["model"].as_string()
+    event_rows = (
+        event_query.with_entities(
+            AgentEvent.session_id,
+            AgentEvent.created_at,
+            event_id,
+            usage_text,
+            model_text,
+        )
+        .order_by(AgentEvent.created_at.desc())
+        .limit(MAX_MESSAGES)
+        .all()
+    )
+    facts: list[Any] = list(rows)
+    for session_id, created_at, event_key, raw_usage, model_name in event_rows:
+        if event_key and event_key in covered:
+            continue
+        meter = assistant_meter({"usage": _parse_usage(raw_usage), "message": {"source": {"model": model_name}}})
+        if not meter["turn_stats"]:
+            continue
+        facts.append(
+            SimpleNamespace(
+                session_id=session_id,
+                created_at=created_at,
+                turn_stats=meter["turn_stats"],
+                model_name=meter["model_name"],
+                profile_id=None,
+            )
+        )
+    facts.sort(key=lambda item: item.created_at.timestamp() if item.created_at else 0, reverse=True)
+    truncated = matched > MAX_MESSAGES or event_matched > MAX_MESSAGES
+    session_ids = {row.session_id for row in facts}
     sessions = (
         db.query(AgentSession.id, AgentSession.title, AgentSession.user_id)
         .filter(AgentSession.id.in_(session_ids))
@@ -115,7 +171,7 @@ def usage_summary(
     recent: list[UsageRecentOut] = []
     calls = 0
 
-    for row in rows:
+    for row in facts:
         prompt, completion, total = _usage(row)
         if not total and not prompt and not completion:
             continue
@@ -210,7 +266,7 @@ def usage_summary(
         completion_tokens=total_completion,
         total_tokens=total_tokens,
         truncated=truncated,
-        scanned_messages=len(rows),
+        scanned_messages=len(facts),
         sample_limit=MAX_MESSAGES,
         series=series,
         by_model=by_model,

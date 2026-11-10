@@ -287,14 +287,6 @@ const IconCompare = () =>
     h('path', { d: 'M20 17H9M20 17l-3-3M20 17l-3 3' }),
   ])
 
-// 压测治理：历史压测配置与白名单，页面明确标注已停用。
-const IconStress = () =>
-  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
-    h('path', { d: 'M4 18a8 8 0 1 1 16 0' }),
-    h('path', { d: 'm12 14 4-4' }),
-    h('circle', { cx: '12', cy: '14', r: '1.4' }),
-  ])
-
 const navGroups = [
   {
     title: '工作台',
@@ -332,7 +324,6 @@ const navGroups = [
     items: [
       { path: '/admin/profiles', label: '协议档', icon: IconProfiles, t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
       { path: '/admin/users', label: '账号', icon: IconUsers, t: 'var(--t-users)', c: 'var(--c-users)' },
-      { path: '/admin/stress', label: '压测治理', icon: IconStress, t: 'var(--t-stress)', c: 'var(--c-stress)' },
     ],
   },
 ]

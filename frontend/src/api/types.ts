@@ -309,13 +309,14 @@ export interface DispatchOverview {
   strategy: string
   max_running_tasks: number
   heartbeat_interval_ms: number
+  paused?: boolean
 }
 
 export interface DispatchWorker {
   id: string
   name: string
   caps: string[]
-  state: 'idle' | 'busy' | 'offline' | 'draining'
+  state: 'idle' | 'busy' | 'offline' | 'draining' | 'restarting'
   weight: number
   load_percent?: number | null
   current_task?: string | null
@@ -339,6 +340,13 @@ export interface DispatchEventPage {
 export interface DispatchConfig {
   strategy: '负载均衡' | '优先级抢占' | '亲和性'
   max_running_tasks: number
+  paused?: boolean
+}
+
+export interface GoldQaDraft {
+  question: string
+  reference: string
+  expected_doc_ids: string[]
 }
 
 export interface RagModelsConfig {
@@ -1473,15 +1481,6 @@ export interface AgentPromptConfig {
   profile_id: string
   base_prompt: string
   overlay: string
-}
-
-export interface WhitelistItem {
-  id: string
-  host: string
-  scope: string
-  creator: string
-  created_at: string
-  status: 'active' | 'inactive'
 }
 
 // 智能体会话：默认 private，owner 可切换为当前内部团队共享。

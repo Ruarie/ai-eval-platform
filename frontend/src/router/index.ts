@@ -44,7 +44,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'workspaces', component: () => import('../views/UserWorkspaces.vue'), meta: { title: '我的工作区' } },
       { path: 'memories', component: () => import('../views/UserMemories.vue'), meta: { title: '我的记忆' } },
       { path: 'admin/profiles', component: () => import('../views/AdminProfiles.vue'), meta: { title: '协议档' } },
-      { path: 'admin/stress', component: () => import('../views/AdminStress.vue'), meta: { title: '压测治理' } },
       { path: 'admin/users', component: () => import('../views/AdminUsers.vue'), meta: { title: '账号' } },
       // 兜底放在布局内：未知地址不再白屏，且保留侧边导航便于回到正常页面。
       {
