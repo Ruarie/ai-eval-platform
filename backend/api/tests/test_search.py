@@ -15,6 +15,7 @@ from sqlalchemy import (
     MetaData,
     Text,
     create_engine,
+    event,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import sessionmaker
@@ -193,7 +194,7 @@ def search_case():
             )
         )
 
-    case = SimpleNamespace(factory=factory, user_id="owner")
+    case = SimpleNamespace(factory=factory, user_id="owner", engine=engine)
 
     def current_user():
         """每次请求重新读取用户，模拟真实 Cookie 解析后的身份。"""
@@ -259,6 +260,21 @@ def test_search_matches_case_body_and_task_report_ids(search_case):
     report_items = _groups(report.json())["report"]["items"]
     assert report_items[0]["id"] == "rep-pay"
     assert report_items[0]["url"] == "/reports/rep-pay"
+
+    statements: list[str] = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(search_case.engine, "before_cursor_execute", capture)
+    try:
+        probed = search_case.client.get("/api/search", params={"q": "task-pay"})
+    finally:
+        event.remove(search_case.engine, "before_cursor_execute", capture)
+    assert probed.status_code == 200
+    joined = "\n".join(statements)
+    assert "tasks.config" not in joined and "tasks.result" not in joined and "tasks.progress" not in joined
+    assert "reports.metrics" not in joined and "share_token" not in joined
 
 
 def test_search_type_filter_limit_and_blank_query(search_case):

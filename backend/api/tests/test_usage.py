@@ -5,7 +5,15 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import JSON, BigInteger, ForeignKeyConstraint, Integer, MetaData, create_engine
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    ForeignKeyConstraint,
+    Integer,
+    MetaData,
+    create_engine,
+    event,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -127,7 +135,7 @@ def usage_case():
     app.dependency_overrides[get_current_user] = current_user
     app.dependency_overrides[get_db] = database
     client = TestClient(app)
-    case = SimpleNamespace(factory=factory, client=client)
+    case = SimpleNamespace(factory=factory, client=client, engine=engine)
     try:
         yield case
     finally:
@@ -161,6 +169,49 @@ def test_usage_summary_aggregates(usage_case):
 
     assert len(data["recent"]) == 3
     assert all("content" not in item for item in data["recent"])
+    # 未超过扫描上限：必须明确告知前端这是全量样本
+    assert data["truncated"] is False
+    assert data["scanned_messages"] == 3
+    assert data["sample_limit"] == 5000
+
+
+def test_usage_summary_marks_truncated_sample(usage_case, monkeypatch):
+    """超过扫描上限时必须回传 truncated/scanned_messages，页面据此提示非全量。"""
+    from app.routers import usage as usage_router
+
+    monkeypatch.setattr(usage_router, "MAX_MESSAGES", 1)
+    response = usage_case.client.get("/api/usage/summary", params={"days": 30})
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    assert data["truncated"] is True
+    assert data["scanned_messages"] == 1
+    assert data["sample_limit"] == 1
+    # 只统计最近一条（created_at 相同，按 SQLite 返回顺序取一条），总量应小于全量 280
+    assert data["total_tokens"] < 280
+
+
+def test_usage_summary_skips_message_body(usage_case):
+    """用量聚合不得把消息正文和附件读进内存。"""
+    statements: list[str] = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(usage_case.engine, "before_cursor_execute", capture)
+    try:
+        response = usage_case.client.get("/api/usage/summary", params={"days": 30})
+    finally:
+        event.remove(usage_case.engine, "before_cursor_execute", capture)
+
+    assert response.status_code == 200, response.text
+    selects = [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith("SELECT") and "messages" in statement
+    ]
+    assert selects, "未捕获到用量消息查询"
+    assert all(".content" not in statement and ".attachments" not in statement for statement in selects), selects
 
 
 def test_usage_summary_days_validation(usage_case):

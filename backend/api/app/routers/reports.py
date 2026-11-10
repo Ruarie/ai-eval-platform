@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import PlainTextResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -52,16 +53,61 @@ def _parent_report_id(db: Session, task: Task | None) -> str | None:
     return parent_report.id if parent_report else None
 
 
-def _title(db: Session, report: Report, task: Task | None) -> str:
-    """按契约示例风格生成报告标题：<类型> · <数据集 版本>（可解析时）。"""
+def _title_with_datasets(report: Report, task: Task | None, datasets: dict[str, Dataset]) -> str:
+    """按契约示例风格生成报告标题；数据集由调用方批量载入，避免列表逐行查库。"""
     label = _KIND_LABELS.get(report.kind, f"{report.kind} 报告")
     config = (task.config or {}) if task else {}
     dataset_id = config.get("dataset_id")
+    ds = datasets.get(dataset_id) if dataset_id else None
+    if ds:
+        return f"{label} · {ds.name} v{ds.version}"
+    return f"{label} · 任务 {report.task_id[:8]}"
+
+
+def _title(db: Session, report: Report, task: Task | None) -> str:
+    """单条报告标题（详情/导出路径复用），内部按需查一次数据集。"""
+    config = (task.config or {}) if task else {}
+    dataset_id = config.get("dataset_id")
+    datasets: dict[str, Dataset] = {}
     if dataset_id:
         ds = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if ds:
-            return f"{label} · {ds.name} v{ds.version}"
-    return f"{label} · 任务 {report.task_id[:8]}"
+            datasets[ds.id] = ds
+    return _title_with_datasets(report, task, datasets)
+
+
+def _child_stress_report_ids(db: Session, task_ids: list[str]) -> dict[str, str]:
+    """批量解析「先评后压」子报告：返回父任务 ID → 压测报告 ID。
+
+    列表页原先每行查两次（子任务 + 子报告），100 条上限会产生数百条 SQL。
+    这里一次取出所有子任务，再一次取出对应报告，语义与 `_child_stress_report_id` 一致
+    （同父任务取最早创建的子任务）。
+    """
+    if not task_ids:
+        return {}
+    children = (
+        db.query(Task.id, Task.parent_task_id)
+        .filter(Task.parent_task_id.in_(task_ids), Task.kind == "stress")
+        .order_by(Task.created_at.asc())
+        .all()
+    )
+    first_child: dict[str, str] = {}
+    for child_id, parent_id in children:
+        if parent_id:
+            first_child.setdefault(parent_id, child_id)
+    if not first_child:
+        return {}
+    reports = (
+        db.query(Report.task_id, Report.id)
+        .filter(Report.task_id.in_(list(first_child.values())))
+        .all()
+    )
+    report_by_task = {task_id: report_id for task_id, report_id in reports}
+    return {
+        parent_id: report_by_task[child_id]
+        for parent_id, child_id in first_child.items()
+        if child_id in report_by_task
+    }
 
 
 def _baseline_matches(current: dict, candidate: dict) -> bool:
@@ -191,18 +237,45 @@ def list_reports(
         query = query.filter(Report.kind == kind)
     if task_id:
         query = query.filter(Report.task_id == task_id)
-    total = query.count()
-    rows = query.order_by(Report.created_at.desc()).offset(offset).limit(limit).all()
+    # count() 会把整行包进子查询，metrics / share_token 仍会被数据库读出。只数主键。
+    total = query.with_entities(func.count(Report.id)).scalar() or 0
+    # 列表不返回指标与分享令牌。metrics 可能很大，share_token 只允许详情通道按需读取。
+    rows = (
+        query.order_by(Report.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .with_entities(Report.id, Report.kind, Report.task_id, Report.created_at)
+        .all()
+    )
+    # 批量载入任务、数据集与派生压测报告，避免逐行查询（原实现单页最多数百条 SQL）。
+    # 标题只需要 config.dataset_id，不读 result / progress。
+    task_ids = list({row.task_id for row in rows if row.task_id})
+    tasks = {
+        task.id: task
+        for task in db.query(Task.id, Task.config).filter(Task.id.in_(task_ids)).all()
+    } if task_ids else {}
+    dataset_ids = {
+        (task.config or {}).get("dataset_id")
+        for task in tasks.values()
+        if (task.config or {}).get("dataset_id")
+    }
+    datasets = {
+        dataset.id: dataset
+        for dataset in db.query(Dataset.id, Dataset.name, Dataset.version)
+        .filter(Dataset.id.in_(list(dataset_ids)))
+        .all()
+    } if dataset_ids else {}
+    child_reports = _child_stress_report_ids(db, task_ids)
     items = []
     for row in rows:
-        task = db.query(Task).filter(Task.id == row.task_id).first()
+        task = tasks.get(row.task_id)
         items.append(
             {
                 "id": row.id,
-                "title": _title(db, row, task),
+                "title": _title_with_datasets(row, task, datasets),
                 "kind": row.kind,
                 "task_id": row.task_id,
-                "child_stress_report_id": _child_stress_report_id(db, task),
+                "child_stress_report_id": child_reports.get(row.task_id),
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }
         )

@@ -3,26 +3,26 @@
     <!-- ═══ 1. 调度大盘 KPI 趋势带（数字滚动 + 迷你趋势线 + 发光描边） ═══ -->
     <div class="kpi-grid mb16" data-od-id="dispatch-kpis" style="--glow-c: var(--c-agent)">
       <div class="kpi kpi-glow">
-        <div class="kpi-num num">{{ onlineDisplay }}<span class="unit">/ {{ totalWorkers }}</span></div>
+        <div class="kpi-num num">{{ overviewReady ? onlineDisplay + ' / ' + totalWorkers : '—' }}</div>
         <div class="kpi-label">在线 Worker 节点</div>
       </div>
       <div class="kpi kpi-trend kpi-glow">
-        <div class="kpi-num num">{{ queueDisplay }}</div>
+        <div class="kpi-num num">{{ overviewReady ? queueDisplay : '—' }}</div>
         <div class="kpi-label">排队队列深度</div>
         <svg class="spark" viewBox="0 0 76 24" preserveAspectRatio="none"><polyline :points="sparkPoints(histQueue)" /></svg>
       </div>
       <div class="kpi kpi-trend kpi-glow">
-        <div class="kpi-num num">{{ runningDisplay }}</div>
+        <div class="kpi-num num">{{ overviewReady ? runningDisplay : '—' }}</div>
         <div class="kpi-label">运行中任务</div>
         <svg class="spark" viewBox="0 0 76 24" preserveAspectRatio="none"><polyline :points="sparkPoints(histRunning)" /></svg>
       </div>
       <div class="kpi kpi-trend kpi-glow">
-        <div class="kpi-num num">{{ costDisplay }}<span class="unit">ms</span></div>
+        <div class="kpi-num num">{{ overviewReady ? costDisplay : '—' }}<span class="unit">ms</span></div>
         <div class="kpi-label">平均分发调度延迟</div>
         <svg class="spark" viewBox="0 0 76 24" preserveAspectRatio="none"><polyline :points="sparkPoints(histCost)" /></svg>
       </div>
       <div class="kpi kpi-trend kpi-glow">
-        <div class="kpi-num num">{{ assignedDisplay }}</div>
+        <div class="kpi-num num">{{ overviewReady ? assignedDisplay : '—' }}</div>
         <div class="kpi-label">今日已分配任务</div>
         <svg class="spark" viewBox="0 0 76 24" preserveAspectRatio="none"><polyline :points="sparkPoints(histAssigned)" /></svg>
       </div>
@@ -232,25 +232,32 @@
               <div class="dock-card-title">
                 <span>内核状态</span>
                 <span class="badge" :class="isRunning ? 'badge-running' : 'badge-cancelled'">
-                  <i class="bdot"></i>{{ isRunning ? '调度中' : '已暂停' }}
+                  <i class="bdot"></i>{{ kernelStateLabel }}
                 </span>
               </div>
               <div class="kernel-metric-row mb8">
                 <div class="k-stat">
                   <span class="k-label tertiary">健康度</span>
-                  <span class="k-val font-bold" style="color: var(--accent-success)">99.4%</span>
+                  <!-- 契约未提供健康度指标，不再用固定 99.4% 冒充真实值 -->
+                  <span class="k-val font-bold" :style="{ color: 'var(--text-tertiary)' }">—</span>
                 </div>
                 <div class="k-stat">
                   <span class="k-label tertiary">活跃并发</span>
-                  <span class="k-val font-bold mono" style="color: var(--accent-ai)">{{ runningDisplay }}/{{ capacity }}</span>
+                  <span class="k-val font-bold mono" style="color: var(--accent-ai)">{{ overviewReady ? runningDisplay + '/' + capacity : '—' }}</span>
                 </div>
                 <div class="k-stat">
                   <span class="k-label tertiary">心跳</span>
-                  <span class="k-val font-bold mono">{{ heartbeatMs }}ms</span>
+                  <span class="k-val font-bold mono">{{ overviewReady ? heartbeatMs + 'ms' : '—' }}</span>
                 </div>
               </div>
               <div class="row" style="gap: 6px">
-                <button class="btn btn-secondary btn-xs" style="flex: 1" @click="toggleScheduler">
+                <button
+                  class="btn btn-secondary btn-xs"
+                  style="flex: 1"
+                  :disabled="liveMode"
+                  :title="liveMode ? '调度暂停/恢复接口尚未在 API 契约中定义' : ''"
+                  @click="toggleScheduler"
+                >
                   {{ isRunning ? '⏸ 暂停' : '▶ 恢复' }}
                 </button>
                 <button class="btn btn-primary btn-xs" style="flex: 1" @click="showRegisterModal = true">
@@ -276,7 +283,7 @@
               <div class="field" style="margin: 6px 0 0">
                 <div class="row-between">
                   <span class="field-label" style="margin: 0; font-size: 11px">并发容量</span>
-                  <b class="num font-bold" style="color: var(--accent-ai); font-size: 13px">{{ capacity }}</b>
+                  <b class="num font-bold" style="color: var(--accent-ai); font-size: 13px">{{ overviewReady ? capacity : '—' }}</b>
                 </div>
                 <input
                   v-model.number="capacity"
@@ -286,6 +293,7 @@
                   max="8"
                   step="1"
                   style="margin-top: 4px"
+                  :disabled="!overviewReady"
                   @change="handleCapacityChange"
                 />
               </div>
@@ -605,7 +613,8 @@ const isBottomDockCollapsed = ref(isMobileViewport)
 const isRunning = ref(true)
 const strategy = ref('负载均衡')
 const capacity = ref(4)
-const assignedToday = ref(126)
+// mock 演示计数只在演示模式预置；live 模式等 overview 返回后再展示。
+const assignedToday = ref(liveMode ? 0 : 126)
 const assignCosts = ref([72, 85, 94, 68, 88])
 // live 模式大盘快照：KPI 与策略/容量以服务端返回为准
 const overviewData = ref<DispatchOverview | null>(null)
@@ -634,6 +643,8 @@ function useCountUp(source: { value: number }) {
       raf = requestAnimationFrame(step)
     },
   )
+  // 组件卸载时取消未完成的滚动动画，避免回调写入已销毁组件的 ref。
+  onBeforeUnmount(() => cancelAnimationFrame(raf))
   return display
 }
 
@@ -671,7 +682,9 @@ interface WorkerNode {
   weight: number
 }
 
-const workerPool = ref<WorkerNode[]>([
+// 演示节点只在 mock 模式作为初值；live 模式必须等 /api/dispatch/workers 返回，
+// 避免接口失败时把 10 个虚构节点与负载当成在线集群。
+const MOCK_WORKERS: WorkerNode[] = [
   { id: 'worker-01', name: 'GPU-Node-A1', caps: ['benchmark', 'judge'], state: 'busy', load: 62, ram: '4.8GB/16GB', task: 'a1f3c2 · smoke-20 v3 (shard 2/5)', weight: 100 },
   { id: 'worker-02', name: 'Vec-Node-V1', caps: ['rag', 'vector'], state: 'idle', load: 8, ram: '2.1GB/16GB', task: null, weight: 100 },
   { id: 'worker-03', name: 'Gen-Node-G1', caps: ['testcase', 'prd'], state: 'busy', load: 45, ram: '3.4GB/16GB', task: 'd4c1a9 · PRD-支付 生成用例', weight: 80 },
@@ -682,7 +695,8 @@ const workerPool = ref<WorkerNode[]>([
   { id: 'worker-08', name: 'Eval-Node-E1', caps: ['benchmark', 'judge'], state: 'idle', load: 18, ram: '2.6GB/16GB', task: null, weight: 100 },
   { id: 'worker-09', name: 'RAG-Node-R1', caps: ['rag', 'lightrag'], state: 'offline', load: 0, ram: '0GB/16GB', task: null, weight: 100 },
   { id: 'worker-10', name: 'Case-Node-C2', caps: ['testcase', 'openapi'], state: 'idle', load: 9, ram: '1.5GB/16GB', task: null, weight: 90 },
-])
+]
+const workerPool = ref<WorkerNode[]>(liveMode ? [] : MOCK_WORKERS.map(w => ({ ...w })))
 
 // 任务工单：统一 mock 仿真项与 live 任务的星图展示模型
 interface TaskNode {
@@ -708,11 +722,13 @@ interface QueueItem {
   parentId?: string | null
 }
 
-const queue = ref<QueueItem[]>([
+// live 模式队列由 /api/tasks 分页结果驱动，初始不得预置演示工单。
+const MOCK_QUEUE: QueueItem[] = [
   { qid: 'q-101', kind: 'benchmark', label: '2 模型 × 数据集 smoke-20 v3 · shard 3/5', prio: 'P0' },
   { qid: 'q-102', kind: 'rag', label: '知识库 default · 黄金 QA qa-v1 · hybrid 回归', prio: 'P1' },
   { qid: 'q-103', kind: 'stress', label: '派生压测 · env=test · 10 QPS', prio: 'P2', parentId: 'q-101' },
-])
+]
+const queue = ref<QueueItem[]>(liveMode ? [] : MOCK_QUEUE.map(q => ({ ...q })))
 
 // live 模式：活跃任务（queued/running/awaiting_case_confirm）与近期任务（甘特）
 const liveActiveTasks = ref<Task[]>([])
@@ -937,6 +953,10 @@ const runningCount = computed(() => liveMode ? liveRunningTotal.value : taskNode
 const assignedTodayNum = computed(() =>
   liveMode && overviewData.value ? overviewData.value.assigned_today : assignedToday.value,
 )
+// live 模式在 overview 首次返回前没有任何真实大盘数据，KPI 必须显示占位符而不是 0/演示值。
+const overviewReady = computed(() => !liveMode || overviewData.value !== null)
+// live 模式的暂停/恢复能力未在 API 契约中定义，徽标只表达"实时接入"，不宣称可控制调度器。
+const kernelStateLabel = computed(() => (liveMode ? '实时接入' : isRunning.value ? '调度中' : '已暂停'))
 
 // KPI 数字滚动显示值
 const onlineDisplay = useCountUp(onlineCount)
@@ -1132,10 +1152,12 @@ interface LogItem {
   tid?: string
 }
 
-const logs = ref<LogItem[]>([
+// 演示日志只在 mock 模式出现；live 模式日志只允许来自 /api/dispatch/events。
+const MOCK_LOGS: LogItem[] = [
   { time: new Date().toTimeString().slice(0, 8), kind: 'ENQUEUE', cat: 'assign', html: '<span class="la">q-101</span> 2 模型 × smoke-20 v3 · shard 3/5 (P0)', tid: 'q-101' },
   { time: new Date().toTimeString().slice(0, 8), kind: 'ASSIGN', cat: 'assign', html: '<span class="la">q-100</span> → worker-01 · 耗时 82ms', tid: 'q-100' },
-])
+]
+const logs = ref<LogItem[]>(liveMode ? [] : MOCK_LOGS.map(l => ({ ...l })))
 
 const logCat = ref<'all' | LogItem['cat']>('all')
 const logCats = [
@@ -1314,7 +1336,12 @@ function addRippleAtWorker(workerId: string | null | undefined) {
   if (!pw) return
   const id = ++rippleSeq
   ripples.value.push({ id, x: pw.x, y: pw.y })
-  window.setTimeout(() => { ripples.value = ripples.value.filter(p => p.id !== id) }, 1200)
+  // 涟漪句柄统一登记，组件卸载时清理，避免定时器继续修改已销毁状态。
+  const timer = window.setTimeout(() => {
+    assignTimers.delete(timer)
+    ripples.value = ripples.value.filter(p => p.id !== id)
+  }, 1200)
+  assignTimers.add(timer)
 }
 
 /* ─── mock 调度分发循环：按策略选节点 → 工单飞向节点 → 进度推进 → 完成涟漪 + 甘特沉淀 ─── */

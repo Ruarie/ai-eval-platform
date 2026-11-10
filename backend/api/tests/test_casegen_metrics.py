@@ -5,7 +5,15 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import JSON, BigInteger, ForeignKeyConstraint, Integer, MetaData, create_engine
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    ForeignKeyConstraint,
+    Integer,
+    MetaData,
+    create_engine,
+    event,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -146,7 +154,7 @@ def metrics_case():
     app.dependency_overrides[get_current_user] = current_user
     app.dependency_overrides[get_db] = database
     client = TestClient(app)
-    case = SimpleNamespace(factory=factory, client=client, now=now)
+    case = SimpleNamespace(factory=factory, client=client, now=now, engine=engine)
     try:
         yield case
     finally:
@@ -160,6 +168,10 @@ def test_casegen_metrics_aggregates(metrics_case):
     data = response.json()
 
     assert data["total_runs"] == 2
+    # 未超过聚合上限：truncated=false，且 matched_runs 与参与聚合的运行数一致
+    assert data["truncated"] is False
+    assert data["matched_runs"] == 2
+    assert data["sample_limit"] == 1000
     assert data["succeeded_runs"] == 1
     assert data["failed_runs"] == 1
     assert data["total_generated"] == 8
@@ -188,6 +200,29 @@ def test_casegen_metrics_aggregates(metrics_case):
     assert recent["task-2"]["error_code"] == "UPSTREAM"
 
 
+def test_casegen_metrics_skips_review_body_and_task_progress(metrics_case):
+    """聚合不读取评审正文和任务进度快照。"""
+    statements: list[str] = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(metrics_case.engine, "before_cursor_execute", capture)
+    try:
+        response = metrics_case.client.get("/api/metrics/casegen", params={"days": 30})
+    finally:
+        event.remove(metrics_case.engine, "before_cursor_execute", capture)
+
+    assert response.status_code == 200, response.text
+    joined = "\n".join(statements)
+    assert "summary" not in joined
+    assert "dimensions" not in joined
+    assert "issues" not in joined
+    assert "progress" not in joined
+    assert "column_schema" not in joined
+    assert "checks" not in joined
+
+
 def test_casegen_metrics_one_day(metrics_case):
     """单日窗口仍返回完整聚合，趋势长度与 days 一致。"""
     response = metrics_case.client.get("/api/metrics/casegen", params={"days": 1})
@@ -196,6 +231,22 @@ def test_casegen_metrics_one_day(metrics_case):
     assert data["total_runs"] == 2
     assert data["avg_ai_score"] == 90.0
     assert len(data["series"]) == 1
+
+
+def test_casegen_metrics_marks_truncated_sample(metrics_case, monkeypatch):
+    """超过聚合上限时回传 truncated/matched_runs，成功率分母只代表样本。"""
+    from app.routers import metrics as metrics_router
+
+    monkeypatch.setattr(metrics_router, "MAX_RUNS", 1)
+    response = metrics_case.client.get("/api/metrics/casegen", params={"days": 30})
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    assert data["truncated"] is True
+    assert data["matched_runs"] == 2
+    assert data["sample_limit"] == 1
+    assert data["total_runs"] == 1
+    assert data["success_rate"] in (0.0, 1.0)
 
 
 def test_casegen_metrics_validates_days(metrics_case):

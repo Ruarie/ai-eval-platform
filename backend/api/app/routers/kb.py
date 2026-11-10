@@ -26,7 +26,8 @@ from shared.kb import (
     index_document,
     retrieve,
 )
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, defer
 
 from ..config import settings
 from ..db import get_db
@@ -72,13 +73,15 @@ def _get_kb_or_404(db: Session, kb_id: str) -> KnowledgeBase:
     return kb
 
 
-def _get_doc_or_404(db: Session, kb_id: str, doc_id: str) -> KbDocument:
-    """读取属于指定知识库的文档或抛出 NOT_FOUND。"""
-    doc = (
-        db.query(KbDocument)
-        .filter(KbDocument.kb_id == kb_id, KbDocument.id == doc_id)
-        .first()
-    )
+def _get_doc_or_404(db: Session, kb_id: str, doc_id: str, *, include_text: bool = True) -> KbDocument:
+    """读取属于指定知识库的文档或抛出 NOT_FOUND。
+
+    删除路径不需要正文。``include_text=False`` 时推迟加载 text，避免为删一行把最多 20MB 正文读进内存。
+    """
+    query = db.query(KbDocument).filter(KbDocument.kb_id == kb_id, KbDocument.id == doc_id)
+    if not include_text:
+        query = query.options(defer(KbDocument.text))
+    doc = query.first()
     if not doc:
         raise AppError(ErrorCode.NOT_FOUND, "文档不存在")
     return doc
@@ -88,10 +91,19 @@ def _owner_name(db: Session, created_by: str | None) -> str:
     """解析创建人显示名；成员已删除或未记录时返回空串。"""
     if not created_by:
         return ""
-    user = db.query(User).filter(User.id == created_by).first()
-    if not user:
-        return ""
-    return user.display_name or user.username or ""
+    return _owner_map(db, {created_by}).get(created_by, "")
+
+
+def _owner_map(db: Session, user_ids: set[str]) -> dict[str, str]:
+    """批量解析创建人显示名，供列表接口一次取齐。"""
+    if not user_ids:
+        return {}
+    rows = (
+        db.query(User.id, User.display_name, User.username)
+        .filter(User.id.in_(user_ids))
+        .all()
+    )
+    return {row.id: (row.display_name or row.username or "") for row in rows}
 
 
 def _format_size(size: int) -> str:
@@ -103,33 +115,47 @@ def _format_size(size: int) -> str:
     return f"{size} B"
 
 
-def _kb_out(db: Session, kb: KnowledgeBase) -> KbOut:
-    """构造知识库响应：doc_count 实时统计，external_chat 返回 null。"""
-    doc_count = None
-    if kb.kind == "lightrag":
-        doc_count = db.query(KbDocument).filter(KbDocument.kb_id == kb.id).count()
+def _kb_out(
+    db: Session,
+    kb: KnowledgeBase,
+    *,
+    doc_count: int | None = None,
+    owner: str | None = None,
+    stats_ready: bool = False,
+) -> KbOut:
+    """构造知识库响应：doc_count 实时统计，external_chat 返回 null。
+
+    ``stats_ready=True`` 表示调用方已批量算好文档数和创建人，此处不再逐库查询。
+    """
+    if not stats_ready:
+        doc_count = None
+        if kb.kind == "lightrag":
+            doc_count = db.query(KbDocument).filter(KbDocument.kb_id == kb.id).count()
+        owner = _owner_name(db, kb.created_by)
+    elif owner is None:
+        owner = _owner_name(db, kb.created_by)
     return KbOut(
         id=kb.id,
         name=kb.name,
         kind=kb.kind,
         doc_count=doc_count,
         is_core=kb.is_core,
-        owner=_owner_name(db, kb.created_by),
+        owner=owner,
         profile_id=kb.profile_id,
         capabilities={"projection": False, "rerank_compare": False},
         created_at=kb.created_at,
     )
 
 
-def _gold_qa_out(db: Session, qa: GoldQa) -> GoldQaOut:
-    """构造黄金 QA 响应。"""
+def _gold_qa_out(db: Session, qa: GoldQa, owner: str | None = None) -> GoldQaOut:
+    """构造黄金 QA 响应。传入 owner 时不再单条查用户。"""
     return GoldQaOut(
         id=qa.id,
         kb_id=qa.kb_id,
         name=qa.name,
         version=qa.version,
         row_count=qa.row_count,
-        owner=_owner_name(db, qa.created_by),
+        owner=owner if owner is not None else _owner_name(db, qa.created_by),
         created_at=qa.created_at,
     )
 
@@ -146,9 +172,29 @@ def _set_core_exclusive(db: Session, kb_id: str) -> None:
 
 @router.get("")
 def list_kb(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """按创建时间返回全部知识库。"""
+    """按创建时间返回全部知识库。文档数与创建人各查一次，不随库数量线性增长。"""
     rows = db.query(KnowledgeBase).order_by(KnowledgeBase.created_at.asc()).all()
-    return {"items": [_kb_out(db, row) for row in rows], "total": len(rows)}
+    lightrag_ids = [row.id for row in rows if row.kind == "lightrag"]
+    counts: dict[str, int] = {}
+    if lightrag_ids:
+        counts = dict(
+            db.query(KbDocument.kb_id, func.count(KbDocument.id))
+            .filter(KbDocument.kb_id.in_(lightrag_ids))
+            .group_by(KbDocument.kb_id)
+            .all()
+        )
+    owners = _owner_map(db, {row.created_by for row in rows if row.created_by})
+    items = [
+        _kb_out(
+            db,
+            row,
+            doc_count=counts.get(row.id, 0) if row.kind == "lightrag" else None,
+            owner=owners.get(row.created_by or "", ""),
+            stats_ready=True,
+        )
+        for row in rows
+    ]
+    return {"items": items, "total": len(items)}
 
 
 @router.post("", response_model=KbOut, status_code=201)
@@ -234,7 +280,12 @@ def delete_kb(
 ):
     """删除知识库及其文档（含磁盘文件、LightRAG 索引）与黄金 QA。"""
     kb = _get_kb_or_404(db, kb_id)
-    docs = db.query(KbDocument).filter(KbDocument.kb_id == kb.id).all()
+    # 删除只需要标识、状态和磁盘路径，不读正文。
+    docs = (
+        db.query(KbDocument.id, KbDocument.status, KbDocument.storage_path)
+        .filter(KbDocument.kb_id == kb.id)
+        .all()
+    )
 
     # 先清引擎索引：已建索引的文档删除失败即中止，避免留下无法再定位的脏召回。
     indexed = [doc.id for doc in docs if doc.status == "indexed"]
@@ -399,7 +450,7 @@ def _cached_statuses(doc_ids: list[str]) -> dict[str, str]:
     }
 
 
-def _refresh_doc_statuses(db: Session, rows: list[KbDocument]) -> dict[str, str]:
+def _refresh_doc_statuses(db: Session, rows: list) -> dict[str, str]:
     """回读仍在建索引的文档状态，返回需要落库的新状态（不在此处提交）。
 
     由调用方先用返回结果构造响应、再统一 UPDATE：``commit`` 会让会话对象过期，
@@ -424,10 +475,20 @@ def list_docs(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """返回知识库文档元信息（不含正文与切块）。"""
+    """返回知识库文档元信息（不含正文与切块）。
+
+    只查元信息列：``KbDocument.text`` 单篇上限 20MB，列表接口若整行加载，
+    一个知识库几十篇文档就会把数百 MB 正文读进内存。
+    """
     _get_kb_or_404(db, kb_id)
     rows = (
-        db.query(KbDocument)
+        db.query(
+            KbDocument.id,
+            KbDocument.filename,
+            KbDocument.status,
+            KbDocument.size,
+            KbDocument.created_at,
+        )
         .filter(KbDocument.kb_id == kb_id)
         .order_by(KbDocument.created_at.asc())
         .all()
@@ -488,7 +549,7 @@ def delete_doc(
     先删引擎再删库内记录：引擎删除失败时抛错中止，避免留下「库里已删、
     向量库里仍在」的脏召回。引擎未配置或空库场景由适配服务按幂等处理。
     """
-    doc = _get_doc_or_404(db, kb_id, doc_id)
+    doc = _get_doc_or_404(db, kb_id, doc_id, include_text=False)
     if not delete_documents(kb_id, [doc.id]):
         if doc.status == "indexed":
             raise AppError(ErrorCode.UPSTREAM, "LightRAG 索引删除失败，请稍后重试")
@@ -605,10 +666,15 @@ def list_gold_qa(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """返回知识库下的黄金 QA 集元信息。"""
+    """返回知识库下的黄金 QA 集元信息。创建人一次取齐。"""
     _get_kb_or_404(db, kb_id)
     rows = db.query(GoldQa).filter(GoldQa.kb_id == kb_id).order_by(GoldQa.created_at.asc()).all()
-    return {"items": [_gold_qa_out(db, row) for row in rows], "total": len(rows)}
+    owners = _owner_map(db, {row.created_by for row in rows if row.created_by})
+    items = [
+        _gold_qa_out(db, row, owner=owners.get(row.created_by or "", ""))
+        for row in rows
+    ]
+    return {"items": items, "total": len(items)}
 
 
 @router.post("/{kb_id}/gold-qa", response_model=GoldQaOut, status_code=201)

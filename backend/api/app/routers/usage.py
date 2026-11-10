@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -34,7 +35,7 @@ router = APIRouter(prefix="/api/usage", tags=["usage"])
 MAX_MESSAGES = 5000
 
 
-def _usage(row: Message) -> tuple[int, int, int]:
+def _usage(row: Any) -> tuple[int, int, int]:
     """从 turn_stats.usage 提取 token；字段缺失时按 prompt+completion 兜底。"""
     stats = row.turn_stats if isinstance(row.turn_stats, dict) else {}
     usage = stats.get("usage") if isinstance(stats.get("usage"), dict) else {}
@@ -65,17 +66,29 @@ def usage_summary(
     start_day = (now - timedelta(days=days - 1)).date()
     start_at = datetime.combine(start_day, datetime.min.time(), tzinfo=UTC)
 
+    base_query = db.query(Message).filter(
+        Message.role == "assistant",
+        Message.created_at >= start_at,
+        Message.turn_stats.isnot(None),
+    )
+    # 先取匹配总数：超过聚合上限时必须告知前端只统计了最近一段，
+    # 不能让截断后的样本看起来像全量用量。
+    # 只数主键。Query.count() 会把 content 放进子查询，计数本身就把正文读出来。
+    matched = base_query.with_entities(func.count(Message.id)).scalar() or 0
+    # 聚合只用用量与归属字段。content / attachments 可能很大，不能随 5000 行一起读入。
     rows = (
-        db.query(Message)
-        .filter(
-            Message.role == "assistant",
-            Message.created_at >= start_at,
-            Message.turn_stats.isnot(None),
+        base_query.with_entities(
+            Message.session_id,
+            Message.created_at,
+            Message.turn_stats,
+            Message.model_name,
+            Message.profile_id,
         )
         .order_by(Message.created_at.desc())
         .limit(MAX_MESSAGES)
         .all()
     )
+    truncated = matched > MAX_MESSAGES
     session_ids = {row.session_id for row in rows}
     sessions = (
         db.query(AgentSession.id, AgentSession.title, AgentSession.user_id)
@@ -100,11 +113,13 @@ def usage_summary(
     )
     user_map: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "total": 0})
     recent: list[UsageRecentOut] = []
+    calls = 0
 
     for row in rows:
         prompt, completion, total = _usage(row)
         if not total and not prompt and not completion:
             continue
+        calls += 1
         total_prompt += prompt
         total_completion += completion
         total_tokens += total
@@ -188,12 +203,15 @@ def usage_summary(
     return UsageSummaryOut(
         days=days,
         generated_at=now,
-        calls=sum(1 for row in rows if sum(_usage(row)) > 0),
+        calls=calls,
         sessions=len(session_ids),
         users=len({sid for sid in session_ids if session_meta.get(sid, ("", ""))[1]}),
         prompt_tokens=total_prompt,
         completion_tokens=total_completion,
         total_tokens=total_tokens,
+        truncated=truncated,
+        scanned_messages=len(rows),
+        sample_limit=MAX_MESSAGES,
         series=series,
         by_model=by_model,
         by_user=by_user,

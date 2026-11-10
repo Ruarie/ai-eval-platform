@@ -955,6 +955,10 @@ export interface UsageSummary {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
+  /** 时间窗内匹配消息超过聚合上限时只统计最近 N 条，页面需提示 */
+  truncated?: boolean
+  scanned_messages?: number
+  sample_limit?: number
   series: UsageSeries[]
   by_model: UsageModel[]
   by_user: UsageUser[]
@@ -1121,6 +1125,10 @@ export interface CasegenModule {
 export interface CasegenMetrics {
   days: number
   generated_at?: string | null
+  /** 时间窗内运行数超过聚合上限时，指标只覆盖最近 sample_limit 次运行 */
+  truncated?: boolean
+  matched_runs?: number
+  sample_limit?: number
   total_runs: number
   succeeded_runs: number
   failed_runs: number
