@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -34,7 +35,7 @@ router = APIRouter(prefix="/api/usage", tags=["usage"])
 MAX_MESSAGES = 5000
 
 
-def _usage(row: Message) -> tuple[int, int, int]:
+def _usage(row: Any) -> tuple[int, int, int]:
     """从 turn_stats.usage 提取 token；字段缺失时按 prompt+completion 兜底。"""
     stats = row.turn_stats if isinstance(row.turn_stats, dict) else {}
     usage = stats.get("usage") if isinstance(stats.get("usage"), dict) else {}
@@ -72,8 +73,21 @@ def usage_summary(
     )
     # 先取匹配总数：超过聚合上限时必须告知前端只统计了最近一段，
     # 不能让截断后的样本看起来像全量用量。
-    matched = base_query.count()
-    rows = base_query.order_by(Message.created_at.desc()).limit(MAX_MESSAGES).all()
+    # 只数主键。Query.count() 会把 content 放进子查询，计数本身就把正文读出来。
+    matched = base_query.with_entities(func.count(Message.id)).scalar() or 0
+    # 聚合只用用量与归属字段。content / attachments 可能很大，不能随 5000 行一起读入。
+    rows = (
+        base_query.with_entities(
+            Message.session_id,
+            Message.created_at,
+            Message.turn_stats,
+            Message.model_name,
+            Message.profile_id,
+        )
+        .order_by(Message.created_at.desc())
+        .limit(MAX_MESSAGES)
+        .all()
+    )
     truncated = matched > MAX_MESSAGES
     session_ids = {row.session_id for row in rows}
     sessions = (

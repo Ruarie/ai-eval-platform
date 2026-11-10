@@ -24,6 +24,7 @@ def test_session_list_batches_active_tasks_without_per_session_fallback(size):
     older = SimpleNamespace(id="old", session_id="s-0", kind="rag", status="queued")
     db = MagicMock()
     session_query = MagicMock()
+    session_query.options.return_value = session_query
     session_query.filter.return_value = session_query
     session_query.order_by.return_value = session_query
     session_query.all.return_value = rows
@@ -35,6 +36,7 @@ def test_session_list_batches_active_tasks_without_per_session_fallback(size):
             return session_query
         assert model is Task
         q = MagicMock()
+        q.options.return_value = q
         q.filter.return_value = q
         q.order_by.return_value = q
         q.all.return_value = [newest, older] if not task_queries and size else []

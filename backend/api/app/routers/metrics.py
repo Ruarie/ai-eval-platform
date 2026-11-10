@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from ..db import get_db
 from ..deps import get_current_user
@@ -80,21 +80,53 @@ def casegen_metrics(
 
     base_query = db.query(Task).filter(Task.kind == "testcase", Task.created_at >= start_at)
     # 先取匹配总数：超过聚合上限时，成功率/采纳率的分母不再是全量，必须回传标记。
-    matched = base_query.count()
-    tasks = base_query.order_by(Task.created_at.desc()).limit(MAX_RUNS).all()
+    # count() 会在子查询里带上 progress/result。只数主键，避免聚合前先读大 JSON。
+    matched = base_query.with_entities(func.count(Task.id)).scalar() or 0
+    # 看板要读 config/result 里的模型与条数，但不需要进度快照。
+    tasks = (
+        base_query.options(
+            load_only(
+                Task.id,
+                Task.status,
+                Task.config,
+                Task.result,
+                Task.created_at,
+                Task.started_at,
+                Task.finished_at,
+            )
+        )
+        .order_by(Task.created_at.desc())
+        .limit(MAX_RUNS)
+        .all()
+    )
     truncated = matched > MAX_RUNS
     task_ids = [task.id for task in tasks]
     sets = (
-        db.query(CaseSet).filter(CaseSet.task_id.in_(task_ids)).all() if task_ids else []
+        db.query(CaseSet)
+        .options(
+            load_only(
+                CaseSet.id,
+                CaseSet.task_id,
+                CaseSet.name,
+                CaseSet.generated_count,
+                CaseSet.confirmed_count,
+                CaseSet.review_state,
+            )
+        )
+        .filter(CaseSet.task_id.in_(task_ids))
+        .all()
+        if task_ids
+        else []
     )
     set_by_task = {case_set.task_id: case_set for case_set in sets if case_set.task_id}
     set_ids = [case_set.id for case_set in sets]
 
     # 每个用例集只取最新一次 AI 评审；历史仍保留在 case_review_runs。
-    latest_runs: dict[str, CaseReviewRun] = {}
+    latest_runs = {}
     if set_ids:
+        # 分数和结论足够；summary / dimensions / issues 是评审正文，不参与聚合。
         for run in (
-            db.query(CaseReviewRun)
+            db.query(CaseReviewRun.case_set_id, CaseReviewRun.score, CaseReviewRun.verdict)
             .filter(CaseReviewRun.case_set_id.in_(set_ids))
             .order_by(CaseReviewRun.created_at.desc())
             .all()

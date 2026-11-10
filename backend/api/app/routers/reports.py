@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import PlainTextResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -236,13 +237,22 @@ def list_reports(
         query = query.filter(Report.kind == kind)
     if task_id:
         query = query.filter(Report.task_id == task_id)
-    total = query.count()
-    rows = query.order_by(Report.created_at.desc()).offset(offset).limit(limit).all()
+    # count() 会把整行包进子查询，metrics / share_token 仍会被数据库读出。只数主键。
+    total = query.with_entities(func.count(Report.id)).scalar() or 0
+    # 列表不返回指标与分享令牌。metrics 可能很大，share_token 只允许详情通道按需读取。
+    rows = (
+        query.order_by(Report.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .with_entities(Report.id, Report.kind, Report.task_id, Report.created_at)
+        .all()
+    )
     # 批量载入任务、数据集与派生压测报告，避免逐行查询（原实现单页最多数百条 SQL）。
+    # 标题只需要 config.dataset_id，不读 result / progress。
     task_ids = list({row.task_id for row in rows if row.task_id})
     tasks = {
         task.id: task
-        for task in db.query(Task).filter(Task.id.in_(task_ids)).all()
+        for task in db.query(Task.id, Task.config).filter(Task.id.in_(task_ids)).all()
     } if task_ids else {}
     dataset_ids = {
         (task.config or {}).get("dataset_id")
@@ -251,7 +261,9 @@ def list_reports(
     }
     datasets = {
         dataset.id: dataset
-        for dataset in db.query(Dataset).filter(Dataset.id.in_(list(dataset_ids))).all()
+        for dataset in db.query(Dataset.id, Dataset.name, Dataset.version)
+        .filter(Dataset.id.in_(list(dataset_ids)))
+        .all()
     } if dataset_ids else {}
     child_reports = _child_stress_report_ids(db, task_ids)
     items = []

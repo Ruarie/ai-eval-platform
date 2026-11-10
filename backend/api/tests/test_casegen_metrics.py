@@ -5,7 +5,15 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import JSON, BigInteger, ForeignKeyConstraint, Integer, MetaData, create_engine
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    ForeignKeyConstraint,
+    Integer,
+    MetaData,
+    create_engine,
+    event,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -146,7 +154,7 @@ def metrics_case():
     app.dependency_overrides[get_current_user] = current_user
     app.dependency_overrides[get_db] = database
     client = TestClient(app)
-    case = SimpleNamespace(factory=factory, client=client, now=now)
+    case = SimpleNamespace(factory=factory, client=client, now=now, engine=engine)
     try:
         yield case
     finally:
@@ -190,6 +198,29 @@ def test_casegen_metrics_aggregates(metrics_case):
     assert recent["task-1"]["ai_score"] == 90
     assert recent["task-1"]["adoption_rate"] == 0.75
     assert recent["task-2"]["error_code"] == "UPSTREAM"
+
+
+def test_casegen_metrics_skips_review_body_and_task_progress(metrics_case):
+    """聚合不读取评审正文和任务进度快照。"""
+    statements: list[str] = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(metrics_case.engine, "before_cursor_execute", capture)
+    try:
+        response = metrics_case.client.get("/api/metrics/casegen", params={"days": 30})
+    finally:
+        event.remove(metrics_case.engine, "before_cursor_execute", capture)
+
+    assert response.status_code == 200, response.text
+    joined = "\n".join(statements)
+    assert "summary" not in joined
+    assert "dimensions" not in joined
+    assert "issues" not in joined
+    assert "progress" not in joined
+    assert "column_schema" not in joined
+    assert "checks" not in joined
 
 
 def test_casegen_metrics_one_day(metrics_case):

@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.60 |
-| 本轮审查日期 | 2026-11-10（用量/质量聚合截断显式化：新增 `truncated`/`scanned_messages`/`sample_limit`/`matched_runs`；报告列表批量投影） |
+| 文档版本 | V2.61 |
+| 本轮审查日期 | 2026-11-10（只读查询继续裁剪大列：用量正文、报告指标与分享令牌、会话确认卡、评审详情；响应字段不变） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.68（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -5093,3 +5093,20 @@ diff 响应：
 - `frontend/src/views/UsageCenter.vue`、`views/CasegenQuality.vue`：截断提示条。
 - `frontend/src/views/Dispatch.vue`、`views/AdminStress.vue`、`views/Login.vue`：移除 live 模式演示数据与伪连接状态；补齐定时器/RAF 清理。
 - `frontend/src/views/Kb.vue`、`views/ModelCompare.vue`、`components/drawers/KbGraphDrawer.vue`、`components/workspace/WorkspaceVideoViewer.vue`：请求竞态、指针捕获与 window 监听清理。
+
+## V2.61 只读查询列裁剪（2026-11-10）
+
+本轮不新增路由、不新增字段、不改变既有字段语义。只减少列表和聚合把用不到的大列读进内存。
+
+- `GET /api/usage/summary`：计数与扫描都不读取 `messages.content` / `attachments`。`truncated` 等 V2.60 字段语义不变。
+- `GET /api/reports`：列表不读取 `metrics` 与 `share_token`；计数只数主键。详情与免登分享仍按原路径读取令牌。
+- `GET /api/metrics/casegen`：不读取任务 `progress`、用例集 `checks`/`column_schema`、评审 `summary`/`dimensions`/`issues`。分数与结论仍参与聚合。
+- `GET /api/search`：任务不读 `config`/`result`/`progress`，报告不读 `metrics`/`share_token`，会话不读确认卡与压缩摘要。
+- `GET /api/sessions`：列表不读 `pending_confirm` 与 `compact_summary`；活动任务只取 id/类型/状态。
+- `GET /api/tasks`：分页结果仍含 config/progress/result；计数改为只数主键。
+- `GET /api/kb`：文档数与创建人各查一次。删除知识库或文档时不读取文档正文。
+
+### 修改代码文件与作用清单
+
+- `backend/api/app/routers/usage.py`、`reports.py`、`metrics.py`、`search.py`、`sessions.py`、`tasks.py`、`kb.py`：列投影与批量计数。
+- `backend/api/tests/test_usage.py`、`test_reports_list.py`、`test_casegen_metrics.py`、`test_search.py`、`test_kb_doc_list.py`、`test_agent_performance.py`：用实际 SQL 断言大列不进入 SELECT。

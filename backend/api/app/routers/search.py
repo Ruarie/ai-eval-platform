@@ -97,7 +97,7 @@ def _search_cases(db: Session, pattern: str, limit: int) -> list[SearchItemOut]:
         )
     )
     rows = (
-        db.query(CaseSet)
+        db.query(CaseSet.id, CaseSet.name, CaseSet.status, CaseSet.updated_at)
         .filter(
             or_(
                 CaseSet.name.ilike(pattern, escape="\\"),
@@ -132,9 +132,9 @@ def _search_cases(db: Session, pattern: str, limit: int) -> list[SearchItemOut]:
 
 
 def _search_tasks(db: Session, pattern: str, limit: int) -> list[SearchItemOut]:
-    """按任务 ID、类型或状态搜索；不扫描 config/result 大 JSON。"""
+    """按任务 ID、类型或状态搜索；不读取 config/result/progress 大 JSON。"""
     rows = (
-        db.query(Task)
+        db.query(Task.id, Task.kind, Task.status, Task.updated_at)
         .filter(
             or_(
                 Task.id.ilike(pattern, escape="\\"),
@@ -163,7 +163,12 @@ def _search_tasks(db: Session, pattern: str, limit: int) -> list[SearchItemOut]:
 def _search_sessions(db: Session, pattern: str, limit: int, user: User) -> list[SearchItemOut]:
     """会话只搜标题与 ID；私有会话仅属主可见，团队会话全员可见。"""
     rows = (
-        db.query(AgentSession)
+        db.query(
+            AgentSession.id,
+            AgentSession.title,
+            AgentSession.visibility,
+            AgentSession.updated_at,
+        )
         .filter(
             AgentSession.deleted_at.is_(None),
             AgentSession.engine_version == "agent_loop_v2",
@@ -195,9 +200,9 @@ def _search_sessions(db: Session, pattern: str, limit: int, user: User) -> list[
 
 
 def _search_reports(db: Session, pattern: str, limit: int) -> list[SearchItemOut]:
-    """报告按 ID 或类型搜索；历史评测报告全员可读。"""
+    """报告按 ID 或类型搜索；不读取 metrics 与分享令牌。"""
     rows = (
-        db.query(Report)
+        db.query(Report.id, Report.kind, Report.task_id, Report.created_at)
         .filter(
             or_(
                 Report.id.ilike(pattern, escape="\\"),
@@ -224,7 +229,13 @@ def _search_reports(db: Session, pattern: str, limit: int) -> list[SearchItemOut
 def _search_kbs(db: Session, pattern: str, limit: int) -> list[SearchItemOut]:
     """知识库按名称搜索；外部 Chat 库同样可见。"""
     rows = (
-        db.query(KnowledgeBase)
+        db.query(
+            KnowledgeBase.id,
+            KnowledgeBase.name,
+            KnowledgeBase.kind,
+            KnowledgeBase.is_core,
+            KnowledgeBase.created_at,
+        )
         .filter(KnowledgeBase.name.ilike(pattern, escape="\\"))
         .order_by(KnowledgeBase.created_at.desc())
         .limit(limit)
@@ -247,7 +258,7 @@ def _search_kbs(db: Session, pattern: str, limit: int) -> list[SearchItemOut]:
 def _search_datasets(db: Session, pattern: str, limit: int) -> list[SearchItemOut]:
     """数据集按名称搜索；仅历史只读资产。"""
     rows = (
-        db.query(Dataset)
+        db.query(Dataset.id, Dataset.name, Dataset.created_at)
         .filter(Dataset.name.ilike(pattern, escape="\\"))
         .order_by(Dataset.created_at.desc())
         .limit(limit)
@@ -269,7 +280,7 @@ def _search_datasets(db: Session, pattern: str, limit: int) -> list[SearchItemOu
 def _search_workspaces(db: Session, pattern: str, limit: int, user: User) -> list[SearchItemOut]:
     """工作区只搜当前成员未注销的目录。"""
     rows = (
-        db.query(Workspace)
+        db.query(Workspace.id, Workspace.name, Workspace.kind, Workspace.created_at)
         .filter(
             Workspace.owner_id == user.id,
             Workspace.deleted_at.is_(None),

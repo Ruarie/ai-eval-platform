@@ -1,10 +1,11 @@
 """Agent 会话及历史回放 REST 接口。"""
 
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from ..agent.attachments import normalize_history_attachments
 from ..agent.log import agent_trace
@@ -235,14 +236,14 @@ def _session_out(
     row: AgentSession,
     user: User,
     workspace_names: dict[str, str] | None = None,
-    active_tasks: dict[str, Task] | None = None,
+    active_tasks: dict[str, Any] | None = None,
 ) -> dict:
     """补齐会话 owner、绑定工作区名、当前成员管理权和活动任务摘要。
 
     名称和活动任务均可由列表批量预取；None 时按行单查（create/sharing 等单对象场景）。
     """
     task = active_tasks.get(row.id) if active_tasks is not None else (
-        db.query(Task)
+        db.query(Task.id, Task.kind, Task.status)
         .filter(Task.session_id == row.id, Task.status.in_(ACTIVE_STATUSES))
         .order_by(Task.created_at.desc())
         .first()
@@ -253,7 +254,7 @@ def _session_out(
             workspace_name = workspace_names.get(row.workspace_id)
         else:
             ws_row = (
-                db.query(Workspace).filter(Workspace.id == row.workspace_id).first()
+                db.query(Workspace.name).filter(Workspace.id == row.workspace_id).first()
             )
             workspace_name = ws_row.name if ws_row else None
     value = SessionOut.model_validate(row).model_dump(mode="json")
@@ -338,9 +339,26 @@ def list_sessions(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """列出当前成员创建的私有会话及全团队共享的未删除会话。"""
+    """列出当前成员创建的私有会话及全团队共享的未删除会话。
+
+    列表响应不含确认卡和压缩摘要。这两列可能很大，用 load_only 避免整表带出。
+    """
     rows = (
         db.query(AgentSession)
+        .options(
+            load_only(
+                AgentSession.id,
+                AgentSession.user_id,
+                AgentSession.title,
+                AgentSession.engine_version,
+                AgentSession.visibility,
+                AgentSession.workspace_id,
+                AgentSession.scope_path,
+                AgentSession.permission_tier,
+                AgentSession.created_at,
+                AgentSession.updated_at,
+            )
+        )
         .filter(
             AgentSession.deleted_at.is_(None),
             or_(AgentSession.user_id == user.id, AgentSession.visibility == "team"),
@@ -348,19 +366,26 @@ def list_sessions(
         .order_by(AgentSession.updated_at.desc())
         .all()
     )
-    _auto_fill_session_titles(db, rows)
+    # 标题回填会 commit。默认 expire_on_commit 会让随后的字段访问把推迟列重新读回来。
+    previous_expire = db.expire_on_commit
+    db.expire_on_commit = False
+    try:
+        _auto_fill_session_titles(db, rows)
+    finally:
+        db.expire_on_commit = previous_expire
     # 名称与活动任务批量预取，空映射也表示查询完成，不能回落逐会话查询。
     bound_ids = {row.workspace_id for row in rows if row.workspace_id}
     ws_names: dict[str, str] = {}
     if bound_ids:
         ws_names = {
             ws.id: ws.name
-            for ws in db.query(Workspace).filter(Workspace.id.in_(bound_ids)).all()
+            for ws in db.query(Workspace.id, Workspace.name).filter(Workspace.id.in_(bound_ids)).all()
         }
-    active_tasks: dict[str, Task] = {}
+    active_tasks: dict[str, Any] = {}
     for start in range(0, len(rows), 500):
         tasks = (
             db.query(Task)
+            .options(load_only(Task.id, Task.session_id, Task.kind, Task.status))
             .filter(Task.session_id.in_([row.id for row in rows[start:start + 500]]),
                     Task.status.in_(ACTIVE_STATUSES))
             .order_by(Task.created_at.desc())

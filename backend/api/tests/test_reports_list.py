@@ -117,3 +117,9 @@ def test_report_list_batches_relations(reports_case):
     # 2 条报告：count + 列表 + 任务 + 数据集 + 子任务 + 子报告 ≈ 6 条；
     # 若回退 N+1，这里会随行数线性增长（每条 +2~3）。
     assert len(statements) <= 8, f"报告列表查询数异常: {len(statements)}"
+    # 列表不读指标、分享令牌，也不读任务结果/进度。
+    joined = "\n".join(statements)
+    assert "metrics" not in joined
+    assert "share_token" not in joined
+    assert "tasks.result" not in joined and ".result" not in joined
+    assert "progress" not in joined

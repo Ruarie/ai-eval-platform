@@ -197,7 +197,8 @@ def list_tasks(
         query = query.filter(Task.status == status)
     if kind:
         query = query.filter(Task.kind == kind)
-    total = query.count()
+    # 列表要返回 config/progress/result，但计数不该为了 count(*) 先把这些 JSON 读出来。
+    total = query.with_entities(func.count(Task.id)).scalar() or 0
     rows = query.order_by(Task.created_at.desc()).offset(offset).limit(limit).all()
     return {"items": [_task_out(row) for row in rows], "total": total}
 
