@@ -20,7 +20,7 @@ logger = logging.getLogger("worker.presence")
 # 调度页把超过 30 秒没有心跳的 idle/busy 显示为离线，因此刷新间隔必须更短。
 PRESENCE_INTERVAL_SECONDS = 10
 NODE_CAPS = ["testcase"]
-_GOVERNED_STATES = {"offline", "draining"}
+_GOVERNED_STATES = {"offline", "draining", "restarting"}
 
 
 def node_id() -> str:
@@ -85,12 +85,27 @@ class Presence:
 
 
 def claim_allowed(worker_node_id: str) -> bool:
-    """没有登记行时允许领取；显式排空或离线则拒绝。"""
+    """没有登记行时允许领取；显式排空、离线或等待重启则拒绝。"""
     with SessionLocal() as db:
         row = db.query(DispatchWorker).filter(DispatchWorker.id == worker_node_id).first()
         if row is None:
             return True
         return row.state not in _GOVERNED_STATES
+
+
+def take_idle_restart(worker_node_id: str) -> bool:
+    """空闲且被标成 restarting 时改回 idle，并让主循环退出以便容器重新拉起。
+
+    先改回 idle，避免新进程起来后仍看到 restarting 而立刻再次退出。
+    """
+    with SessionLocal() as db:
+        row = db.query(DispatchWorker).filter(DispatchWorker.id == worker_node_id).first()
+        if row is None or row.state != "restarting":
+            return False
+        row.state = "idle"
+        row.current_task_id = None
+        db.commit()
+        return True
 
 
 def write_presence(worker_node_id: str, name: str, busy: bool, task_id: str | None) -> None:

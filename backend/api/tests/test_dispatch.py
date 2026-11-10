@@ -41,7 +41,7 @@ class TestEffectiveState:
 
     def test_explicit_states_preserved(self) -> None:
         """draining/offline 为显式治理状态，不参与心跳超时降级。"""
-        for state in ("draining", "offline"):
+        for state in ("draining", "offline", "restarting"):
             assert _effective_state(_worker(state, datetime.now(UTC))) == state
 
 
@@ -53,6 +53,8 @@ class TestEffectiveState:
         ("POST", "/api/dispatch/workers", {"id": "w-1", "name": "节点一"}),
         ("PUT", "/api/dispatch/workers/w-1", {"state": "draining"}),
         ("PUT", "/api/dispatch/config", {"strategy": "负载均衡"}),
+        ("PUT", "/api/dispatch/config", {"paused": True}),
+        ("POST", "/api/dispatch/workers/w-1/restart", None),
         ("GET", "/api/dispatch/events", None),
     ],
 )

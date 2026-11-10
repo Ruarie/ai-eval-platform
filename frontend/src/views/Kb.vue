@@ -405,6 +405,34 @@
       @success="loadGoldQas"
     />
 
+    <n-modal v-model:show="showAiGoldQaModal" preset="card" title="生成黄金 QA 候选" style="width: 640px">
+      <p class="small tertiary" style="line-height: 1.6; margin-top: 0">
+        根据当前知识库文档摘录出题，先给候选，确认后才入库。不会创建评测任务。
+      </p>
+      <div class="field">
+        <label class="field-label">条数</label>
+        <n-input-number v-model:value="goldQaCount" :min="1" :max="20" />
+      </div>
+      <div class="field">
+        <label class="field-label">集合名称</label>
+        <n-input v-model:value="goldQaName" placeholder="例如：退款说明问答" />
+      </div>
+      <p v-if="goldQaTruncated" class="small" style="color: var(--accent-warning)">文档摘录已截断，候选只覆盖已送入模型的片段。</p>
+      <div v-if="goldQaDrafts.length" class="section-gap" style="gap: 8px; max-height: 320px; overflow: auto">
+        <div v-for="(item, index) in goldQaDrafts" :key="index" class="panel" style="padding: 10px 12px">
+          <div style="font-weight: 600">{{ item.question }}</div>
+          <div class="small tertiary" style="margin-top: 4px">{{ item.reference }}</div>
+        </div>
+      </div>
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end; gap: 8px">
+          <n-button @click="showAiGoldQaModal = false">关闭</n-button>
+          <n-button :loading="generatingGoldQa" @click="generateGoldQa">生成候选</n-button>
+          <n-button type="primary" :disabled="!goldQaDrafts.length" :loading="savingGoldQa" @click="saveGoldQaDrafts">确认入库</n-button>
+        </div>
+      </template>
+    </n-modal>
+
     <KbGraphDrawer
       v-model:show="showGraphDrawer"
       :kb-id="activeKbId"
@@ -453,6 +481,13 @@ const isQuerying = ref(false)
 const showCreateKbModal = ref(false)
 const showUploadDocModal = ref(false)
 const showUploadGoldQaModal = ref(false)
+const showAiGoldQaModal = ref(false)
+const goldQaCount = ref(8)
+const goldQaName = ref('')
+const goldQaDrafts = ref<{ question: string; reference: string; expected_doc_ids: string[] }[]>([])
+const goldQaTruncated = ref(false)
+const generatingGoldQa = ref(false)
+const savingGoldQa = ref(false)
 const showGraphDrawer = ref(false)
 
 /** 图谱空态里的「上传文档」：收起抽屉并打开上传弹窗，避免用户找不到入口。 */
@@ -625,9 +660,60 @@ async function markAsCore() {
   }
 }
 
-// 当前契约未定义浏览器端 AI 生成黄金 QA 的调用入口，不能在前端虚构已入库结果。
 function handleAiGenQa() {
-  message.warning('黄金 QA 的 AI 生成功能尚未提供正式接口，请上传符合规范的 QA 文件')
+  if (!currentKb.value) {
+    message.warning('请先创建或选择知识库')
+    return
+  }
+  if (currentKb.value.kind !== 'lightrag') {
+    message.warning('外部 Chat 知识库不从本地文档生成黄金 QA')
+    return
+  }
+  goldQaDrafts.value = []
+  goldQaTruncated.value = false
+  goldQaName.value = goldQaName.value || `${currentKb.value.name} 问答`
+  showAiGoldQaModal.value = true
+}
+
+async function generateGoldQa() {
+  if (!currentKb.value) return
+  generatingGoldQa.value = true
+  try {
+    const result = await api.kb.generateGoldQA(currentKb.value.id, goldQaCount.value || 8)
+    goldQaDrafts.value = result.items || []
+    goldQaTruncated.value = result.source_truncated === true
+    if (!goldQaDrafts.value.length) message.warning('没有生成出有效问答')
+  } catch (err: any) {
+    message.error(err.message || '生成黄金 QA 失败')
+  } finally {
+    generatingGoldQa.value = false
+  }
+}
+
+async function saveGoldQaDrafts() {
+  if (!currentKb.value || !goldQaDrafts.value.length) return
+  const name = goldQaName.value.trim()
+  if (!name) {
+    message.warning('请填写集合名称')
+    return
+  }
+  savingGoldQa.value = true
+  try {
+    const file = new File(
+      [JSON.stringify(goldQaDrafts.value, null, 2)],
+      'gold-qa.json',
+      { type: 'application/json' },
+    )
+    await api.kb.uploadGoldQA(currentKb.value.id, file, name)
+    showAiGoldQaModal.value = false
+    goldQaDrafts.value = []
+    await loadGoldQas()
+    message.success('黄金 QA 已入库')
+  } catch (err: any) {
+    message.error(err.message || '入库失败')
+  } finally {
+    savingGoldQa.value = false
+  }
 }
 
 // 创建知识库后以接口响应更新选择态，再加载该库的子资源。

@@ -264,7 +264,7 @@ WS `error` 事件 payload 与上表同一套 `code` + `message`（可带 `fields
 | **用例工作台 (cases.html)** | 6 大策略分布、自检、草稿编辑与审核、72h 倒计时、Excel 导入导出及 AI PRD 用例抽取；旧评测映射入口停用 | `/api/case-folders`, `/api/case-sets`, `/api/case-sets/from-candidates`, `/api/case-sets/{id}`, `/api/case-sets/{id}/cases`, `/api/case-sets/{id}/confirm`, `/api/case-sets/{id}/cancel`, `/api/case-sets/ai-generate`, `/api/case-sets/ai-compare`, `/api/case-sets/import-template`, `/api/case-sets/{id}/import`, `/api/case-sets/{id}/export` | GET/POST/PUT/DELETE | 成员 · 全员同权 |
 | **知识库 (kb.html)** | 3栏工作台 / 文档与切块预览 / 4模式检索 Playground / 黄金 QA | `/api/kb`, `/api/kb/{id}`, `/api/kb/{id}/documents`, `/api/kb/{id}/documents/{doc_id}/chunks`, `/api/kb/{id}/query`, `/api/kb/{id}/gold-qa` | GET/POST/DELETE | 成员 · 全员同权 |
 | **协议档与智能体 (admin-profiles.html)** | 4 Tab 架构（协议档、MCP 工具只读、技能受控说明、运行时治理）/ 连通性探活 Ping | `/api/profiles`, `/api/profiles/{id}/check`, `/api/mcp/tools`, `/api/admin/settings` | GET/POST/PUT/DELETE | 成员 · 全员同权 |
-| **压测治理 (admin-stress.html)** | 7天峰值 QPS 面积图 / Host 白名单表格 / 安全阈值 / 成本预算 / Prometheus `/metrics` | `/api/admin/stress/settings`, `/api/admin/stress/whitelist`, `/api/admin/stress/usage`, `/metrics` | GET/POST/PUT/DELETE | 成员 · 全员同权 |
+| **压测治理** | 前端页面已移除。新建压测已停用，并发上限在调度中心维护。白名单接口仍保留给历史执行器 | `/api/admin/stress/whitelist` | GET/POST/DELETE | 成员 · 全员同权 |
 | **成员与账号 (admin-users.html)** | 4 维 KPI 卡片 / 成员搜索表格 / 24h 登录活动柱状图 / 改密与停用 | `/api/users`, `/api/users/activity-summary`, `/api/users/{id}/status`, `/api/users/{id}/reset-password`, `/api/users/{id}/audit-logs` | GET/POST/PUT | 成员 · 全员同权 |
 
 ---
@@ -1466,6 +1466,10 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 - `nodes` / `edges` 为空数组表示该库尚未抽出实体（未索引完成或文档过短），**不得**用示例数据填充；
 - `kind=external_chat` 的知识库返回 `VALIDATION`(400)；引擎不可用或读取失败返回 `UPSTREAM`(502)。
 
+#### `POST /api/kb/{id}/gold-qa/ai-generate`
+
+按当前知识库已入库文档摘录生成黄金 QA 候选，**不入库、不创建评测任务**。请求 `{ "max_count": 8 }`（1–20）。响应 `{ "items": [{ "question", "reference", "expected_doc_ids" }], "source_truncated": false }`。没有可抽取正文返回 `VALIDATION`；外部 Chat 库返回 `VALIDATION`；模型输出无法解析返回 `UPSTREAM`。确认后仍用 `POST /api/kb/{id}/gold-qa` 上传入库。单篇摘录最多 2000 字，合计最多 12000 字。
+
 #### `GET /api/kb/{id}/gold-qa` / `POST /api/kb/{id}/gold-qa`
 
 黄金 QA 上传与维护。列 `question, reference, expected_doc_ids[]?`；覆盖上传后 `version += 1`。无 expected_doc_ids 的样本不进 Hit Rate 评估分母。支持通过大模型自动从已索引文档中抽取问答对并自动关联切块。
@@ -1921,7 +1925,8 @@ Agent Loop v2 在执行会改动工作区的工具（`write`/`edit`/`bash` 等�
   "assigned_today": 126,
   "strategy": "负载均衡",
   "max_running_tasks": 4,
-  "heartbeat_interval_ms": 500
+  "heartbeat_interval_ms": 500,
+  "paused": false
 }
 ```
 
@@ -1954,11 +1959,15 @@ Agent Loop v2 在执行会改动工作区的工具（`write`/`edit`/`bash` 等�
 
 修改节点状态或权重（如维护下线、排空 `draining`、更新能力标签）：`{ "state", "weight", "caps" }`。
 
-运行中的 Worker 进程用环境变量 `WORKER_NODE_ID` / `WORKER_NODE_NAME` 登记或刷新自己的一行，约每 10 秒更新 `last_heartbeat_at`。执行中为 `busy` 且 `load_percent=100`，空闲为 `idle` 且 `load_percent=0`。心跳不改管理员设置的权重、能力、`draining` 和 `offline`。后两种状态不再领取新任务；任务选择仍是 `testcase` 队列的 `SKIP LOCKED`，不按权重或策略挑节点。超过 30 秒没有心跳的 `idle` / `busy` 仍按离线展示。预览种子不再插入演示节点。
+运行中的 Worker 进程用环境变量 `WORKER_NODE_ID` / `WORKER_NODE_NAME` 登记或刷新自己的一行，约每 10 秒更新 `last_heartbeat_at`。执行中为 `busy` 且 `load_percent=100`，空闲为 `idle` 且 `load_percent=0`。心跳不改管理员设置的权重、能力、`draining`、`offline` 和 `restarting`。这三种状态不再领取新任务；任务选择仍是 `testcase` 队列的 `SKIP LOCKED`，不按权重或策略挑节点。超过 30 秒没有心跳的 `idle` / `busy` 仍按离线展示。预览种子不再插入演示节点。
+
+#### `POST /api/dispatch/workers/{id}/restart`
+
+把已登记节点标为 `restarting` 并写一条调度事件。空闲的 Worker 进程在下一轮循环退出，由容器 `restart: unless-stopped` 重新拉起；正在执行的任务先跑完。节点不存在返回 `NOT_FOUND`。平台不在 API 进程里杀容器。
 
 #### `PUT /api/dispatch/config`
 
-更新分发策略与全局并发容量：`{ "strategy": "负载均衡" | "优先级抢占" | "亲和性", "max_running_tasks": 4 }`。
+更新分发策略、全局并发容量或暂停领取：`{ "strategy": "负载均衡" | "优先级抢占" | "亲和性", "max_running_tasks": 4, "paused": false }`。`paused=true` 时 Worker 不再领取排队的用例任务和数据集导入，已经在执行的任务继续跑完。大盘响应带 `paused`。
 
 #### `GET /api/dispatch/events?after_id=&limit=`
 
@@ -5038,7 +5047,7 @@ diff 响应：
 
 边界：
 
-- 只统计 `role=assistant` 且 `turn_stats` 非空的消息；用户消息不计；
+- 只统计模型回复的 token：优先取 `role=assistant` 且 `turn_stats` 非空的消息；当前 Agent 回合若尚未把用量写入该字段，则回读 `assistant/message` 事实里的 `data.usage`。同一条事实已投影进消息时只计一次。用户消息不计；
 - `usage` 缺失时用 prompt+completion 兜底；全缺失不计入 calls；
 - 时间窗按消息 `created_at`；最多扫描 5000 条，超出时 `truncated=true`，`scanned_messages` 为实际扫描条数、`sample_limit` 为上限，页面必须提示“非全量”；
 - 共享会话归会话创建者；成员名缺失显示“未记录”；

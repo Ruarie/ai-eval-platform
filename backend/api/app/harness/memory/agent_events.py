@@ -26,6 +26,7 @@ from app.models import (
     WorkspaceExecutionGuard,
     WsEvent,
 )
+from app.usage_facts import assistant_meter
 
 
 class SessionLogWriteError(OSError):
@@ -376,11 +377,16 @@ class SessionLog:
             )
         elif not isinstance(content, str):
             content = ""
+        meter = assistant_meter(data) if role == "assistant" else {}
         db.add(Message(session_id=self.session_id, role=role, content=content,
                        source_id=event["event_id"], source_version=1,
                        attachments=extensions.get("attachment_refs", []) if role == "user" else [],
                        author_id=self.actor_id if role == "user" else None,
-                       client_message_id=data.get("client_message_id") if role == "user" else None))
+                       client_message_id=data.get("client_message_id") if role == "user" else None,
+                       turn_stats=meter.get("turn_stats"),
+                       model_name=meter.get("model_name"),
+                       provider=meter.get("provider"),
+                       latency_ms=meter.get("latency_ms")))
 
     def begin_turn(self, user_data: dict, *, writer_id: str | None = None) -> tuple[dict, dict]:
         """接受回合与用户事实原子写入；没有半个已接受回合。"""

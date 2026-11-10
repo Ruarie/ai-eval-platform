@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h1>用量中心</h1>
-        <p class="page-sub">按 assistant 消息的 turn_stats 聚合 token；当前未配置逐模型单价，不展示费用估算。</p>
+        <p class="page-sub">按每次模型回复的上游 token 用量聚合：已写入消息的 turn_stats 直接计入；当前 Agent 对话若还没写入，则回读回合事实里的 usage。未配置逐模型单价，不展示费用。</p>
       </div>
       <div class="page-actions">
         <div class="range-switch" role="group" aria-label="统计时间范围">

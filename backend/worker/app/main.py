@@ -47,6 +47,13 @@ DEFAULT_MAX_RUNNING_TASKS = 3
 EXPIRE_SCAN_INTERVAL_S = 60.0
 
 
+def _dispatch_paused(db) -> bool:
+    """调度中心暂停后不再领取新任务；缺省或脏数据都按未暂停。"""
+    row = db.query(Setting).filter(Setting.key == "dispatch").first()
+    value = row.value if row else None
+    return isinstance(value, dict) and value.get("paused") is True
+
+
 def _max_running_tasks(db) -> int:
     """读取 settings.max_running_tasks 并发闸门；缺失或非法时回退默认 3。"""
     row = db.query(Setting).filter(Setting.key == "max_running_tasks").first()
@@ -252,16 +259,22 @@ def loop() -> None:
         try:
             cancel_non_testcase_tasks(db)
             recover_expired_task_leases(db)
+            # 管理员请求重启：只在本轮还没领到任务时退出，正在执行的任务先跑完。
+            if presence.take_idle_restart():
+                logger.info("管理员请求重启节点，空闲退出以便容器重新拉起")
+                print("[worker] restart requested, exiting", flush=True)
+                raise SystemExit(0)
             # 导入租约独立于 Task；先回收异常退出的领取，再按设置尝试领取一个作业。
             recover_expired_dataset_import_leases(db)
-            # 排空或离线维护时不领新任务；已经在执行的任务由租约心跳继续。
-            if presence.allows_claim():
+            # 排空、离线或调度暂停时不领新任务；已经在执行的任务由租约心跳继续。
+            paused = _dispatch_paused(db)
+            if presence.allows_claim() and not paused:
                 import_claim = claim_next_dataset_import(db)
             # 平台并发闸门（PRD 3.4）：running 任务达到 max_running_tasks 时
             # 不领取新任务，queued 任务保持排队；会话内串行由 tasks 表的
             # 部分唯一索引 uq_tasks_active_session 在创建侧保证。
             running = db.query(Task).filter(Task.status == "running").count()
-            if presence.allows_claim() and not import_claim and running < _max_running_tasks(db):
+            if presence.allows_claim() and not paused and not import_claim and running < _max_running_tasks(db):
                 task = (
                     db.query(Task)
                     .filter(Task.status == "queued", Task.kind == "testcase")

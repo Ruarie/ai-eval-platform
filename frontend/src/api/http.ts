@@ -25,6 +25,7 @@ import {
   type KbDocument,
   type KbChunk,
   type GoldQA,
+  type GoldQaDraft,
   type Task,
   type TaskSpec,
   type Report,
@@ -46,7 +47,6 @@ import {
   type CaseGenerateResult,
   type CaseCompareResult,
   type CaseCoverageResult,
-  type WhitelistItem,
   type DispatchOverview,
   type DispatchWorker,
   type DispatchEventPage,
@@ -106,7 +106,6 @@ import {
   MOCK_TEST_CASES,
   MOCK_TASKS,
   MOCK_REPORTS,
-  MOCK_WHITELIST,
   MOCK_MCP_TOOLS,
   buildMockReportMarkdown,
 } from './mockData'
@@ -223,7 +222,6 @@ const mockStore = {
   cases: [...MOCK_TEST_CASES],
   tasks: [...MOCK_TASKS],
   reports: { ...MOCK_REPORTS },
-  whitelist: [...MOCK_WHITELIST],
   sessions: [
     {
       id: 's-default',
@@ -645,6 +643,11 @@ export const api = {
     async updateWorker(id: string, payload: { state?: string; weight?: number; caps?: string[] }): Promise<DispatchWorker | null> {
       if (getDataMode() === 'mock') return null
       const { data } = await http.put(`/api/dispatch/workers/${id}`, payload)
+      return data
+    },
+    async restartWorker(id: string): Promise<DispatchWorker | null> {
+      if (getDataMode() === 'mock') return null
+      const { data } = await http.post(`/api/dispatch/workers/${id}/restart`)
       return data
     },
     async updateConfig(payload: Partial<DispatchConfig>): Promise<DispatchConfig | null> {
@@ -1622,6 +1625,10 @@ export const api = {
       const { data } = await http.get(`/api/kb/${id}/graph`, { params: { limit } })
       return data
     },
+    async generateGoldQA(id: string, maxCount = 8): Promise<{ items: GoldQaDraft[]; source_truncated: boolean }> {
+      const { data } = await http.post(`/api/kb/${id}/gold-qa/ai-generate`, { max_count: maxCount })
+      return data
+    },
     async getGoldQA(id: string): Promise<GoldQA[]> {
       if (getDataMode() === 'mock') return mockStore.goldQAs.filter((x) => x.kb_id === id)
       const { data } = await http.get(`/api/kb/${id}/gold-qa`)
@@ -1684,7 +1691,7 @@ export const api = {
     },
   },
 
-  // 10. 管理员设置与压测治理
+  // 10. 管理员设置
   admin: {
     async getSettings(): Promise<AdminSettings> {
       if (getDataMode() === 'mock') return mockStore.settings
@@ -1800,39 +1807,6 @@ export const api = {
       }
       const { data } = await http.put(`/api/admin/agent-prompts/${encodeURIComponent(profileId)}`, payload)
       return data
-    },
-    async getWhitelist(): Promise<WhitelistItem[]> {
-      if (getDataMode() === 'mock') return mockStore.whitelist
-      try {
-        const { data } = await http.get('/api/admin/stress/whitelist')
-        return Array.isArray(data) ? data : data.items || []
-      } catch (e) {
-        if (getDataMode() === 'mock') return mockStore.whitelist
-        throw e
-      }
-    },
-    async addWhitelist(payload: { host: string; scope: string }): Promise<WhitelistItem> {
-      if (getDataMode() === 'mock') {
-        const item: WhitelistItem = {
-          id: 'wl-' + Date.now(),
-          host: payload.host,
-          scope: payload.scope || 'test',
-          creator: localStorage.getItem('ae_user') || 'admin',
-          created_at: new Date().toISOString(),
-          status: 'active',
-        }
-        mockStore.whitelist.push(item)
-        return item
-      }
-      const { data } = await http.post('/api/admin/stress/whitelist', payload)
-      return data
-    },
-    async deleteWhitelist(id: string): Promise<void> {
-      if (getDataMode() === 'mock') {
-        mockStore.whitelist = mockStore.whitelist.filter((x) => x.id !== id)
-        return
-      }
-      await http.delete(`/api/admin/stress/whitelist/${id}`)
     },
     async getRagModels(): Promise<RagModelsConfig> {
       const { data } = await http.get('/api/admin/rag-models')

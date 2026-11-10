@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.routers.kb import _decode_text, _parse_expected, _parse_gold_qa
+from app.routers.kb import _decode_text, _parse_expected, _parse_gold_qa, _parse_qa_items
 
 
 @pytest.mark.parametrize(
@@ -23,6 +23,7 @@ from app.routers.kb import _decode_text, _parse_expected, _parse_gold_qa
         ("GET", "/api/kb/kb-1/documents/d-1/chunks"),
         ("DELETE", "/api/kb/kb-1/documents/d-1"),
         ("GET", "/api/kb/kb-1/gold-qa"),
+        ("POST", "/api/kb/kb-1/gold-qa/ai-generate"),
         ("POST", "/api/kb/kb-1/query"),
     ],
 )
@@ -110,6 +111,20 @@ def test_chunk_text_basic():
     assert chunks[0]["chunk_id"] == "d-01#c01"
     assert chunks[0]["tokens"] == 512
     assert "d-01#c02" in {c["chunk_id"] for c in chunks}
+
+
+def test_parse_qa_items_keeps_known_doc_ids():
+    """候选只保留本库文档编号，并按条数截断。"""
+    text = """```json
+[{"question": "多久到账？", "reference": "1-3 个工作日", "expected_doc_ids": ["doc-1", "other"]},
+ {"question": "缺答案", "reference": "", "expected_doc_ids": ["doc-1"]}]
+```"""
+    items = _parse_qa_items(text, {"doc-1"}, 8)
+    assert items == [{
+        "question": "多久到账？",
+        "reference": "1-3 个工作日",
+        "expected_doc_ids": ["doc-1"],
+    }]
 
 
 def test_chunk_text_single_short():

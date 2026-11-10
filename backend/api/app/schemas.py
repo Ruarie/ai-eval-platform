@@ -641,7 +641,7 @@ class DispatchWorkerCreate(ApiModel):
 class DispatchWorkerUpdate(ApiModel):
     """修改节点状态、权重或能力标签；状态取值对齐调度契约。"""
 
-    state: Literal["idle", "busy", "offline", "draining"] | None = None
+    state: Literal["idle", "busy", "offline", "draining", "restarting"] | None = None
     weight: int | None = Field(default=None, ge=1, le=1000)
     caps: list[str] | None = None
 
@@ -660,10 +660,12 @@ class DispatchWorkerOut(OrmOut):
 
 
 class DispatchConfigUpdate(ApiModel):
-    """更新分发策略与全局并发容量。"""
+    """更新分发策略、全局并发容量或是否暂停领取新任务。"""
 
     strategy: Literal["负载均衡", "优先级抢占", "亲和性"] | None = None
     max_running_tasks: int | None = Field(default=None, ge=1, le=64)
+    # True 时 Worker 不再领取排队任务和数据集导入；已经在执行的任务继续跑完。
+    paused: bool | None = None
 
 
 class DispatchOverviewOut(ApiModel):
@@ -677,6 +679,7 @@ class DispatchOverviewOut(ApiModel):
     strategy: str
     max_running_tasks: int
     heartbeat_interval_ms: int
+    paused: bool = False
 
 
 class DispatchEventOut(OrmOut):
@@ -1291,6 +1294,27 @@ class GoldQaOut(ApiModel):
     row_count: int
     owner: str = ""
     created_at: Any | None = None
+
+
+class GoldQaGenerateIn(ApiModel):
+    """按知识库文档生成黄金 QA 候选，不直接入库。"""
+
+    max_count: int = Field(default=8, ge=1, le=20)
+
+
+class GoldQaDraftOut(ApiModel):
+    """一条尚未入库的黄金 QA 候选。"""
+
+    question: str
+    reference: str
+    expected_doc_ids: list[str] = Field(default_factory=list)
+
+
+class GoldQaGenerateOut(ApiModel):
+    """黄金 QA 候选。确认后仍走原有上传接口入库。"""
+
+    items: list[GoldQaDraftOut]
+    source_truncated: bool = False
 
 
 # ─── 需求基线与用例覆盖 ───────────────────────────────────────────────

@@ -33,6 +33,7 @@ from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user
 from ..errors import AppError, ErrorCode
+from ..llm_client import call_agent_model
 from ..models import (
     AuditLog,
     GoldQa,
@@ -43,6 +44,9 @@ from ..models import (
     uuid_str,
 )
 from ..schemas import (
+    GoldQaDraftOut,
+    GoldQaGenerateIn,
+    GoldQaGenerateOut,
     GoldQaOut,
     KbChunkOut,
     KbCreate,
@@ -675,6 +679,116 @@ def list_gold_qa(
         for row in rows
     ]
     return {"items": items, "total": len(items)}
+
+
+_GOLD_QA_SOURCE_BUDGET = 12_000
+_GOLD_QA_DOC_CLIP = 2_000
+
+
+def _gold_qa_source(db: Session, kb_id: str) -> tuple[str, bool, set[str]]:
+    """拼一段文档摘录给模型。超长正文只取开头，并记下是否被截断。"""
+    rows = (
+        db.query(KbDocument.id, KbDocument.filename, KbDocument.text)
+        .filter(KbDocument.kb_id == kb_id)
+        .order_by(KbDocument.created_at.asc())
+        .all()
+    )
+    parts: list[str] = []
+    used = 0
+    truncated = False
+    doc_ids: set[str] = set()
+    for doc_id, filename, text in rows:
+        body = (text or "").strip()
+        if not body:
+            continue
+        doc_ids.add(doc_id)
+        clip = body[:_GOLD_QA_DOC_CLIP]
+        if len(body) > _GOLD_QA_DOC_CLIP:
+            truncated = True
+        piece = f"【文档 {filename} doc_id={doc_id}】\n{clip}"
+        if used + len(piece) > _GOLD_QA_SOURCE_BUDGET:
+            truncated = True
+            remain = _GOLD_QA_SOURCE_BUDGET - used
+            if remain > 200:
+                parts.append(piece[:remain])
+            break
+        parts.append(piece)
+        used += len(piece)
+    if not parts:
+        raise AppError(ErrorCode.VALIDATION, "知识库还没有可抽取的文档正文")
+    return "\n\n".join(parts), truncated, doc_ids
+
+
+def _parse_qa_items(text: str, doc_ids: set[str], limit: int) -> list[dict]:
+    """把模型输出收成问答候选。文档编号不在本库内的引用直接丢掉。"""
+    raw = text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1]
+        fence = raw.rfind("```")
+        if fence >= 0:
+            raw = raw[:fence]
+    try:
+        data = json.loads(raw.strip())
+    except json.JSONDecodeError as exc:
+        raise AppError(ErrorCode.UPSTREAM, "模型输出无法解析为黄金 QA") from exc
+    if isinstance(data, dict):
+        data = data.get("items") or data.get("questions") or []
+    if not isinstance(data, list):
+        raise AppError(ErrorCode.UPSTREAM, "模型输出无法解析为黄金 QA")
+    items: list[dict] = []
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+        question = str(row.get("question") or "").strip()
+        reference = str(row.get("reference") or "").strip()
+        if not question or not reference:
+            continue
+        raw_ids = row.get("expected_doc_ids") or []
+        if isinstance(raw_ids, str):
+            raw_ids = [part.strip() for part in raw_ids.split(";") if part.strip()]
+        expected = [str(item) for item in raw_ids if str(item) in doc_ids][:8]
+        items.append({
+            "question": question[:500],
+            "reference": reference[:2000],
+            "expected_doc_ids": expected,
+        })
+        if len(items) >= limit:
+            break
+    if not items:
+        raise AppError(ErrorCode.UPSTREAM, "模型未返回有效的问答")
+    return items
+
+
+@router.post("/{kb_id}/gold-qa/ai-generate", response_model=GoldQaGenerateOut, summary="生成黄金 QA 候选")
+def generate_gold_qa(
+    kb_id: str,
+    body: GoldQaGenerateIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """根据已入库文档生成问答候选，不写入黄金 QA 表。
+
+    确认后仍由原上传接口入库。不创建 RAG 评测任务。
+    """
+    _ = user
+    kb = _get_kb_or_404(db, kb_id)
+    if kb.kind != "lightrag":
+        raise AppError(ErrorCode.VALIDATION, "外部 Chat 知识库不从本地文档生成黄金 QA")
+    source, truncated, doc_ids = _gold_qa_source(db, kb_id)
+    system = (
+        "你是知识库评测出题助手。只根据给定文档摘录写出可核对的问答。"
+        "输出 JSON 数组，每项含 question、reference、expected_doc_ids。"
+        "expected_doc_ids 只能使用摘录里出现的 doc_id。不要输出解释。"
+    )
+    user_prompt = (
+        f"请生成 {body.max_count} 条黄金 QA。reference 必须能在摘录中找到依据。\n\n{source}"
+    )
+    result = call_agent_model(db, system, user_prompt, temperature=0.2, max_tokens=4096)
+    items = _parse_qa_items(result.text, doc_ids, body.max_count)
+    return GoldQaGenerateOut(
+        items=[GoldQaDraftOut(**item) for item in items],
+        source_truncated=truncated,
+    )
 
 
 @router.post("/{kb_id}/gold-qa", response_model=GoldQaOut, status_code=201)

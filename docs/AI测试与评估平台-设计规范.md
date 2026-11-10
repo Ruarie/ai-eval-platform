@@ -112,9 +112,8 @@ V1 **不允许**一个任务同时跑 Benchmark 和 RAG。要两份报告就下�
   数据集      /datasets
   用例        /cases
   知识库      /kb
-管理          （仅管理员）
+管理
   协议档      /admin/profiles
-  压测治理    /admin/stress
   账号        /admin/users
 ```
 
