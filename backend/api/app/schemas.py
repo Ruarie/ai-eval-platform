@@ -1521,7 +1521,11 @@ class UsageRecentOut(ApiModel):
 
 
 class UsageSummaryOut(ApiModel):
-    """Token 用量中心响应；未配置单价时不做费用估算。"""
+    """Token 用量中心响应；未配置单价时不做费用估算。
+
+    ``truncated=True`` 表示时间窗内匹配消息超过聚合上限，当前数字只覆盖最近
+    ``scanned_messages`` 条；页面必须显式提示，不能把样本当全量。
+    """
 
     days: int
     generated_at: Any | None = None
@@ -1531,6 +1535,9 @@ class UsageSummaryOut(ApiModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    truncated: bool = False
+    scanned_messages: int = 0
+    sample_limit: int = 0
     series: list[UsageSeriesOut] = Field(default_factory=list)
     by_model: list[UsageModelOut] = Field(default_factory=list)
     by_user: list[UsageUserOut] = Field(default_factory=list)
@@ -1744,10 +1751,17 @@ class CasegenModuleOut(ApiModel):
 
 
 class CasegenMetricsOut(ApiModel):
-    """用例生成质量看板响应。"""
+    """用例生成质量看板响应。
+
+    ``truncated=True`` 表示时间窗内运行数超过聚合上限，指标只覆盖最近
+    ``sample_limit`` 次运行；分母不是全量，页面必须显式提示。
+    """
 
     days: int
     generated_at: Any | None = None
+    truncated: bool = False
+    matched_runs: int = 0
+    sample_limit: int = 0
     total_runs: int = 0
     succeeded_runs: int = 0
     failed_runs: int = 0

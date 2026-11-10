@@ -34,6 +34,13 @@
       </div>
 
       <template v-else>
+        <!-- 聚合上限提示：成功率/采纳率的样本不是全量，必须显式说明 -->
+        <div v-if="data.truncated" class="panel" style="padding: 10px 14px; margin-bottom: 12px; border-color: var(--accent-warning)">
+          <span class="small" style="color: var(--accent-warning)">
+            当前时间窗内共有 {{ data.matched_runs }} 次运行，超过聚合上限 {{ data.sample_limit }} 次；
+            以下指标只覆盖最近 {{ data.total_runs }} 次运行，成功率与采纳率的分母不是全量。
+          </span>
+        </div>
         <section class="kpi-grid">
           <div class="kpi">
             <div class="kpi-num">{{ data.total_runs }}</div>

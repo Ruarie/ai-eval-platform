@@ -160,6 +160,10 @@ def test_casegen_metrics_aggregates(metrics_case):
     data = response.json()
 
     assert data["total_runs"] == 2
+    # 未超过聚合上限：truncated=false，且 matched_runs 与参与聚合的运行数一致
+    assert data["truncated"] is False
+    assert data["matched_runs"] == 2
+    assert data["sample_limit"] == 1000
     assert data["succeeded_runs"] == 1
     assert data["failed_runs"] == 1
     assert data["total_generated"] == 8
@@ -196,6 +200,22 @@ def test_casegen_metrics_one_day(metrics_case):
     assert data["total_runs"] == 2
     assert data["avg_ai_score"] == 90.0
     assert len(data["series"]) == 1
+
+
+def test_casegen_metrics_marks_truncated_sample(metrics_case, monkeypatch):
+    """超过聚合上限时回传 truncated/matched_runs，成功率分母只代表样本。"""
+    from app.routers import metrics as metrics_router
+
+    monkeypatch.setattr(metrics_router, "MAX_RUNS", 1)
+    response = metrics_case.client.get("/api/metrics/casegen", params={"days": 30})
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    assert data["truncated"] is True
+    assert data["matched_runs"] == 2
+    assert data["sample_limit"] == 1
+    assert data["total_runs"] == 1
+    assert data["success_rate"] in (0.0, 1.0)
 
 
 def test_casegen_metrics_validates_days(metrics_case):

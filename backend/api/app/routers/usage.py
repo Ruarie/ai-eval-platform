@@ -65,17 +65,16 @@ def usage_summary(
     start_day = (now - timedelta(days=days - 1)).date()
     start_at = datetime.combine(start_day, datetime.min.time(), tzinfo=UTC)
 
-    rows = (
-        db.query(Message)
-        .filter(
-            Message.role == "assistant",
-            Message.created_at >= start_at,
-            Message.turn_stats.isnot(None),
-        )
-        .order_by(Message.created_at.desc())
-        .limit(MAX_MESSAGES)
-        .all()
+    base_query = db.query(Message).filter(
+        Message.role == "assistant",
+        Message.created_at >= start_at,
+        Message.turn_stats.isnot(None),
     )
+    # 先取匹配总数：超过聚合上限时必须告知前端只统计了最近一段，
+    # 不能让截断后的样本看起来像全量用量。
+    matched = base_query.count()
+    rows = base_query.order_by(Message.created_at.desc()).limit(MAX_MESSAGES).all()
+    truncated = matched > MAX_MESSAGES
     session_ids = {row.session_id for row in rows}
     sessions = (
         db.query(AgentSession.id, AgentSession.title, AgentSession.user_id)
@@ -100,11 +99,13 @@ def usage_summary(
     )
     user_map: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "total": 0})
     recent: list[UsageRecentOut] = []
+    calls = 0
 
     for row in rows:
         prompt, completion, total = _usage(row)
         if not total and not prompt and not completion:
             continue
+        calls += 1
         total_prompt += prompt
         total_completion += completion
         total_tokens += total
@@ -188,12 +189,15 @@ def usage_summary(
     return UsageSummaryOut(
         days=days,
         generated_at=now,
-        calls=sum(1 for row in rows if sum(_usage(row)) > 0),
+        calls=calls,
         sessions=len(session_ids),
         users=len({sid for sid in session_ids if session_meta.get(sid, ("", ""))[1]}),
         prompt_tokens=total_prompt,
         completion_tokens=total_completion,
         total_tokens=total_tokens,
+        truncated=truncated,
+        scanned_messages=len(rows),
+        sample_limit=MAX_MESSAGES,
         series=series,
         by_model=by_model,
         by_user=by_user,

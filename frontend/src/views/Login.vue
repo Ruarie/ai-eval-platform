@@ -470,8 +470,8 @@ const passwordInputRef = ref<HTMLInputElement | null>(null)
 const showForgotModal = ref(false)
 const showRegisterModal = ref(false)
 
-/** 状态行：免密健康探测状态 */
-const agentStatusText = ref('连接正常 · 调度器运行中')
+/** 状态行：免密健康探测状态；探测完成前显示检测中，不能用预设文案伪装已连通 */
+const agentStatusText = ref('正在检测服务状态…')
 
 /** 鼠标轻量视差偏移 (桌面端最大 ±3px) */
 const mouseX = ref(0)
@@ -523,15 +523,13 @@ function togglePasswordVisible() {
   showPassword.value = !showPassword.value
 }
 
-/** 登录页健康探测：未登录状态下调用免密健康接口 */
+/** 登录页健康探测：未登录状态下调用免密健康接口；/api/health 只证明 API 可服务，不宣称调度器状态 */
 async function loadAgentStatus() {
   try {
     const res = await fetch('/api/health')
-    if (res.ok) {
-      agentStatusText.value = '连接正常 · 调度器运行中'
-    }
+    agentStatusText.value = res.ok ? '后端服务连接正常' : `后端服务异常（HTTP ${res.status}）`
   } catch {
-    // 保持默认兜底文案
+    agentStatusText.value = '无法连接后端服务'
   }
 }
 

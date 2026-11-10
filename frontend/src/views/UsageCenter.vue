@@ -27,6 +27,13 @@
       </div>
 
       <template v-else>
+        <!-- 聚合上限提示：数字只覆盖最近 N 条消息，不能当全量用量 -->
+        <div v-if="data.truncated" class="panel" style="padding: 10px 14px; margin-bottom: 12px; border-color: var(--accent-warning)">
+          <span class="small" style="color: var(--accent-warning)">
+            当前时间窗内匹配消息超过聚合上限，以下数字只统计最近 {{ data.scanned_messages ?? data.sample_limit }} 条
+            消息（上限 {{ data.sample_limit }} 条），不代表全量用量。请缩小时间范围后查看。
+          </span>
+        </div>
         <section class="kpi-grid">
           <div class="kpi"><b>{{ data.calls }}</b><span>模型调用</span></div>
           <div class="kpi"><b>{{ data.sessions }}</b><span>会话数</span></div>

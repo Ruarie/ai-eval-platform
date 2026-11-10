@@ -31,6 +31,9 @@ from ..schemas import (
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
+# 单次聚合的运行上限：超过后只统计最近 MAX_RUNS 次运行，并在响应里标记 truncated。
+MAX_RUNS = 1000
+
 _STATUS_ORDER = ["queued", "running", "awaiting_case_confirm", "succeeded", "failed", "cancelled"]
 _TERMINAL_SUCCESS = {"succeeded"}
 _TERMINAL_FAILED = {"failed"}
@@ -75,13 +78,11 @@ def casegen_metrics(
     start_day = (now - timedelta(days=days - 1)).date()
     start_at = datetime.combine(start_day, datetime.min.time(), tzinfo=UTC)
 
-    tasks = (
-        db.query(Task)
-        .filter(Task.kind == "testcase", Task.created_at >= start_at)
-        .order_by(Task.created_at.desc())
-        .limit(1000)
-        .all()
-    )
+    base_query = db.query(Task).filter(Task.kind == "testcase", Task.created_at >= start_at)
+    # 先取匹配总数：超过聚合上限时，成功率/采纳率的分母不再是全量，必须回传标记。
+    matched = base_query.count()
+    tasks = base_query.order_by(Task.created_at.desc()).limit(MAX_RUNS).all()
+    truncated = matched > MAX_RUNS
     task_ids = [task.id for task in tasks]
     sets = (
         db.query(CaseSet).filter(CaseSet.task_id.in_(task_ids)).all() if task_ids else []
@@ -234,6 +235,9 @@ def casegen_metrics(
     return CasegenMetricsOut(
         days=days,
         generated_at=now,
+        truncated=truncated,
+        matched_runs=matched,
+        sample_limit=MAX_RUNS,
         total_runs=len(tasks),
         succeeded_runs=succeeded,
         failed_runs=failed,

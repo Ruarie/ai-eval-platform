@@ -498,6 +498,9 @@ const queryMetrics = ref({ hit_rate: null as number | null, mrr: null as number 
 const chunkFlowRef = ref<HTMLElement | null>(null)
 const flashChunkId = ref('')
 
+// 高亮定时器句柄：连续点击时只保留最后一次，并在组件卸载时清理。
+let flashChunkTimer: number | undefined
+
 // 点击召回卡片后滚动左栏切块流到对应切块并短暂高亮；切块属于其他文档时给出提示。
 function locateChunk(chunkId: string) {
   const target = chunkFlowRef.value?.querySelector(`[data-chunk="${chunkId}"]`) as HTMLElement | null
@@ -507,7 +510,8 @@ function locateChunk(chunkId: string) {
   }
   target.scrollIntoView({ behavior: 'smooth', block: 'center' })
   flashChunkId.value = chunkId
-  window.setTimeout(() => {
+  window.clearTimeout(flashChunkTimer)
+  flashChunkTimer = window.setTimeout(() => {
     if (flashChunkId.value === chunkId) flashChunkId.value = ''
   }, 1200)
 }
@@ -680,18 +684,28 @@ function handleDeleteDoc(doc: KbDoc) {
   })
 }
 
+// 切块预览请求序号：快速切换文档或调整切块参数时，只接受最后一次响应。
+let chunkPreviewRequestId = 0
+
 // 读取当前文档的服务端切块预览；切块参数仅影响预览，不在浏览器生成样本正文。
 async function loadChunkPreview() {
-  if (!currentKb.value || !activeDocId.value) {
+  const requestId = ++chunkPreviewRequestId
+  const kbId = currentKb.value?.id
+  const docId = activeDocId.value
+  if (!kbId || !docId) {
     chunkPreview.value = []
     return
   }
   try {
-    chunkPreview.value = await api.kb.getDocChunks(currentKb.value.id, activeDocId.value, {
+    const next = await api.kb.getDocChunks(kbId, docId, {
       chunk_size: chunkSize.value,
       overlap: overlap.value,
     })
+    // 过期响应直接丢弃，避免旧文档切块覆盖当前文档。
+    if (requestId !== chunkPreviewRequestId) return
+    chunkPreview.value = next
   } catch (err: any) {
+    if (requestId !== chunkPreviewRequestId) return
     chunkPreview.value = []
     message.error(err.message || '加载文档切块失败')
   }
@@ -762,6 +776,9 @@ watch(
 
 onBeforeUnmount(() => {
   if (docStatusTimer !== undefined) window.clearInterval(docStatusTimer)
+  window.clearTimeout(flashChunkTimer)
+  // 递增序号使所有在途的切块请求失效，避免卸载后回写状态。
+  chunkPreviewRequestId += 1
 })
 
 // 只要切换文档或调整预览参数，就重新请求当前文档的切块结果。

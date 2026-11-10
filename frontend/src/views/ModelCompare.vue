@@ -434,9 +434,15 @@ async function loadResult() {
   }
 }
 
+// 样本请求序号：切换任务或连续点筛选时只接受最后一次响应，避免旧结果覆盖新筛选
+let samplesRequestId = 0
+
 async function loadSamples(filter: 'all' | 'diff' | 'fail') {
-  if (!task.value?.report_id) return
-  const data = await api.reports.samples(task.value.report_id, { filter, limit: 100 })
+  const reportId = task.value?.report_id
+  if (!reportId) return
+  const requestId = ++samplesRequestId
+  const data = await api.reports.samples(reportId, { filter, limit: 100 })
+  if (requestId !== samplesRequestId) return
   samples.value = data.items
   samplesTotal.value = data.total
 }
@@ -452,6 +458,8 @@ async function refreshResult() {
 
 function goBack() {
   stopPolling()
+  // 使在途样本请求失效，返回列表后不再回写已清空的状态
+  samplesRequestId += 1
   taskId.value = null
   task.value = null
   report.value = null

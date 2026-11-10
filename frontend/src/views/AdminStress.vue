@@ -27,23 +27,15 @@
     <div class="stress-grid">
       <!-- 左主栏 -->
       <div class="section-gap" style="gap: 16px">
-        <!-- S5 AI 容量与参数建议卡（对齐原型 69-85；推荐值为演示数据） -->
+        <!-- 压测能力已停用：不提供 AI 参数建议，避免把固定推荐值当成真实容量分析 -->
         <div class="ai-card">
           <div class="ai-card-head">
             <span class="ai-badge"><i class="ai-dot"></i>AI 容量与参数建议</span>
-            <span class="small tertiary mono">基于近 7 天真实发压与拐点数据</span>
+            <span class="small tertiary mono">未接入</span>
           </div>
-          <p class="small" style="color: var(--text-secondary); line-height: 1.6; margin-bottom: 12px">
-            近 7 天峰值 QPS 多次触及上限 500 的 92%（462），且有 2 次压测因时长不足未跑到性能拐点。建议收紧单次 QPS 上限、放宽单次最大发压时长并微调单次预算：
+          <p class="small" style="color: var(--text-secondary); line-height: 1.6; margin-bottom: 0">
+            压测能力已停用，平台不再采集发压与拐点数据，因此不提供容量推荐。本页仅保留白名单与安全阈值的历史维护能力。
           </p>
-          <div class="row wrap" style="gap: 8px; margin-bottom: 14px">
-            <span class="tag-soft">QPS 上限 <b class="num">500 → 420</b></span>
-            <span class="tag-soft">时长上限 <b class="num">30 → 45 分钟</b></span>
-            <span class="tag-soft">默认预算 <b class="num">5 → 6 USD</b></span>
-          </div>
-          <div class="row" style="justify-content: flex-end">
-            <button class="btn btn-ai btn-sm" @click="adoptAiSuggestion">采纳推荐参数</button>
-          </div>
         </div>
 
         <!-- 1. 发压目标安全白名单 -->
@@ -439,14 +431,6 @@ function capacityPct(current: number | null, max: number): string {
 
 /** S8 Prometheus 指标端点：stress 容器暴露 /metrics（端口 19090），按当前访问主机拼接 */
 const metricsUrl = computed(() => `http://${window.location.hostname}:19090/metrics`)
-
-/** S5 采纳 AI 推荐参数：一键回填到 settings，随「保存治理与安全配置」统一落库 */
-function adoptAiSuggestion() {
-  settings.value.stress.max_qps = 420
-  settings.value.stress.max_duration_s = 45 * 60 // 45 分钟
-  settings.value.default_max_usd = 6
-  message.success('已填充 AI 推荐参数，点击「保存治理与安全配置」生效')
-}
 
 async function loadData() {
   try {

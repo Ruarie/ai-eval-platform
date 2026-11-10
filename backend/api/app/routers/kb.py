@@ -399,7 +399,7 @@ def _cached_statuses(doc_ids: list[str]) -> dict[str, str]:
     }
 
 
-def _refresh_doc_statuses(db: Session, rows: list[KbDocument]) -> dict[str, str]:
+def _refresh_doc_statuses(db: Session, rows: list) -> dict[str, str]:
     """回读仍在建索引的文档状态，返回需要落库的新状态（不在此处提交）。
 
     由调用方先用返回结果构造响应、再统一 UPDATE：``commit`` 会让会话对象过期，
@@ -424,10 +424,20 @@ def list_docs(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """返回知识库文档元信息（不含正文与切块）。"""
+    """返回知识库文档元信息（不含正文与切块）。
+
+    只查元信息列：``KbDocument.text`` 单篇上限 20MB，列表接口若整行加载，
+    一个知识库几十篇文档就会把数百 MB 正文读进内存。
+    """
     _get_kb_or_404(db, kb_id)
     rows = (
-        db.query(KbDocument)
+        db.query(
+            KbDocument.id,
+            KbDocument.filename,
+            KbDocument.status,
+            KbDocument.size,
+            KbDocument.created_at,
+        )
         .filter(KbDocument.kb_id == kb_id)
         .order_by(KbDocument.created_at.asc())
         .all()

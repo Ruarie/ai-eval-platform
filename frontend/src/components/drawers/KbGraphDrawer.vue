@@ -52,6 +52,7 @@
             @pointerdown="onPointerDown"
             @pointermove="onPointerMove"
             @pointerup="onPointerUp"
+            @pointercancel="onPointerUp"
             @pointerleave="onPointerUp"
           >
             <defs>
@@ -203,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import { api } from '../../api/http'
 import type { KbGraph, KbGraphEdge, KbGraphNode } from '../../api/types'
@@ -587,6 +588,9 @@ const dragging = ref(false)
 let dragOrigin: { x: number; y: number; vx: number; vy: number } | null = null
 let moved = false
 let frame = 0
+// 指针捕获目标：拖动超过阈值后记录，结束/中断/卸载时释放
+let capturedEl: SVGSVGElement | null = null
+let capturedPointerId: number | null = null
 let pendingView: { scale: number; x: number; y: number } | null = null
 
 function resetView() {
@@ -642,7 +646,11 @@ function onPointerMove(event: PointerEvent) {
       return
     }
     moved = true
-    ;(event.currentTarget as SVGSVGElement).setPointerCapture?.(event.pointerId)
+    // 记录 capture 目标，pointerup/pointercancel/卸载时成对释放，
+    // 否则指针在画布外中断后事件仍被 svg 劫持，节点点击会失效。
+    capturedEl = event.currentTarget as SVGSVGElement
+    capturedPointerId = event.pointerId
+    capturedEl.setPointerCapture?.(event.pointerId)
   }
   scheduleView({
     scale: view.value.scale,
@@ -651,10 +659,27 @@ function onPointerMove(event: PointerEvent) {
   })
 }
 
+/** 释放指针捕获（幂等），确保拖动被中断时不会残留 capture */
+function releasePointerCapture() {
+  if (capturedEl && capturedPointerId !== null) {
+    capturedEl.releasePointerCapture?.(capturedPointerId)
+  }
+  capturedEl = null
+  capturedPointerId = null
+}
+
 function onPointerUp() {
   dragging.value = false
   dragOrigin = null
+  releasePointerCapture()
 }
+
+// 抽屉关闭/组件销毁时释放捕获并取消待执行的视图帧
+onBeforeUnmount(() => {
+  releasePointerCapture()
+  if (frame) cancelAnimationFrame(frame)
+  frame = 0
+})
 
 /** 拖拽结束时不要顺带把节点选中，避免平移后误触详情。 */
 function onNodeClick(nodeId: string) {

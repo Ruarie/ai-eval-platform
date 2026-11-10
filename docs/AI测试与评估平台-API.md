@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.59 |
-| 本轮审查日期 | 2026-11-09（Token 用量中心 MVP：按天/模型/成员聚合用量） |
+| 文档版本 | V2.60 |
+| 本轮审查日期 | 2026-11-10（用量/质量聚合截断显式化：新增 `truncated`/`scanned_messages`/`sample_limit`/`matched_runs`；报告列表批量投影） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.68（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -4611,6 +4611,9 @@ diff 响应：
 {
   "days": 30,
   "generated_at": "2026-11-09T07:00:00Z",
+  "truncated": false,
+  "matched_runs": 12,
+  "sample_limit": 1000,
   "total_runs": 12,
   "succeeded_runs": 10,
   "failed_runs": 1,
@@ -4668,7 +4671,7 @@ diff 响应：
 边界：
 
 - 只读聚合，不写审计、不修改任务/用例集/评审状态；
-- 运行数按 `tasks.kind=testcase` 且 `created_at` 在时间窗内统计，最多扫描最近 1000 条；
+- 运行数按 `tasks.kind=testcase` 且 `created_at` 在时间窗内统计，最多扫描最近 1000 条；`matched_runs` 为时间窗内匹配总数，超过 `sample_limit` 时 `truncated=true`，此时成功率/采纳率的分母只是样本，页面必须提示；
 - 成功率 = `succeeded_runs / total_runs`；`awaiting_case_confirm` 不计入成功或失败；
 - 采纳率 = `confirmed_count / generated_count`，分母为 0 返回 0；
 - AI 均分只取每个用例集最新一次 `case_review_runs`；没有评分返回 null；
@@ -4999,6 +5002,9 @@ diff 响应：
   "prompt_tokens": 1200000,
   "completion_tokens": 180000,
   "total_tokens": 1380000,
+  "truncated": false,
+  "scanned_messages": 120,
+  "sample_limit": 5000,
   "series": [
     { "day": "2026-11-09", "calls": 8, "prompt_tokens": 12000, "completion_tokens": 1800, "total_tokens": 13800 }
   ],
@@ -5034,7 +5040,7 @@ diff 响应：
 
 - 只统计 `role=assistant` 且 `turn_stats` 非空的消息；用户消息不计；
 - `usage` 缺失时用 prompt+completion 兜底；全缺失不计入 calls；
-- 时间窗按消息 `created_at`；最多扫描 5000 条，超出只统计最近窗口；
+- 时间窗按消息 `created_at`；最多扫描 5000 条，超出时 `truncated=true`，`scanned_messages` 为实际扫描条数、`sample_limit` 为上限，页面必须提示“非全量”；
 - 共享会话归会话创建者；成员名缺失显示“未记录”；
 - 只读聚合，不返回正文/提示词/工具结果/凭据；
 - 当前不返回费用字段；单价与预算告警后续登记。
@@ -5045,3 +5051,45 @@ diff 响应：
 - `backend/api/tests/test_usage.py`：聚合、兜底与参数边界。
 - `frontend/src/views/UsageCenter.vue`、`router/index.ts`、`layouts/MainLayout.vue`：用量页、路由与导航。
 - `frontend/src/api/types.ts`、`http.ts`：用量类型与客户端。
+
+## V2.60 聚合截断显式化与只读列表投影（2026-11-10）
+
+本轮不新增路由、不改变既有字段语义，只补齐“样本 vs 全量”的可判别字段，并修正两个只读列表的内存放大问题。
+
+### V2.60.1 `GET /api/metrics/casegen` 新增字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `truncated` | bool | 时间窗内运行数超过 `sample_limit` 时为 true，指标只覆盖最近样本 |
+| `matched_runs` | int | 时间窗内匹配的运行总数（不受扫描上限影响） |
+| `sample_limit` | int | 本次聚合的扫描上限，当前为 1000 |
+
+旧客户端忽略未知字段即可；`total_runs` 仍表示本次实际参与聚合的运行数。
+
+### V2.60.2 `GET /api/usage/summary` 新增字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `truncated` | bool | 匹配消息超过 `sample_limit` 时为 true |
+| `scanned_messages` | int | 实际扫描的 assistant 消息条数 |
+| `sample_limit` | int | 本次聚合的扫描上限，当前为 5000 |
+
+`truncated=true` 时，`total_tokens` / `by_model` / `by_user` 只代表扫描窗口内的用量，前端必须显式提示，不得当作全量。
+
+### V2.60.3 无契约变化的只读优化
+
+- `GET /api/reports`：任务、数据集与派生压测报告改为批量投影，单页 SQL 数量由 O(4N) 降为常数级；响应字段不变。
+- `GET /api/kb/{id}/documents`：只查询文档元信息列，不再把 `text` 正文（单篇上限 20MB）载入列表响应；响应字段不变。
+- `GET /api/sessions` 等既有接口未改动。
+
+### V2.60.4 修改代码文件与作用清单
+
+- `backend/api/app/routers/usage.py`、`app/routers/metrics.py`、`app/schemas.py`：截断标记与扫描上限常量。
+- `backend/api/app/routers/reports.py`：报告列表批量投影（任务/数据集/派生压测报告）。
+- `backend/api/app/routers/kb.py`：文档列表列裁剪。
+- `backend/api/tests/test_usage.py`、`test_casegen_metrics.py`：截断字段与标记回归。
+- `backend/api/tests/test_reports_list.py`、`test_kb_doc_list.py`：批量投影与列裁剪回归（含查询次数/实际 SQL 断言）。
+- `frontend/src/api/types.ts`：`UsageSummary` / `CasegenMetrics` 同步可选字段。
+- `frontend/src/views/UsageCenter.vue`、`views/CasegenQuality.vue`：截断提示条。
+- `frontend/src/views/Dispatch.vue`、`views/AdminStress.vue`、`views/Login.vue`：移除 live 模式演示数据与伪连接状态；补齐定时器/RAF 清理。
+- `frontend/src/views/Kb.vue`、`views/ModelCompare.vue`、`components/drawers/KbGraphDrawer.vue`、`components/workspace/WorkspaceVideoViewer.vue`：请求竞态、指针捕获与 window 监听清理。

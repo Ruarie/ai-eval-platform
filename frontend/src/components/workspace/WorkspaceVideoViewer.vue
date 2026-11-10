@@ -386,6 +386,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  stopScrubbing()
   if (hideTimer) clearTimeout(hideTimer)
   if (feedbackTimer) clearTimeout(feedbackTimer)
 })
@@ -540,6 +541,19 @@ function handleFullscreenChange(): void {
   isFullscreen.value = !!document.fullscreenElement
 }
 
+// 进度条拖拽的 window 监听句柄：提升到组件作用域，卸载时可强制解绑，
+// 避免拖拽过程中切换文件/关闭抽屉后监听残留。
+let scrubMoveHandler: ((event: MouseEvent) => void) | null = null
+let scrubUpHandler: (() => void) | null = null
+
+/** 解绑进度条拖拽监听（幂等） */
+function stopScrubbing(): void {
+  if (scrubMoveHandler) window.removeEventListener('mousemove', scrubMoveHandler)
+  if (scrubUpHandler) window.removeEventListener('mouseup', scrubUpHandler)
+  scrubMoveHandler = null
+  scrubUpHandler = null
+}
+
 function onProgressMouseDown(e: MouseEvent): void {
   if (!progressBarRef.value || !duration.value || !videoRef.value) return
   const rect = progressBarRef.value.getBoundingClientRect()
@@ -549,7 +563,9 @@ function onProgressMouseDown(e: MouseEvent): void {
   videoRef.value.currentTime = newTime
   currentTime.value = newTime
 
-  function onMouseMove(moveEvent: MouseEvent): void {
+  stopScrubbing()
+
+  scrubMoveHandler = (moveEvent: MouseEvent): void => {
     if (!progressBarRef.value || !duration.value || !videoRef.value) return
     const moveX = moveEvent.clientX - rect.left
     const movePct = Math.max(0, Math.min(1, moveX / rect.width))
@@ -557,14 +573,10 @@ function onProgressMouseDown(e: MouseEvent): void {
     videoRef.value.currentTime = moveTime
     currentTime.value = moveTime
   }
+  scrubUpHandler = (): void => stopScrubbing()
 
-  function onMouseUp(): void {
-    window.removeEventListener('mousemove', onMouseMove)
-    window.removeEventListener('mouseup', onMouseUp)
-  }
-
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onMouseUp)
+  window.addEventListener('mousemove', scrubMoveHandler)
+  window.addEventListener('mouseup', scrubUpHandler)
 }
 
 function onProgressHover(e: MouseEvent): void {
