@@ -5,13 +5,20 @@
 """
 
 import asyncio
+import sys
 import time
 from dataclasses import replace
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from adapter.config import load_config
-from adapter.engine import _MAX_FAILED_RECORDS, EngineBusy, EngineUnavailable, LightRAGEngine
+from adapter.engine import (
+    _MAX_FAILED_RECORDS,
+    EngineBusy,
+    EngineUnavailable,
+    LightRAGEngine,
+    _invisible_fingerprint,
+)
 
 
 class FakeDocStatus:
@@ -39,6 +46,7 @@ class FakeRag:
     ) -> None:
         self.doc_status = FakeDocStatus(records)
         self.inserted: list[str] = []
+        self.texts: list[str] = []
         self.deleted: list[str] = []
         self.cancelled = False
         self.graph_calls: list[tuple[str, int, int | None]] = []
@@ -47,6 +55,7 @@ class FakeRag:
         self.embedding_calls: list[list[str]] = []
         self._block = block
         self._delay = delay
+        self.release = asyncio.Event()
         self._graph = SimpleNamespace(
             nodes=graph_nodes or [], edges=graph_edges or [], is_truncated=graph_truncated
         )
@@ -54,13 +63,14 @@ class FakeRag:
     async def ainsert(self, text: str, ids=None, file_paths=None, track_id=None) -> None:
         if self._block:
             try:
-                await asyncio.Event().wait()
+                await self.release.wait()
             except asyncio.CancelledError:
                 self.cancelled = True
                 raise
         if self._delay:
             await asyncio.sleep(self._delay)
         self.inserted.append((ids or [""])[0])
+        self.texts.append(text)
 
     async def adelete_by_doc_id(self, doc_id: str) -> SimpleNamespace:
         self.deleted.append(doc_id)
@@ -258,6 +268,82 @@ def test_duplicate_index_request_is_idempotent():
         assert first == second == {"doc_id": "doc-a", "status": "indexing"}
         await asyncio.sleep(0.4)
         assert rag.inserted == ["doc-a"]
+
+    asyncio.run(case())
+
+
+def test_delete_waits_for_inflight_index_before_touching_engine():
+    """删除必须等在途索引结束：否则引擎管线冲突会让知识库删不掉（502）。"""
+
+    async def case() -> None:
+        engine = _engine()
+        rag = FakeRag(block=True)
+        engine._rag = rag
+        await engine.index_document("kb-1", "doc-a", "a.txt", "正文")
+        await asyncio.sleep(0.01)
+
+        deleting = asyncio.create_task(engine.delete_documents("kb-1", ["doc-a"]))
+        await asyncio.sleep(0.05)
+        assert rag.deleted == []  # 索引未完成，删除排队
+
+        rag.release.set()
+        result = await asyncio.wait_for(deleting, 2)
+        assert rag.deleted == ["doc-a"]
+        assert result["deleted"] is True
+        await engine.stop()
+
+    asyncio.run(case())
+
+
+def _stub_content_hash(monkeypatch, duplicate: tuple[str, str] | None) -> None:
+    """注入 lightrag 内容哈希模块：返回固定重复文档（路径用于判定归属）。"""
+    module = ModuleType("lightrag")
+    utils = ModuleType("lightrag.utils_pipeline")
+    utils.compute_text_content_hash = lambda text: "hash"
+    original_path = duplicate[1] if duplicate else ""
+
+    async def fake_lookup(doc_status, content_hash, current_doc_id):
+        if duplicate is None:
+            return None
+        return duplicate[0], SimpleNamespace(file_path=original_path)
+
+    utils.get_duplicate_doc_by_content_hash = fake_lookup
+    module.utils_pipeline = utils
+    monkeypatch.setitem(sys.modules, "lightrag", module)
+    monkeypatch.setitem(sys.modules, "lightrag.utils_pipeline", utils)
+
+
+def test_cross_kb_duplicate_gets_invisible_fingerprint(monkeypatch):
+    """同一正文已在别的知识库索引时补零宽指纹，保证本库能独立建索引与检索。"""
+
+    async def case() -> None:
+        _stub_content_hash(monkeypatch, ("doc-a", "kb-A__doc-a__a.txt"))
+        engine = _engine()
+        rag = FakeRag(delay=0.01)
+        engine._rag = rag
+        await engine.index_document("kb-B", "doc-b", "a.txt", "正文")
+        await asyncio.sleep(0.05)
+        assert len(rag.texts) == 1
+        sent = rag.texts[0]
+        assert sent.startswith("正文")
+        fingerprint = sent[len("正文\n"):]
+        assert fingerprint and all(ch in "\u200b\u200c\u200d\u2060" for ch in fingerprint)
+        assert fingerprint == _invisible_fingerprint("doc-b")
+
+    asyncio.run(case())
+
+
+def test_same_kb_duplicate_still_uses_engine_dedup(monkeypatch):
+    """同一知识库内重复正文不追加指纹，仍由引擎判重，避免同库重复索引。"""
+
+    async def case() -> None:
+        _stub_content_hash(monkeypatch, ("doc-a", "kb-B__doc-a__a.txt"))
+        engine = _engine()
+        rag = FakeRag(delay=0.01)
+        engine._rag = rag
+        await engine.index_document("kb-B", "doc-b", "a.txt", "正文")
+        await asyncio.sleep(0.05)
+        assert rag.texts == ["正文"]
 
     asyncio.run(case())
 

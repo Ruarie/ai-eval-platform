@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -222,22 +223,28 @@ def _try_lightrag(kb_id: str, query: str, mode: str, k: int) -> list[dict] | Non
 
 
 def index_document(kb_id: str, doc_id: str, filename: str, text: str) -> dict:
-    """请求适配服务为文档建索引（异步受理）。
+    """请求适配服务为文档建索引（异步受理），受理失败时重试一次。
 
     返回 ``{"accepted": bool, "status": "indexing"|"failed"}``：适配服务不可用
     或拒绝受理时为 ``failed``，由调用方如实落库，禁止把未建索引的文档标成
     ``indexed``。
+
+    引擎在抽取高峰会短暂超出 15s 受理窗口；单次超时即落 failed 会让用户只能
+    重新上传。适配层对同一 doc_id 的重复受理是幂等的（``_queued`` 去重），
+    因此这里可以安全重试一次。
     """
     if not (text or "").strip():
         return {"accepted": False, "status": "failed"}
-    data = _lightrag_post(
-        "/documents/index",
-        {"kb_id": kb_id, "doc_id": doc_id, "filename": filename, "text": text},
-        timeout=_lightrag_timeout("LIGHTRAG_INDEX_TIMEOUT_SECONDS", LIGHTRAG_INDEX_TIMEOUT_S),
-    )
-    if data is None or data.get("status") not in {"indexing", "indexed", "failed"}:
-        return {"accepted": False, "status": "failed"}
-    return {"accepted": data.get("status") != "failed", "status": data.get("status")}
+    payload = {"kb_id": kb_id, "doc_id": doc_id, "filename": filename, "text": text}
+    timeout = _lightrag_timeout("LIGHTRAG_INDEX_TIMEOUT_SECONDS", LIGHTRAG_INDEX_TIMEOUT_S)
+    for attempt in range(2):
+        data = _lightrag_post("/documents/index", payload, timeout=timeout)
+        if data is not None and data.get("status") in {"indexing", "indexed", "failed"}:
+            return {"accepted": data.get("status") != "failed", "status": data.get("status")}
+        if attempt == 0:
+            logger.warning("LightRAG 建索引受理失败，重试一次 kb_id=%s doc_id=%s", kb_id, doc_id)
+            time.sleep(0.5)
+    return {"accepted": False, "status": "failed"}
 
 
 def delete_documents(kb_id: str, doc_ids: list[str]) -> bool:

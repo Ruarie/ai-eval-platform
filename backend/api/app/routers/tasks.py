@@ -38,6 +38,10 @@ def _task_out(task: Task) -> dict:
     if isinstance(config, dict):
         payload["dataset_id"] = config.get("dataset_id")
         payload["kb_id"] = config.get("kb_id")
+    # 用例集归属只在 result 快照里；提升为顶层字段供列表与 Agent 工具直接取用
+    # （API §3.10 的 task.status 口径），避免调用方再解包 result。
+    result = task.result if isinstance(task.result, dict) else {}
+    payload["case_set_id"] = result.get("case_set_id")
     return payload
 
 

@@ -268,6 +268,47 @@ def _truncation_task(db):
     db.commit()
 
 
+def test_generation_uses_task_snapshot_profile_before_global_agent_profile(
+    worker_db_factory, monkeypatch,
+):
+    """任务快照里用户选择的协议档优先；报告归因必须与实际调用模型一致。"""
+    with worker_db_factory() as db:
+        db.add(ProtocolProfile(
+            id="snapshot-profile", name="快照档", protocol="openai_chat",
+            base_url="https://example.test", model="snapshot-model",
+        ))
+        db.add(ProtocolProfile(
+            id="global-profile", name="全局档", protocol="openai_chat",
+            base_url="https://example.test", model="global-model",
+        ))
+        db.add(Setting(key="agent_profile_id", value="global-profile"))
+        db.add(Task(
+            id="task", kind="testcase", status="running", created_by="owner",
+            claimed_by_worker_id="worker", claim_expires_at=utcnow() + timedelta(minutes=1),
+            config={
+                "case_source": {"text": "登录需求"},
+                "profile_ids": ["snapshot-profile"],
+            },
+        ))
+        db.commit()
+    monkeypatch.setattr(testcase, "profile_connection", lambda *_a, **_k: (
+        "https://example.test", "snapshot-model", "local-test-placeholder",
+    ))
+    monkeypatch.setattr(testcase, "read_profile_env", lambda _id: SimpleNamespace(full_url=False))
+    monkeypatch.setattr(testcase, "call_protocol", lambda **_k: SimpleNamespace(
+        text='[{"name":"登录成功","strategy":"正向","priority":"HX","expected":"进入工作台"}]',
+        finish_reason="stop",
+    ))
+
+    testcase.run_testcase("task")
+
+    with worker_db_factory() as db:
+        task = db.get(Task, "task")
+        assert task.status == "awaiting_case_confirm"
+        assert task.result["profile_id"] == "snapshot-profile"
+        assert task.result["model_name"] == "snapshot-model"
+
+
 def test_generation_retries_once_with_larger_budget_when_truncated(worker_db_factory, monkeypatch):
     """输出被 max_tokens 截断时抬预算重试一次，而不是直接判「无法解析」。"""
     with worker_db_factory() as db:

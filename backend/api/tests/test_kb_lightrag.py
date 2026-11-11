@@ -122,6 +122,24 @@ def test_index_document_reports_failed_when_engine_missing(monkeypatch):
     assert result == {"accepted": False, "status": "failed"}
 
 
+def test_index_document_retries_once_after_transient_failure(monkeypatch):
+    """受理超时/5xx 只重试一次；适配层按 doc_id 幂等，第二次成功即可继续索引。"""
+    responses = [None, {"doc_id": "doc-a", "status": "indexing"}]
+    calls: list[dict] = []
+
+    def fake_post(path, payload, timeout):
+        calls.append(payload)
+        return responses.pop(0)
+
+    monkeypatch.setattr(kb_module, "_lightrag_post", fake_post)
+
+    result = kb_module.index_document("kb-1", "doc-a", "a.txt", "正文")
+
+    assert result == {"accepted": True, "status": "indexing"}
+    assert len(calls) == 2
+    assert calls[0]["doc_id"] == calls[1]["doc_id"] == "doc-a"
+
+
 def test_index_document_accepts_async_indexing(monkeypatch):
     """受理成功返回 indexing，平台据此落库并等待状态回读。"""
     monkeypatch.setattr(

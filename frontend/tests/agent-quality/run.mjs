@@ -86,9 +86,14 @@ async function ask(page, question) {
   const log = await page.evaluate(() => {
     const node = document.querySelector('[role="log"]')
     if (!node) return document.body.innerText
-    // 思考块（reasoning）是模型的内部推理，常为英文，不参与回答质量断言。
+    // 只保留对话正文：思考块是模型内部推理，工具卡/执行过程/请求头是界面装饰，
+    // 计入回答会让「回答过长」断言把工具面板文字误判成模型啰嗦。
     const clone = node.cloneNode(true)
-    clone.querySelectorAll('.reasoning-block').forEach(el => el.remove())
+    clone
+      .querySelectorAll(
+        '.reasoning-block, .turn-process-tool, .turn-media-results, .assistant-header, .turn-segment-label'
+      )
+      .forEach(el => el.remove())
     return clone.innerText
   })
   const index = log.lastIndexOf(question)

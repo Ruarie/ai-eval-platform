@@ -19,10 +19,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from collections import OrderedDict
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import partial
+from types import SimpleNamespace
 from typing import Any
 
 from .config import EngineConfig
@@ -80,6 +84,20 @@ def localize_prompts() -> None:
             PROMPTS[key] = base + _LANGUAGE_HINT
 
 
+# 零宽字符表：只用于给「跨知识库副本」打不可见指纹，不影响正文语义与展示。
+_ZERO_WIDTH = ("\u200b", "\u200c", "\u200d", "\u2060")
+
+
+def _invisible_fingerprint(doc_id: str) -> str:
+    """由 doc_id 派生 16 个零宽字符的稳定指纹（64 bit 空间，互不相同）。"""
+    digest = hashlib.sha256(doc_id.encode("utf-8")).digest()[:16]
+    chars: list[str] = []
+    for byte in digest:
+        for shift in (0, 2, 4, 6):
+            chars.append(_ZERO_WIDTH[(byte >> shift) & 0b11])
+    return "".join(chars)
+
+
 def _record_file_path(record: Any) -> str:
     """读取 doc_status 记录里的来源标识；兼容对象与 dict 两种返回形态。"""
     if record is None:
@@ -88,6 +106,48 @@ def _record_file_path(record: Any) -> str:
     if value is None and isinstance(record, dict):
         value = record.get("file_path")
     return str(value or "")
+
+
+class _MutationGate:
+    """写入闸门：索引可并发，删除必须独占。
+
+    LightRAG 的写入与删除共用同一条管线：删除和正在执行的 ``ainsert`` 并发时
+    引擎会直接报错（平台表现为「索引删除失败」502，知识库删不掉）。用读写语义
+    而不是单把锁，保留 ``max_parallel_insert`` 的并发抽取能力。
+    """
+
+    def __init__(self) -> None:
+        self._cond = asyncio.Condition()
+        self._active = 0
+        self._exclusive = False
+
+    @asynccontextmanager
+    async def shared(self) -> AsyncIterator[None]:
+        """索引任务：与其它索引并发，但删除进行中时排队。"""
+        async with self._cond:
+            while self._exclusive:
+                await self._cond.wait()
+            self._active += 1
+        try:
+            yield
+        finally:
+            async with self._cond:
+                self._active -= 1
+                self._cond.notify_all()
+
+    @asynccontextmanager
+    async def exclusive(self) -> AsyncIterator[None]:
+        """删除任务：等待在途索引结束后独占执行，结束后放行。"""
+        async with self._cond:
+            while self._exclusive or self._active:
+                await self._cond.wait()
+            self._exclusive = True
+        try:
+            yield
+        finally:
+            async with self._cond:
+                self._exclusive = False
+                self._cond.notify_all()
 
 
 class EngineUnavailable(RuntimeError):
@@ -109,6 +169,8 @@ class LightRAGEngine:
         # 管线并发：LightRAG 的 max_parallel_insert 只有在多个 ainsert 并发时才生效，
         # 旧实现用单把锁把文档串起来，配置调大也不会提速。用信号量按配置放行。
         self._pipeline_slots = asyncio.Semaphore(max(1, int(self.config.max_parallel_insert)))
+        # 删除必须等在途索引结束；索引之间仍按信号量并发。
+        self._mutations = _MutationGate()
         # 已受理但尚未写入 doc_status 的文档，用于「受理后立刻查询」的状态兜底。
         self._queued: set[str] = set()
         # 后台任务引用集合，防止任务被 GC 提前回收。
@@ -269,6 +331,7 @@ class LightRAGEngine:
             raise EngineBusy(f"索引队列已满（{limit}），请稍后重试")
 
         file_source = build_file_source(kb_id, doc_id, filename)
+        text = await self._avoid_cross_kb_duplicate(rag, kb_id, doc_id, text)
         self._queued.add(doc_id)
         self._failed.pop(doc_id, None)
         self._stale_since.pop(doc_id, None)
@@ -276,12 +339,13 @@ class LightRAGEngine:
         async def _worker() -> None:
             try:
                 async with self._pipeline_slots:
-                    await rag.ainsert(
-                        text,
-                        ids=[doc_id],
-                        file_paths=[file_source],
-                        track_id=doc_id,
-                    )
+                    async with self._mutations.shared():
+                        await rag.ainsert(
+                            text,
+                            ids=[doc_id],
+                            file_paths=[file_source],
+                            track_id=doc_id,
+                        )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - 后台任务必须自兜底
@@ -297,6 +361,42 @@ class LightRAGEngine:
         task.add_done_callback(self._tasks.discard)
         return {"doc_id": doc_id, "status": "indexing"}
 
+    async def _avoid_cross_kb_duplicate(
+        self, rag: Any, kb_id: str, doc_id: str, text: str
+    ) -> str:
+        """跨知识库的同一份正文补一个不可见指纹，避免被内容哈希判重。
+
+        引擎是单 workspace 单一图谱（见模块 docstring 第 1 条），LightRAG 按内容
+        哈希全局去重：相同正文上传到第二个知识库会被直接标 failed，该库检索不到
+        任何切块。这里只在「同一内容已属于其它知识库」时追加由 doc_id 派生的零宽
+        指纹，让每个知识库各自拥有独立索引；同库重复仍交给引擎判重，不绕过。
+        """
+        try:
+            from lightrag.utils_pipeline import (
+                compute_text_content_hash,
+                get_duplicate_doc_by_content_hash,
+            )
+
+            content_hash = compute_text_content_hash(text)
+            match = await get_duplicate_doc_by_content_hash(
+                rag.doc_status, content_hash, doc_id
+            )
+        except Exception:  # noqa: BLE001 - 判重失败时退回引擎默认行为
+            logger.warning("跨库重复内容检查失败，按引擎默认去重处理 doc_id=%s", doc_id)
+            return text
+        if not match:
+            return text
+        original_doc_id, record = match
+        original_source = _record_file_path(record)
+        if not original_source or belongs_to_kb(original_source, kb_id):
+            return text
+        logger.info(
+            "文档正文已在其它知识库索引，追加不可见指纹以独立建库 doc_id=%s original=%s",
+            doc_id,
+            original_doc_id,
+        )
+        return text + "\n" + _invisible_fingerprint(doc_id)
+
     async def delete_documents(self, kb_id: str, doc_ids: list[str]) -> dict[str, Any]:
         """批量删除文档及其切块、图谱元素；不存在视为幂等成功。
 
@@ -305,7 +405,8 @@ class LightRAGEngine:
         """
         rag = self._require_rag()
         results: dict[str, str] = {}
-        async with self._pipeline_slots:
+        # 独占写入闸门：等在途 ainsert 结束再删，避免引擎管线冲突导致删除失败。
+        async with self._mutations.exclusive():
             # 删除前核对来源前缀：平台侧已校验归属，这里再挡一次跨知识库误删。
             sources: dict[str, Any] = {}
             try:
@@ -392,7 +493,10 @@ class LightRAGEngine:
     ) -> dict[str, Any]:
         """执行一次只有检索、不生成答案的查询，并映射为平台上下文结构。"""
         rag = self._require_rag()
-        from lightrag import QueryParam
+        try:
+            from lightrag import QueryParam
+        except ModuleNotFoundError:  # 单测注入假引擎时没有安装 lightrag
+            QueryParam = SimpleNamespace  # type: ignore[assignment,misc]
 
         window = chunk_top_k_for(kb_id, top_k)
         param = QueryParam(

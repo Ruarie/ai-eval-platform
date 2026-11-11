@@ -247,14 +247,23 @@ def run_testcase(task_id: str) -> None:
             return
 
         # ─── 解析 Agent 协议档并调用 LLM 生成（六策略配比） ───
+        # 任务快照里的 profile_ids 是用户创建任务时的显式选择，优先使用它；
+        # 只有快照缺省（历史任务）才回落到全局 Agent 协议档，避免报告归因与实际
+        # 模型不一致。
+        snapshot_ids = config.get("profile_ids")
+        requested_id = (
+            snapshot_ids[0]
+            if isinstance(snapshot_ids, list) and snapshot_ids and isinstance(snapshot_ids[0], str)
+            else None
+        )
         row = db.query(Setting).filter(Setting.key == "agent_profile_id").first()
-        profile_id = row.value if row else None
+        profile_id = requested_id or (row.value if row else None)
         profile, profile_switched = _pick_generation_profile(db, profile_id)
         if profile_switched:
             db.add(TaskEvent(
                 task_id=task.id, event="progress",
                 message=(
-                    f"默认 Agent 协议档使用「思考强度」型模板（思考量不可控，容易把输出预算"
+                    f"所选协议档使用「思考强度」型模板（思考量不可控，容易把输出预算"
                     f"全用于思考导致正文为空），本次生成改用「{profile.name}」"
                 ),
             ))

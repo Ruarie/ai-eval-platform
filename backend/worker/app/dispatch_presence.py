@@ -69,6 +69,18 @@ class Presence:
             logger.warning("调度节点状态读取失败，本轮仍按队列领取")
             return True
 
+    def take_idle_restart(self) -> bool:
+        """本节点被管理员标记为 restarting 时改回 idle 并让主循环退出。
+
+        主循环持有的是 :class:`Presence` 实例，必须在类上暴露该动作；直接调用
+        模块级函数会让主循环每轮抛 AttributeError 而永不领任务。
+        """
+        try:
+            return take_idle_restart(self._identity)
+        except Exception:
+            logger.warning("调度节点重启状态读取失败 node=%s", self._identity)
+            return False
+
     def beat(self) -> None:
         """把当前活动写回调度节点。数据库短暂失败只记日志，不打断主循环。"""
         with self._lock:

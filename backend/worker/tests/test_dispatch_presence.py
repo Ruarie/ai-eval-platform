@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from app.dispatch_presence import claim_allowed, take_idle_restart, write_presence
+from app.dispatch_presence import Presence, claim_allowed, take_idle_restart, write_presence
 from app.models import DispatchWorker
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -78,4 +78,18 @@ def test_restarting_stops_claims_until_acknowledged(tmp_path, monkeypatch):
         assert row.state == "idle"
         assert row.current_task_id is None
     assert take_idle_restart("worker-1") is False
+
+    # 主循环持有 Presence 实例；实例方法必须与模块函数同语义，否则 worker 永不领任务。
+    monkeypatch.setenv("WORKER_NODE_ID", "worker-1")
+    presence = Presence()
+    with factory() as db:
+        row = db.query(DispatchWorker).one()
+        row.state = "restarting"
+        db.commit()
+    assert presence.take_idle_restart() is True
+    with factory() as db:
+        row = db.query(DispatchWorker).one()
+        assert row.state == "idle"
+        assert row.current_task_id is None
+    assert presence.take_idle_restart() is False
     engine.dispose()

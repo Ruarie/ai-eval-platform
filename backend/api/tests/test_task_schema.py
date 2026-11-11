@@ -8,6 +8,21 @@ from app.harness.orchestration.confirm import _validate_confirmed
 from app.schemas import TaskCreate
 
 
+def test_task_out_lifts_case_set_id_from_result_snapshot():
+    """列表/详情把 result.case_set_id 提升为顶层字段，Agent 工具不必再解包。"""
+    from app.models import Task
+    from app.routers.tasks import _task_out
+
+    task = Task(
+        id="task-1", kind="testcase", status="succeeded", created_by="user-1",
+        config={}, progress={}, result={"case_set_id": "case-set-1"},
+    )
+
+    payload = _task_out(task)
+
+    assert payload["case_set_id"] == "case-set-1"
+
+
 def test_task_create_accepts_frontend_config_wrapper():
     """已完成前端的 config 包装仍应转换为冻结的 TaskSpec 快照。"""
     task = TaskCreate.model_validate(

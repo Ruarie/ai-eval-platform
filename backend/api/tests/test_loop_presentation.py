@@ -78,6 +78,26 @@ def test_media_display_accepts_agent_wire_names():
     assert '"upstream_task_id": "task-1"' in call["arguments_preview"]
 
 
+def test_platform_read_tools_project_arguments_and_results():
+    """平台只读工具经 platform_ wire 名调用时也要有参数与结果预览，不能只是空卡片。"""
+    call = tool_display({"name": "platform_kb_list", "args": {}})
+    assert call["registry_name"] == "kb.list"
+    assert "unavailable_reason" not in call
+    assert "arguments_preview" in call
+
+    listed = tool_display({"name": "platform_task_list", "args": {"status": "succeeded", "limit": 5}})
+    assert listed["registry_name"] == "task.list"
+    assert '"status": "succeeded"' in listed["arguments_preview"]
+
+    result = tool_display({
+        "name": "platform_kb_list",
+        "status": "succeeded",
+        "content": "默认知识库 60 篇",
+    }, result=True)
+    assert result["registry_name"] == "kb.list"
+    assert result["result_preview"] == "默认知识库 60 篇"
+
+
 def test_task_display_accepts_agent_wire_registry_and_mcp_names():
     """三种已登记任务名称都投影同一安全字段集合，避免卡片因名称差异失去参数。"""
     names = (

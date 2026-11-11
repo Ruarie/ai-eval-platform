@@ -1,10 +1,11 @@
 """前端展示投影：只读真实请求和登记工具，不开放内部执行配置。"""
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import replace
 
-from app.harness.execution.task_contract import canonical_task_tool_name
+from app.harness.execution.task_contract import canonical_task_tool_name, task_tool_aliases
 from app.harness.security.loop_redaction import redact_for_transport
 from app.llm.loop_contracts import LlmRequestError
 from app.llm.resolver import resolve_request
@@ -12,6 +13,7 @@ from app.llm.resolver import resolve_request
 # 字段名来自平台工具 codec；不把任意参数透传到普通会话。
 TOOL_FIELDS = {
     "read": "path file_path offset next_offset limit",
+    "read_image": "path file_path",
     "write": "path file_path content",
     "edit": "path file_path old new old_string new_string",
     "bash": "command timeout timeout_ms",
@@ -22,6 +24,10 @@ TOOL_FIELDS = {
     "task.create": "kind",
     "task.status": "task_id",
     "task.cancel": "task_id",
+    # 平台只读工具没有敏感参数；登记后卡片才能展示参数与结果预览。
+    "kb.list": "",
+    "task.list": "kind status limit offset",
+    "history.read": "turn_id from_seq limit",
     # 媒体提示词与参考图可能包含用户隐私；卡片只展示非敏感生成参数。
     "image.generate": "size count prompt_extend",
     "video.create": "resolution duration watermark",
@@ -42,10 +48,27 @@ _MODEL_WIRE_ALIASES = {
 }
 
 
+def _wire_variants(registry_name: str) -> tuple[str, ...]:
+    """注册表短名对应的模型可见名：原名、``platform_`` 前缀名与任务工具别名。
+
+    与 ``PlatformToolBridge`` 的 wire 生成规则保持一致，供展示层反查短名。
+    """
+    prefixed = registry_name if re.fullmatch(r"[A-Za-z0-9_]+", registry_name) else (
+        "platform_" + re.sub(r"[^A-Za-z0-9_]", "_", registry_name)
+    )
+    return tuple(dict.fromkeys((registry_name, prefixed, *task_tool_aliases(registry_name))))
+
+
+_REGISTRY_BY_WIRE: dict[str, str] = {}
+for _registry_name in TOOL_FIELDS:
+    for _wire in _wire_variants(_registry_name):
+        _REGISTRY_BY_WIRE.setdefault(_wire, _registry_name)
+
+
 def _canonical_display_name(wire: str) -> str:
     """把模型可见名归一为注册表短名；未知名称保持原样。"""
     name = canonical_task_tool_name(wire)
-    return _MODEL_WIRE_ALIASES.get(name, name)
+    return _MODEL_WIRE_ALIASES.get(name) or _REGISTRY_BY_WIRE.get(name, name)
 
 
 def _task_display(source: Mapping[str, object], *, result: bool) -> dict[str, object] | None:
