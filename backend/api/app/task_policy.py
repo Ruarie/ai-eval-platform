@@ -66,7 +66,18 @@ def enforce_task_quota(db: Session, user_id: str, kind: str) -> None:
     db.query(User).filter(User.id == user_id).with_for_update(key_share=True).first()
     if count_active_tasks(db, user_id=user_id) < settings.max_active_tasks_per_user:
         return
+    # 配额把 awaiting_case_confirm 也算作活动任务（草稿占着确认位）；这类占满时
+    # 「等待任务结束」的提示是误导，用户实际需要去用例页确认或取消草稿。
+    pending_drafts = (
+        db.query(Task)
+        .filter(Task.created_by == user_id, Task.status == "awaiting_case_confirm")
+        .count()
+    )
+    message = (
+        "达到个人任务配额上限：已有待确认的用例草稿，请先在用例页确认或取消"
+        if pending_drafts >= settings.max_active_tasks_per_user
+        else "达到个人任务配额上限，请等待现有任务结束后再发起"
+    )
     db.add(AuditLog(user_id=user_id, action="task_quota_rejected", target_type="user",
                     target_id=user_id, detail={"kind": kind, "limit": settings.max_active_tasks_per_user}))
-    raise AppError(ErrorCode.CONCURRENCY, "达到个人任务配额上限，请等待现有任务结束后再发起",
-                   fields={"task_quota_rejected": True})
+    raise AppError(ErrorCode.CONCURRENCY, message, fields={"task_quota_rejected": True})

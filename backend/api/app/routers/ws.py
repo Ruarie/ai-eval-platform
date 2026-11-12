@@ -32,6 +32,7 @@ from ..agent.graph import (
     router_audit_from_update,
 )
 from ..agent.log import agent_trace
+from ..agent.pending_cards import card_meta, lock_idle_session, store_card
 from ..agent.title import generate_title_text
 from ..agent_prompt_settings import get_agent_prompt_overlay
 from ..config import settings
@@ -1446,24 +1447,14 @@ def _card_meta(
     *,
     resume_nonce: str | None = None,
 ) -> dict[str, Any]:
-    """H5 恢复协议元数据（写入卡 JSONB ``meta`` 键；task 确认/工具审批共用）。
-
-    字段：schema_version / confirm_type / thread_id / owner_id /
-    created_at；工具审批卡另带一次性 resume_nonce（恢复图检查点用，
-    消费即失效——并发/重复恢复由行锁 + 清卡保证至多一次）。
-    """
-    from datetime import datetime
-
-    meta: dict[str, Any] = {
-        "schema_version": _CONFIRM_SCHEMA_VERSION,
-        "confirm_type": confirm_type,
-        "thread_id": thread_id or "",
-        "owner_id": owner_id,
-        "created_at": datetime.now(UTC).isoformat(),
-    }
-    if resume_nonce:
-        meta["resume_nonce"] = resume_nonce
-    return meta
+    """H5 恢复协议元数据；实际构造在 :mod:`app.agent.pending_cards`。"""
+    return card_meta(
+        schema_version=_CONFIRM_SCHEMA_VERSION,
+        owner_id=owner_id,
+        thread_id=thread_id,
+        confirm_type=confirm_type,
+        resume_nonce=resume_nonce,
+    )
 
 
 def _persist_pending_confirm(
@@ -1474,33 +1465,24 @@ def _persist_pending_confirm(
     thread_id: str | None = None,
     user_id: str | None = None,
 ) -> None:
-    """把确认卡 TaskSpec 写入 sessions.pending_confirm（行锁），供 confirm_ack 二次校验。
+    """把确认卡 TaskSpec 写入 sessions.pending_confirm，供 confirm_ack 二次校验。
 
-    ``confirm_author`` 只作归属元数据，不进入卡标 JSON（前端提交 patch 须剥离）。
-    H5：卡 JSONB 附 ``meta`` 恢复协议元数据（schema_version/confirm_type/
-    thread_id/created_at）；会话已有待处理卡（确认/审批任意种类）→
-    CONCURRENCY，绝不覆盖（团队协作不得抢占）。
+    ``confirm_author`` 只作归属元数据，不进入卡标 JSON（前端提交 patch 须剥离）；
+    会话已有待处理卡（确认/审批/澄清任意种类）→ CONCURRENCY，绝不覆盖。
     """
     spec = dict(payload)
     author = spec.pop("confirm_author", None)
     author_id = author.get("id") if isinstance(author, dict) else None
-    session = (
-        db.query(AgentSession)
-        .filter(AgentSession.id == session_id)
-        .with_for_update()
-        .first()
-    )
-    if not session:
-        raise AppError(ErrorCode.NOT_FOUND, "会话不存在")
-    if session.pending_confirm is not None:
-        raise AppError(ErrorCode.CONCURRENCY, "会话存在待处理任务卡，请先确认或取消")
+    session = lock_idle_session(db, session_id)
     owner_id = str(author_id or user_id or session.user_id or "")
-    spec["meta"] = _card_meta(
-        owner_id, thread_id, "task_confirm", resume_nonce=None
+    store_card(
+        db,
+        session,
+        kind="task_confirm",
+        payload=spec,
+        meta=_card_meta(owner_id, thread_id, "task_confirm", resume_nonce=None),
+        author_id=owner_id,
     )
-    session.pending_confirm = spec
-    session.pending_confirm_author_id = owner_id
-    db.commit()
 
 
 def _persist_pending_approval(
@@ -1514,35 +1496,17 @@ def _persist_pending_approval(
     """工具审批卡落库（H5 HITL：图 interrupt 后由 ws 层落卡，等待 resume）。
 
     卡 JSONB：``meta``（confirm_type=tool_approval + 一次性 resume_nonce）+
-    ``approval`` 字段白名单（id/call_id/name/command/reason/risk_level）。
-    行锁：已有任何待处理卡 → CONCURRENCY。返回卡 dict（含 meta）。
+    白名单字段（见 ``pending_cards.CARD_FIELDS``）。
     """
-    from uuid import uuid4
-
-    session = (
-        db.query(AgentSession)
-        .filter(AgentSession.id == session_id)
-        .with_for_update()
-        .first()
+    session = lock_idle_session(db, session_id)
+    return store_card(
+        db,
+        session,
+        kind="tool_approval",
+        payload=approval,
+        meta=_card_meta(user_id, thread_id, "tool_approval", resume_nonce=uuid4().hex),
+        author_id=user_id,
     )
-    if not session:
-        raise AppError(ErrorCode.NOT_FOUND, "会话不存在")
-    if session.pending_confirm is not None:
-        raise AppError(ErrorCode.CONCURRENCY, "会话存在待处理任务卡，请先确认或取消")
-    allowed = {"id", "call_id", "name", "command", "reason", "risk_level", "sandbox_scope"}
-    card = {
-        key: value for key, value in approval.items() if key in allowed
-    }
-    card["meta"] = _card_meta(
-        user_id,
-        thread_id,
-        "tool_approval",
-        resume_nonce=uuid4().hex,
-    )
-    session.pending_confirm = card
-    session.pending_confirm_author_id = user_id
-    db.commit()
-    return card
 
 
 def _persist_pending_clarify(
@@ -1560,20 +1524,10 @@ def _persist_pending_clarify(
     归一后的 ≤8 题三题型结构，ws 层做轻量 sanity 校验）。行锁：已有任何
     待处理卡 → CONCURRENCY。返回卡 dict（含 meta）。
     """
-    session = (
-        db.query(AgentSession)
-        .filter(AgentSession.id == session_id)
-        .with_for_update()
-        .first()
-    )
-    if not session:
-        raise AppError(ErrorCode.NOT_FOUND, "会话不存在")
-    if session.pending_confirm is not None:
-        raise AppError(ErrorCode.CONCURRENCY, "会话存在待处理任务卡，请先确认或取消")
-    allowed = {"id", "questions"}
-    card = {key: value for key, value in clarify.items() if key in allowed}
-    questions = card.get("questions")
-    if not isinstance(card.get("id"), str) or not card["id"]:
+    session = lock_idle_session(db, session_id)
+    payload = {key: value for key, value in clarify.items() if key in {"id", "questions"}}
+    questions = payload.get("questions")
+    if not isinstance(payload.get("id"), str) or not payload["id"]:
         raise AppError(ErrorCode.VALIDATION, "澄清问题缺少卡标识")
     if not isinstance(questions, list) or not questions or len(questions) > 8:
         raise AppError(ErrorCode.VALIDATION, "澄清问题数量必须为 1–8 个")
@@ -1582,16 +1536,14 @@ def _persist_pending_clarify(
             raise AppError(ErrorCode.VALIDATION, f"第 {index} 个澄清问题格式无效")
         if not isinstance(item.get("id"), str) or not str(item.get("question") or "").strip():
             raise AppError(ErrorCode.VALIDATION, f"第 {index} 个澄清问题缺少 id 或 question")
-    card["meta"] = _card_meta(
-        user_id,
-        thread_id,
-        "clarify",
-        resume_nonce=uuid4().hex,
+    return store_card(
+        db,
+        session,
+        kind="clarify",
+        payload=payload,
+        meta=_card_meta(user_id, thread_id, "clarify", resume_nonce=uuid4().hex),
+        author_id=user_id,
     )
-    session.pending_confirm = card
-    session.pending_confirm_author_id = user_id
-    db.commit()
-    return card
 
 
 def _clear_pending_confirm(db: Session, session_id: str) -> None:

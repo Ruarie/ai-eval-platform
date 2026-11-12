@@ -166,3 +166,21 @@ def test_agent_preparation_rejects_retired_kind_before_asset_checks(task_db, kin
                              SimpleNamespace(session_id="session", user_id="owner"))
     assert error.value.code == ErrorCode.VALIDATION
     assert task_db.query(Task).count() == 0
+
+
+def test_quota_message_points_to_pending_drafts(task_db, monkeypatch):
+    """配额被待确认草稿占满时，提示去用例页确认/取消，而不是等待任务结束。"""
+    from app.task_policy import enforce_task_quota
+
+    monkeypatch.setattr(settings, "max_active_tasks_per_user", 1)
+    task_db.add(Task(
+        id="draft-1", kind="testcase", status="awaiting_case_confirm",
+        created_by="owner", config={}, progress={}, result={},
+    ))
+    task_db.commit()
+
+    with pytest.raises(AppError) as error:
+        enforce_task_quota(task_db, "owner", "testcase")
+
+    assert error.value.code == ErrorCode.CONCURRENCY
+    assert "确认或取消" in error.value.message

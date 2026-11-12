@@ -1755,19 +1755,23 @@ onMounted(async () => {
   window.addEventListener('resize', syncWrapSize)
   window.addEventListener('keydown', onKeydown)
   syncWrapSize()
-  // 甘特时间游标：运行中条形每秒延展
-  nowTimer = window.setInterval(() => { nowTs.value = Date.now() }, 1000)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  // 甘特时间游标：运行中条形每秒延展；后台标签页不必刷新
+  nowTimer = window.setInterval(() => {
+    if (document.hidden) return
+    nowTs.value = Date.now()
+  }, 1000)
   if (liveMode) {
     // 真实模式：首屏全量加载后按 3s 节拍轮询事件，6s 全量刷新，不启动本地仿真
     await loadLiveAll()
     await pollLiveEvents()
     handleRouteTaskFocus()
-    pollTimer = window.setInterval(liveTick, 3000)
+    pollTimer = window.setInterval(() => { if (!document.hidden) void liveTick() }, 3000)
     return
   }
   handleRouteTaskFocus()
   timer = setInterval(() => {
-    if (!isRunning.value) return
+    if (document.hidden || !isRunning.value) return
     // 随机微调负载
     workerPool.value.forEach(w => {
       if (w.state === 'busy') {
@@ -1776,8 +1780,18 @@ onMounted(async () => {
     })
   }, 2000)
 
-  dispatchTimer = setInterval(dispatchTick, 2600)
+  dispatchTimer = setInterval(() => { if (!document.hidden) dispatchTick() }, 2600)
 })
+
+/**
+ * 后台标签页暂停轮询：调度页有 1s/2s/2.6s/3s 多路定时器，切到后台仍全速打接口
+ * 会白白占用连接与服务端资源。回到前台立即补一轮，避免数据停留在旧值。
+ */
+function onVisibilityChange() {
+  if (document.hidden) return
+  nowTs.value = Date.now()
+  if (liveMode) void liveTick()
+}
 
 // 监听路由参数变化（如由任务中心跳转过来时）
 watch(() => route.query.task_id || route.query.highlight_task, () => {
@@ -1785,6 +1799,7 @@ watch(() => route.query.task_id || route.query.highlight_task, () => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   if (timer) clearInterval(timer)
   if (dispatchTimer) clearInterval(dispatchTimer)
   if (nowTimer) clearInterval(nowTimer)
