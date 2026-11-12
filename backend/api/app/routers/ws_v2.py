@@ -436,9 +436,13 @@ class WsV2Connection:
                 return
             cursor = after_cursor
             replay = True
+            # 空闲退避：没有新事实时逐次拉长间隔（上限 10×），有事实立即回到基频。
+            # 每连接固定 100ms 轮询在几十条并发会话下就是几百 QPS 的无谓读。
+            interval = self.poll_interval
             while True:
                 access = await self.service.authorize(self.actor_id, sid)
                 rows = await self.service.read_stream(sid, cursor, self.page_size)
+                activity = bool(rows)
                 for row in rows:
                     number = row.get("cursor")
                     if (
@@ -470,6 +474,7 @@ class WsV2Connection:
                     raise AppError(ErrorCode.INTERNAL, "快照前缀缺失")
                 if self.trace_enabled and access.trace:
                     facts = await self.service.read_trace(sid, self.trace_seq, self.page_size)
+                    activity = activity or bool(facts)
                     for event in facts:
                         if type(event.get("seq")) is not int or event["seq"] <= self.trace_seq:
                             continue
@@ -482,7 +487,12 @@ class WsV2Connection:
                 elif not access.trace:
                     self.trace_enabled = False
                 # 读取有限页后让出调度，避免快读空转饿死接收/发送任务。
-                await asyncio.sleep(self.poll_interval)
+                interval = (
+                    self.poll_interval
+                    if activity
+                    else min(self.poll_interval * 10, interval * 1.5)
+                )
+                await asyncio.sleep(interval)
         except asyncio.CancelledError:
             raise
         except AppError as exc:
