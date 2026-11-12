@@ -136,6 +136,9 @@ _STRATEGY_NAMES = {
 }
 # 候选生成的模型调用超时：与 Worker 用例生成预算（280s）对齐，
 # 否则同为 80 条 / 16384 tokens 的请求在向导路径更容易被 120s 默认值掐断。
+# 未传分页时的返回上限：列表页按需全量拉取，行数无界增长会拖慢首屏并放大内存。
+MAX_LIST_ROWS = 500
+
 GENERATION_TIMEOUT_S = 280.0
 # 需求覆盖复审是独立轻量请求（输入是清单而非全量需求生成），预算单独一档。
 COVERAGE_TIMEOUT_S = 120.0
@@ -424,8 +427,13 @@ def list_case_sets(
     if page is not None and page_size is not None:
         rows = query.offset((page - 1) * page_size).limit(page_size).all()
     else:
-        rows = query.all()
-    return {"items": [CaseSetOut.model_validate(row) for row in rows], "total": total}
+        rows = query.limit(MAX_LIST_ROWS).all()
+    return {
+        "items": [CaseSetOut.model_validate(row) for row in rows],
+        "total": total,
+        # 未分页且行数超过上限时明确告知，前端据此提示改用分页参数。
+        "truncated": total > len(rows),
+    }
 
 
 @router.post("", response_model=CaseSetOut, status_code=201)
