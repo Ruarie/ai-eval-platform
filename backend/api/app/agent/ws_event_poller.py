@@ -97,6 +97,7 @@ class WsEventPoller:
             logger.warning("WS 事件轮询初始化游标失败，从 0 开始", exc_info=True)
             self._cursor = 0
         self._task = asyncio.create_task(self._run(), name="ws-event-poller")
+        logger.info("WS 事件轮询已启动 cursor=%s", self._cursor)
 
     async def close(self) -> None:
         if self._task is None:
@@ -109,6 +110,10 @@ class WsEventPoller:
     async def _run(self) -> None:
         while True:
             await asyncio.sleep(POLL_INTERVAL_S)
+            # 没有任何在线连接时不查库：v1 是历史协议，新会话都走 v2，
+            # 空跑轮询只会给数据库增加无意义负载。
+            if not SESSION_CONNECTION_HUB.has_connections():
+                continue
             try:
                 rows = await asyncio.to_thread(_fetch, self._cursor)
             except Exception:  # noqa: BLE001 - 单轮查询失败不应终止轮询
@@ -116,6 +121,7 @@ class WsEventPoller:
                 continue
             if not rows:
                 continue
+            logger.info("WS 事件轮询取到 %d 条 cursor=%s", len(rows), self._cursor)
             self._cursor = max(self._cursor, rows[-1]["row_id"])
             for row in rows:
                 try:

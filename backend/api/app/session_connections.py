@@ -55,6 +55,10 @@ class SessionConnectionHub:
             ready=ready,
         )
 
+    def has_connections(self) -> bool:
+        """是否有任何在线连接；后台广播任务据此跳过空转查询。"""
+        return bool(self._connections)
+
     def unregister(self, session_id: str, connection_id: str) -> None:
         """按唯一连接 ID 注销，避免旧连接清掉同会话的新重连。"""
         rows = self._connections.get(session_id)
