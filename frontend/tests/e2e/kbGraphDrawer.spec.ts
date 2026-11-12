@@ -117,3 +117,43 @@ test('节点过多时按关联度截断提示可见', async ({ page }) => {
 
   await expect(page.getByText('已按关联度截断，仅展示最强的一批')).toBeVisible()
 })
+
+test('图谱工作台支持搜索定位、标签开关与全屏浏览', async ({ page }) => {
+  await setupKb(page, route => route.fulfill({ json: GRAPH }))
+  await page.getByRole('button', { name: '知识图谱' }).click()
+  await expect(page.locator('svg.graph-canvas .graph-node')).toHaveCount(3)
+
+  // 搜索命中后点击即选中并把视图居中，侧栏显示该实体详情。
+  await page.getByPlaceholder('搜索实体名称…').fill('退款')
+  await expect(page.locator('.graph-search-hit')).toHaveCount(1)
+  await page.locator('.graph-search-hit').click()
+  await expect(page.locator('.side-title')).toHaveText('退款申请')
+
+  // 关系标签默认开启（选中实体后标注关系文字），关闭后不再渲染。
+  await expect(page.locator('.graph-edge-label').first()).toBeVisible()
+  await page.getByRole('button', { name: '关系标签' }).click()
+  await expect(page.locator('.graph-edge-label')).toHaveCount(0)
+  await page.getByRole('button', { name: '关系标签' }).click()
+
+  // 节点标签开关。
+  await expect(page.locator('.graph-label').first()).toBeVisible()
+  await page.getByRole('button', { name: '节点标签' }).click()
+  await expect(page.locator('.graph-label')).toHaveCount(0)
+  await page.getByRole('button', { name: '节点标签' }).click()
+
+  // 图例可隐藏。
+  await expect(page.locator('.graph-legend')).toHaveCount(1)
+  await page.getByRole('button', { name: '图例' }).click()
+  await expect(page.locator('.graph-legend')).toHaveCount(0)
+
+  // 全屏只切换画布宽度；Esc 退出全屏但不关闭抽屉。
+  await page.getByRole('button', { name: '全屏' }).click()
+  await expect(page.getByRole('button', { name: '退出全屏' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: '全屏' })).toBeVisible()
+  await expect(page.getByText('知识图谱 · 默认知识库')).toBeVisible()
+
+  // 重排布局后节点数量不变，图仍可交互。
+  await page.getByRole('button', { name: '重排布局' }).click()
+  await expect(page.locator('svg.graph-canvas .graph-node')).toHaveCount(3)
+})

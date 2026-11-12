@@ -1,5 +1,5 @@
 <template>
-  <n-drawer :show="show" width="min(1240px, 97vw)" @update:show="emit('update:show', $event)">
+  <n-drawer :show="show" :width="fullscreen ? '100vw' : 'min(1240px, 97vw)'" @update:show="emit('update:show', $event)">
     <n-drawer-content :title="`知识图谱 · ${kbName || '当前知识库'}`" closable>
       <div v-if="loading" class="graph-state">正在读取实体关系…</div>
 
@@ -9,6 +9,7 @@
       </div>
 
       <template v-else>
+        <div class="graph-shell" :class="{ fullscreen }">
         <div class="graph-meta">
           <span class="small muted">
             {{ viewGraph?.nodes.length || 0 }} 个实体 · {{ viewGraph?.edges.length || 0 }} 条关系
@@ -18,11 +19,57 @@
               （已按关联度截断，仅展示最强的一批）
             </template>
           </span>
-          <div class="row" style="gap: 8px">
-            <span v-for="item in legend" :key="item.type" class="legend-item small">
-              <i :style="{ background: item.color }"></i>{{ item.label }}
-              <b class="legend-count">{{ item.count }}</b>
-            </span>
+          <div v-if="graph?.nodes.length" class="row graph-actions">
+            <div class="graph-search">
+              <input
+                v-model="query"
+                class="graph-search-input"
+                placeholder="搜索实体名称…"
+                aria-label="搜索实体名称"
+                @focus="searchOpen = true"
+                @keydown.enter.prevent="pickFirstMatch"
+                @keydown.esc="closeSearch"
+              />
+              <button v-if="query" class="graph-search-clear" type="button" aria-label="清空搜索" @click="closeSearch">×</button>
+              <div v-if="searchOpen && query.trim()" class="graph-search-panel">
+                <button
+                  v-for="hit in matches"
+                  :key="hit.id"
+                  type="button"
+                  class="graph-search-hit"
+                  @click="focusNode(hit.id)"
+                >
+                  <i :style="{ background: typeColor(hit.entity_type) }"></i>
+                  <span class="graph-search-hit-name">{{ hit.id }}</span>
+                  <b>{{ hit.degree }}</b>
+                </button>
+                <div v-if="!matches.length" class="graph-search-empty small tertiary">没有匹配的实体</div>
+              </div>
+            </div>
+            <button
+              class="btn btn-secondary btn-sm"
+              :class="{ 'is-on': showNodeLabels }"
+              :aria-pressed="showNodeLabels"
+              title="显示/隐藏节点名称"
+              @click="showNodeLabels = !showNodeLabels"
+            >节点标签</button>
+            <button
+              class="btn btn-secondary btn-sm"
+              :class="{ 'is-on': showEdgeLabels }"
+              :aria-pressed="showEdgeLabels"
+              title="选中实体后显示关系文字"
+              @click="showEdgeLabels = !showEdgeLabels"
+            >关系标签</button>
+            <button
+              class="btn btn-secondary btn-sm"
+              :class="{ 'is-on': showLegend }"
+              :aria-pressed="showLegend"
+              @click="showLegend = !showLegend"
+            >图例</button>
+            <button class="btn btn-secondary btn-sm" title="重新计算布局" @click="refreshLayout">重排布局</button>
+            <button class="btn btn-secondary btn-sm" @click="toggleFullscreen">
+              {{ fullscreen ? '退出全屏' : '全屏' }}
+            </button>
             <button
               v-if="graph && graph.nodes.length > VISIBLE_LIMIT"
               class="btn btn-secondary btn-sm"
@@ -33,6 +80,12 @@
             <button class="btn btn-secondary btn-sm" @click="resetView">重置视图</button>
             <button class="btn btn-secondary btn-sm" @click="load">刷新</button>
           </div>
+        </div>
+        <div v-if="showLegend && graph?.nodes.length" class="graph-legend">
+          <span v-for="item in legend" :key="item.type" class="legend-item small">
+            <i :style="{ background: item.color }"></i>{{ item.label }}
+            <b class="legend-count">{{ item.count }}</b>
+          </span>
         </div>
 
         <div v-if="!graph?.nodes.length" class="graph-state">
@@ -100,6 +153,15 @@
               >
                 <title>{{ line.description || '关系' }}</title>
               </line>
+              <!-- 关系标签：只标注选中实体的关系，且限制条数，避免上千条文字糊住画布。 -->
+              <text
+                v-for="line in edgeLabels"
+                :key="`edge-label-${line.key}`"
+                :x="(line.x1 + line.x2) / 2"
+                :y="(line.y1 + line.y2) / 2 - 4"
+                class="graph-edge-label"
+                text-anchor="middle"
+              >{{ line.label }}</text>
             </g>
             <g
               v-for="item in placed"
@@ -169,13 +231,20 @@
               </div>
               <div class="side-row" style="display: block">
                 <div class="small tertiary mb8">关系（{{ selectedRelations.length }}）</div>
-                <div v-for="(rel, index) in selectedRelations" :key="`rel-${index}`" class="rel-row">
+                <button
+                  v-for="(rel, index) in selectedRelations"
+                  :key="`rel-${index}`"
+                  type="button"
+                  class="rel-row"
+                  :title="`查看「${rel.other}」`"
+                  @click="focusNode(rel.other)"
+                >
                   <span class="rel-dir">{{ rel.dir }}</span>
                   <div class="rel-main">
                     <div class="rel-other">{{ rel.other }}</div>
                     <div v-if="rel.description" class="rel-desc">{{ rel.description }}</div>
                   </div>
-                </div>
+                </button>
                 <div v-if="!selectedRelations.length" class="small tertiary">该实体暂无关系</div>
               </div>
             </template>
@@ -198,13 +267,14 @@
             </div>
           </aside>
         </div>
+        </div>
       </template>
     </n-drawer-content>
   </n-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { api } from '../../api/http'
 import type { KbGraph, KbGraphEdge, KbGraphNode } from '../../api/types'
@@ -245,6 +315,15 @@ const graph = ref<KbGraph | null>(null)
 const loading = ref(false)
 const error = ref('')
 const selectedId = ref('')
+// 与 LightRAG WebUI 对齐的看图控制：全屏、标签/图例开关、搜索、重新布局。
+const fullscreen = ref(false)
+const showNodeLabels = ref(true)
+const showEdgeLabels = ref(true)
+const showLegend = ref(true)
+const query = ref('')
+const searchOpen = ref(false)
+// 递增后换一组初始位置重新收敛，等效 WebUI 的「刷新布局」。
+const layoutSeed = ref(0)
 
 async function load() {
   const kbId = props.kbId
@@ -317,7 +396,7 @@ function nodeRadius(degree: number, total: number) {
  * 网格分簇虽然整齐，但节点像"珠子串"、边跨簇全挤在中间；力导向更接近
  * LightRAG 的观感：同类实体自然聚成团，长尾散在外围。
  */
-function layout(nodes: KbGraphNode[], edges: KbGraphEdge[]): PlacedNode[] {
+function layout(nodes: KbGraphNode[], edges: KbGraphEdge[], seed = 0): PlacedNode[] {
   const total = nodes.length
   if (!total) return []
 
@@ -330,10 +409,10 @@ function layout(nodes: KbGraphNode[], edges: KbGraphEdge[]): PlacedNode[] {
   const vy = new Float64Array(total)
   const radius = new Float64Array(total)
 
-  // 初始位置：黄金角螺旋 + 按 id 的稳定抖动，保证每次打开布局一致。
+  // 初始位置：黄金角螺旋 + 按 id 的稳定抖动；seed 变化即换一组起点重新收敛。
   nodes.forEach((node, i) => {
-    const angle = i * 2.399963229728653
-    const spread = 26 * Math.sqrt(i + 1)
+    const angle = i * 2.399963229728653 + seed * 1.7
+    const spread = 26 * Math.sqrt(i + 1) * (1 + (seed % 5) * 0.02)
     px[i] = Math.cos(angle) * spread
     py[i] = Math.sin(angle) * spread * 0.86
     radius[i] = nodeRadius(node.degree, total)
@@ -486,7 +565,9 @@ const viewGraph = computed(() => {
   return { ...g, nodes, edges: g.edges.filter((e) => keep.has(e.source) && keep.has(e.target)) }
 })
 
-const placed = computed(() => layout(viewGraph.value?.nodes ?? [], viewGraph.value?.edges ?? []))
+const placed = computed(() =>
+  layout(viewGraph.value?.nodes ?? [], viewGraph.value?.edges ?? [], layoutSeed.value),
+)
 
 const positions = computed(() => new Map(placed.value.map((item) => [item.node.id, item])))
 /** 基础关系：按权重平方根分三档合并成 path（参考 LightRAG 的边宽策略）。 */
@@ -528,6 +609,20 @@ const highlightEdges = computed(() => {
   return lines
 })
 
+/** 关系标签：只给选中实体的前 24 条关系加文字，避免大图变成文字墙。 */
+const edgeLabels = computed(() => {
+  if (!showEdgeLabels.value) return []
+  return highlightEdges.value
+    .filter((line) => (line.description || '').trim())
+    .slice(0, 24)
+    .map((line) => ({ ...line, label: shortEdgeLabel(line.description) }))
+})
+
+function shortEdgeLabel(text: string) {
+  const value = (text || '').trim()
+  return value.length > 10 ? `${value.slice(0, 9)}…` : value
+}
+
 const selected = computed(() => (viewGraph.value?.nodes ?? []).find((node) => node.id === selectedId.value) ?? null)
 
 const selectedRelations = computed(() => {
@@ -549,6 +644,69 @@ const topNodes = computed(() =>
     .sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
     .slice(0, 6),
 )
+
+// ─── 搜索与视图控制（对齐 LightRAG WebUI 的图谱工作台）───────────────
+const matches = computed(() => {
+  const keyword = query.value.trim().toLowerCase()
+  if (!keyword) return []
+  return [...(viewGraph.value?.nodes ?? [])]
+    .filter((node) => node.id.toLowerCase().includes(keyword))
+    .sort((a, b) => b.degree - a.degree || a.id.localeCompare(b.id))
+    .slice(0, 8)
+})
+
+/** 选中实体并把视图居中到它（放大到至少 1.4 倍，小节点也能看清）。 */
+function focusNode(nodeId: string) {
+  if (!positions.value.has(nodeId)) return
+  selectedId.value = nodeId
+  closeSearch()
+  centerOn(nodeId)
+}
+
+function centerOn(nodeId: string) {
+  const point = positions.value.get(nodeId)
+  if (!point) return
+  const scale = Math.max(view.value.scale, 1.4)
+  scheduleView({
+    scale,
+    x: CANVAS_WIDTH / 2 - point.x * scale,
+    y: CANVAS_HEIGHT / 2 - point.y * scale,
+  })
+}
+
+function pickFirstMatch() {
+  const first = matches.value[0]
+  if (first) focusNode(first.id)
+}
+
+function closeSearch() {
+  query.value = ''
+  searchOpen.value = false
+}
+
+function refreshLayout() {
+  layoutSeed.value += 1
+  selectedId.value = ''
+  resetView()
+}
+
+function toggleFullscreen() {
+  fullscreen.value = !fullscreen.value
+}
+
+/**
+ * 全屏下按 Esc 只退出全屏，不关闭整个抽屉。
+ * 用捕获阶段拦截，保证早于 Naive 抽屉自身的 Esc 关闭监听。
+ */
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && fullscreen.value) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    fullscreen.value = false
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown, { capture: true }))
 
 const hoverId = ref('')
 /** 悬停优先于选中：LightRAG 是 hover 即聚焦、点击才持久选中。 */
@@ -676,6 +834,7 @@ function onPointerUp() {
 
 // 抽屉关闭/组件销毁时释放捕获并取消待执行的视图帧
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown, { capture: true })
   releasePointerCapture()
   if (frame) cancelAnimationFrame(frame)
   frame = 0
@@ -706,7 +865,7 @@ const labelIds = computed(() => {
 })
 
 function showLabel(node: KbGraphNode) {
-  return labelIds.value.has(node.id)
+  return showNodeLabels.value && labelIds.value.has(node.id)
 }
 
 /** 长实体名截断显示，完整名称在右侧详情里看。 */
@@ -902,8 +1061,19 @@ function docName(docId: string) {
 .rel-row {
   display: flex;
   gap: 6px;
-  padding: 6px 0;
+  width: 100%;
+  padding: 6px 4px;
+  border: 0;
   border-top: 1px dashed var(--border, #eef1f5);
+  border-radius: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rel-row:hover {
+  background: var(--fill-hover, #f6f8fc);
 }
 
 .rel-dir {
@@ -988,5 +1158,134 @@ function docName(docId: string) {
 
 .side-hint {
   line-height: 1.7;
+}
+
+/* ─── 图谱工作台工具条：搜索、显示开关、全屏 ─── */
+.graph-actions {
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.graph-actions .btn.is-on {
+  border-color: var(--primary, #4a7dfc);
+  color: var(--primary, #4a7dfc);
+  background: var(--primary-weak, rgba(74, 125, 252, 0.1));
+}
+
+.graph-search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.graph-search-input {
+  width: 176px;
+  height: 28px;
+  padding: 0 24px 0 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 12.5px;
+  background: #fff;
+  color: var(--text-primary, #1f2430);
+}
+
+.graph-search-input:focus {
+  outline: none;
+  border-color: var(--primary, #4a7dfc);
+}
+
+.graph-search-clear {
+  position: absolute;
+  right: 6px;
+  border: 0;
+  background: none;
+  color: var(--text-quaternary, #9aa3b2);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.graph-search-panel {
+  position: absolute;
+  z-index: 20;
+  top: 32px;
+  left: 0;
+  width: 260px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(31, 41, 55, 0.12);
+}
+
+.graph-search-hit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.graph-search-hit:hover {
+  background: var(--fill-hover, #f6f8fc);
+}
+
+.graph-search-hit i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.graph-search-hit-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--text-primary, #1f2430);
+}
+
+.graph-search-hit b {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-quaternary, #9aa3b2);
+}
+
+.graph-search-empty {
+  padding: 8px;
+}
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: -2px 0 10px;
+}
+
+.graph-edge-label {
+  font-size: 8.5px;
+  fill: #4a7dfc;
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 2.4px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* 全屏：抽屉已占满视口，画布高度按视口重算，避免留大片空白。 */
+.graph-shell.fullscreen .graph-canvas {
+  max-height: calc(100vh - 190px);
 }
 </style>
