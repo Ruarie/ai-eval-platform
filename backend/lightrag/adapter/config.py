@@ -70,6 +70,8 @@ class EngineConfig:
     max_chunks_per_doc: int
     # 待索引队列上限：每篇排队文档的正文都驻留内存，无上限会在连续上传时 OOM。
     max_queue_documents: int
+    # 队列正文总字符上限：单篇可达 2400 万字符，只按篇数限制仍可能吃满内存。
+    max_queue_characters: int
     # 停机时等待在建索引任务收尾的宽限期：直接取消会把 doc_status 留在 processing。
     shutdown_grace_s: float
     workspace: str
@@ -130,6 +132,8 @@ def load_config() -> EngineConfig:
         max_parallel_insert=_env_int("LIGHTRAG_MAX_PARALLEL_INSERT", 1),
         max_chunks_per_doc=_env_int("LIGHTRAG_MAX_CHUNKS_PER_DOC", 3),
         max_queue_documents=_env_int("LIGHTRAG_MAX_QUEUE_DOCUMENTS", 64),
+        # 64 篇 × 单篇 2400 万字符最坏是 GB 级常驻；按总字符数再兜一层底。
+        max_queue_characters=_env_int("LIGHTRAG_MAX_QUEUE_CHARACTERS", 8_000_000),
         shutdown_grace_s=_env_float("LIGHTRAG_SHUTDOWN_GRACE_SECONDS", 30.0),
         workspace=_env_str("LIGHTRAG_WORKSPACE", "aieval"),
     )

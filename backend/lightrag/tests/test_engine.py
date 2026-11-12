@@ -101,6 +101,27 @@ def _engine(**overrides) -> LightRAGEngine:
     return LightRAGEngine(config)
 
 
+def test_queue_limit_rejects_overflow_by_total_characters():
+    """只按篇数限制挡不住单篇超长文档：队列正文总字符超限同样拒绝。"""
+
+    async def case() -> None:
+        engine = _engine(max_queue_documents=8, max_queue_characters=10)
+        engine._rag = FakeRag(block=True)
+        await engine.index_document("kb-1", "doc-a", "a.txt", "x" * 8)
+        await asyncio.sleep(0.01)
+        assert engine._queued_chars == 8
+
+        with pytest.raises(EngineBusy):
+            await engine.index_document("kb-1", "doc-b", "b.txt", "y" * 4)
+
+        engine._rag.release.set()
+        await asyncio.sleep(0.05)
+        assert engine._queued_chars == 0
+        await engine.stop()
+
+    asyncio.run(case())
+
+
 def test_queue_limit_rejects_overflow():
     """队列已满时返回 EngineBusy，接口层据此转 429，而不是继续占内存。"""
 

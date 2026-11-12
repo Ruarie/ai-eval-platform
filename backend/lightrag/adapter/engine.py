@@ -184,6 +184,8 @@ class LightRAGEngine:
         self._mutations = _MutationGate()
         # 已受理但尚未写入 doc_status 的文档，用于「受理后立刻查询」的状态兜底。
         self._queued: set[str] = set()
+        # 队列正文总字符数：只按篇数限制仍可能被单篇超长文档撑爆内存。
+        self._queued_chars = 0
         # 后台任务引用集合，防止任务被 GC 提前回收。
         self._tasks: set[asyncio.Task] = set()
         # 受理即失败（连入队都没成功）的文档，避免状态永远停在 indexing；
@@ -355,11 +357,19 @@ class LightRAGEngine:
         limit = max(1, self.config.max_queue_documents)
         if len(self._queued) >= limit:
             raise EngineBusy(f"索引队列已满（{limit}），请稍后重试")
+        # 队列正文总字符上限：单篇允许 2400 万字符，只限篇数挡不住内存峰值。
+        char_limit = max(1, self.config.max_queue_characters)
+        pending_chars = self._queued_chars + len(text)
+        if pending_chars > char_limit:
+            raise EngineBusy(
+                f"索引队列正文超出上限（{char_limit} 字符），请稍后重试"
+            )
 
         file_source = build_file_source(kb_id, doc_id, filename)
         text = await self._avoid_cross_kb_duplicate(rag, kb_id, doc_id, text)
         enqueued_at = time.time()
         self._queued.add(doc_id)
+        self._queued_chars += len(text)
         self._failed.pop(doc_id, None)
         self._stale_since.pop(doc_id, None)
 
@@ -389,6 +399,7 @@ class LightRAGEngine:
                 )
             finally:
                 self._queued.discard(doc_id)
+                self._queued_chars -= len(text)
 
         task = asyncio.create_task(_worker())
         self._tasks.add(task)
@@ -679,6 +690,7 @@ class LightRAGEngine:
             "embedding_dim": self.config.embedding_dim,
             "chunk_token_size": self.config.chunk_token_size,
             "queued_documents": len(self._queued),
+            "queued_characters": self._queued_chars,
         }
         if not self.config.ready:
             snapshot["missing"] = self.config.missing
