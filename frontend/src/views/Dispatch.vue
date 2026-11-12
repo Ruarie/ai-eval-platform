@@ -581,6 +581,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import KindTag from '../components/common/KindTag.vue'
 import { api } from '../api/http'
+import { polarPoint, wedgePath as buildWedge, truncate, workerLane as workerLaneOf } from '../utils/dispatchLayout'
 import DispatchKpiBand from '../components/dispatch/DispatchKpiBand.vue'
 import type { DispatchOverview, DispatchWorker, Task, TaskKind, TaskStatus } from '../api/types'
 
@@ -795,23 +796,19 @@ const SKILL_DEFS = [
   { kind: 'testcase' as TaskKind, name: 'Testcase', fullName: '用例生成', icon: '🧩', color: 'var(--c-cases)', angle: 180, desc: 'PRD/OpenAPI · 6 大策略配比' },
 ]
 
-/** 极坐标 → 星图直角坐标（角度单位：度，0° 正右，90° 正下） */
+/** 星图极坐标：画布中心与半径由页面常量决定，换算逻辑在 utils/dispatchLayout。 */
 function polar(angleDeg: number, r: number): { x: number; y: number } {
-  const a = (angleDeg * Math.PI) / 180
-  return { x: CX + r * Math.cos(a), y: CY + r * Math.sin(a) }
+  return polarPoint(CX, CY, angleDeg, r)
 }
 
-/** 业务扇区底色楔块路径：从内核出发的扇形（跨度 ±spread） */
+/** 业务扇区底色楔块路径（跨度 ±spread）。 */
 function wedgePath(angle: number, spread: number, r: number): string {
-  const p1 = polar(angle - spread, r)
-  const p2 = polar(angle + spread, r)
-  return `M ${CX} ${CY} L ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} A ${r} ${r} 0 0 1 ${p2.x.toFixed(1)} ${p2.y.toFixed(1)} Z`
+  return buildWedge(CX, CY, angle, spread, r)
 }
 
-/** Worker 归属业务扇区：取能力标签中首个匹配的技能域，无匹配进通用扇区 */
+/** Worker 归属业务扇区：取能力标签中首个匹配的技能域，无匹配进通用扇区。 */
 function workerLane(w: WorkerNode): TaskKind | 'general' {
-  const lane = SKILL_DEFS.find(l => w.caps.includes(l.kind))
-  return lane ? lane.kind : 'general'
+  return workerLaneOf(w.caps, SKILL_DEFS.map(l => l.kind as string)) as TaskKind | 'general'
 }
 
 /** 业务标识色（工单芯片左侧色条） */
@@ -820,9 +817,9 @@ function kindColor(kind: TaskKind): string {
   return def ? def.color : 'var(--text-tertiary)'
 }
 
-/** 文本截断：星图芯片宽度有限，超长标签省略号收尾 */
+/** 文本截断：星图芯片宽度有限，超长标签省略号收尾。 */
 function trunc(s: string, n: number): string {
-  return s.length > n ? s.slice(0, n - 1) + '…' : s
+  return truncate(s, n)
 }
 
 // 星图布局：技能节点坐标 / Worker 扇区坐标 / 工单芯片坐标 / 执行链路路径，全部由数据驱动
