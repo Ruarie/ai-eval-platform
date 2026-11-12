@@ -135,6 +135,38 @@ def test_expired_lease_stops_next_benchmark_batch_before_recovery(worker_db_fact
         assert db.get(Task, "task").status == "running"
 
 
+def test_dispatch_settings_reads_pause_and_limit_in_one_query(worker_db_factory):
+    """暂停标记与并发闸门合并读取；缺失或脏数据回退默认值。"""
+    from app import main
+    from app.models import Setting
+
+    def put(db, key, value):
+        """夹具已注入默认设置：存在则更新，不存在再插入。"""
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row is None:
+            db.add(Setting(key=key, value=value))
+        else:
+            row.value = value
+
+    with worker_db_factory() as db:
+        put(db, "dispatch", {"paused": False})
+        put(db, "max_running_tasks", main.DEFAULT_MAX_RUNNING_TASKS)
+        db.commit()
+        assert main._dispatch_settings(db) == (False, main.DEFAULT_MAX_RUNNING_TASKS)
+        put(db, "dispatch", {"paused": True})
+        put(db, "max_running_tasks", 5)
+        db.commit()
+        assert main._dispatch_settings(db) == (True, 5)
+
+    with worker_db_factory() as db:
+        put(db, "dispatch", {"paused": "yes"})
+        put(db, "max_running_tasks", True)
+        db.commit()
+        paused, limit = main._dispatch_settings(db)
+        assert paused is False
+        assert limit == main.DEFAULT_MAX_RUNNING_TASKS
+
+
 def test_old_executor_cannot_overwrite_recovered_failure(worker_db_factory):
     """旧执行器持有的 running 对象在回收后不能创建结果或覆盖失败原因。"""
     with worker_db_factory() as db:

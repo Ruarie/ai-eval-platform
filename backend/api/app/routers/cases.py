@@ -44,6 +44,7 @@ from shared.casegen import (
     rebalance_with_stats,
     selfcheck,
 )
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..case_asset_service import materialize_case_set
@@ -412,9 +413,13 @@ def list_case_sets(
 ):
     """列出全部用例集，按契约返回 {items, total} 包装，支持分页与关键词过滤。"""
     query = db.query(CaseSet)
+    filters = []
     if q and q.strip():
-        query = query.filter(CaseSet.name.ilike(f"%{q.strip()}%"))
-    total = query.count()
+        filters.append(CaseSet.name.ilike(f"%{q.strip()}%"))
+    if filters:
+        query = query.filter(*filters)
+    # 只对主键做聚合，避免 count 包一层「全列子查询」。
+    total = db.query(func.count(CaseSet.id)).filter(*filters).scalar() or 0
     query = query.order_by(CaseSet.created_at.desc())
     if page is not None and page_size is not None:
         rows = query.offset((page - 1) * page_size).limit(page_size).all()
@@ -908,13 +913,16 @@ def save_cases(
     for case_id, case in existing.items():
         if case_id not in payload_ids:
             db.delete(case)
+    # 显式 id 未命中时按插入处理；被其它用例集占用则统一查一次后拒绝，避免逐行回查。
+    missing_ids = payload_ids - set(existing)
+    clashes = {
+        case.id
+        for case in db.query(CaseItem).filter(CaseItem.id.in_(missing_ids)).all()
+    } if missing_ids else set()
     for index, case_in in enumerate(body.cases):
         target = existing.get(case_in.id) if case_in.id else None
-        if case_in.id and target is None:
-            # 显式 id 未命中时按插入处理；若 id 已被其他用例集占用则拒绝，避免跨集串行
-            clash = db.query(CaseItem).filter(CaseItem.id == case_in.id).first()
-            if clash:
-                raise AppError(ErrorCode.VALIDATION, f"用例 {case_in.id} 不属于该用例集")
+        if case_in.id and target is None and case_in.id in clashes:
+            raise AppError(ErrorCode.VALIDATION, f"用例 {case_in.id} 不属于该用例集")
         _upsert_case(db, case_set, case_in, target, index)
     db.flush()
     _refresh_generated_count(db, case_set)
@@ -1222,6 +1230,15 @@ def _write_imported_cases(
         db.query(CaseItem).filter(CaseItem.case_set_id == case_set.id).delete(synchronize_session=False)
         db.flush()
         existing = {}
+    # 导入行可能带跨集编号：一次查出被占用的 id，循环内不再逐行回查。
+    incoming_ids = {
+        str(item.get("id")) for item in parsed if isinstance(item, dict) and item.get("id")
+    }
+    foreign_ids = incoming_ids - set(existing)
+    occupied = {
+        row[0]
+        for row in db.query(CaseItem.id).filter(CaseItem.id.in_(foreign_ids)).all()
+    } if foreign_ids else set()
 
     sort_base = 0 if mode == "replace" else len(existing)
     imported = 0
@@ -1232,11 +1249,9 @@ def _write_imported_cases(
             raise AppError(ErrorCode.VALIDATION, f"第 {offset + 1} 条用例字段不合法") from exc
         source_id = case_in.id
         target = existing.get(source_id) if source_id else None
-        if case_in.id and target is None:
-            clash = db.query(CaseItem).filter(CaseItem.id == case_in.id).first()
-            if clash:
-                # 其他用例集占用该编号时改为新 id，避免跨集串行
-                case_in.id = None
+        if case_in.id and target is None and case_in.id in occupied:
+            # 其他用例集占用该编号时改为新 id，避免跨集串行
+            case_in.id = None
         saved = _upsert_case(db, case_set, case_in, target, sort_base + offset)
         # 包含尚未 flush 的新行；跨集编号重建后也按原编号复用本批副本。
         if source_id:

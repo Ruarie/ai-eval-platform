@@ -45,26 +45,44 @@ DEFAULT_MAX_RUNNING_TASKS = 3
 
 # 72h 超时扫描节流间隔（秒）：主循环 1s 一轮，扫描器每 60s 实际执行一次
 EXPIRE_SCAN_INTERVAL_S = 60.0
+# 租约回收扫描间隔：租约 120s，5s 粒度足够，避免每秒扫两张表。
+RECLAIM_SCAN_INTERVAL_S = 5.0
+# 非 testcase 任务退役扫描间隔：只在启动/低频执行，防止旧任务被反复领取。
+RETIRE_SCAN_INTERVAL_S = 30.0
+# 数据库连续失败时指数退避上限（秒），避免故障期间日志与连接风暴。
+MAX_BACKOFF_S = 30.0
+
+
+def _dispatch_settings(db) -> tuple[bool, int]:
+    """一次读回调度暂停标记与并发闸门；两条 Setting 合并为单次查询。"""
+    rows = (
+        db.query(Setting)
+        .filter(Setting.key.in_(("dispatch", "max_running_tasks")))
+        .all()
+    )
+    values = {row.key: row.value for row in rows}
+    dispatch = values.get("dispatch")
+    paused = isinstance(dispatch, dict) and dispatch.get("paused") is True
+    raw = values.get("max_running_tasks")
+    if isinstance(raw, bool):
+        limit = DEFAULT_MAX_RUNNING_TASKS
+    elif isinstance(raw, int) and raw >= 1:
+        limit = raw
+    elif isinstance(raw, float) and raw >= 1:
+        limit = int(raw)
+    else:
+        limit = DEFAULT_MAX_RUNNING_TASKS
+    return paused, limit
 
 
 def _dispatch_paused(db) -> bool:
     """调度中心暂停后不再领取新任务；缺省或脏数据都按未暂停。"""
-    row = db.query(Setting).filter(Setting.key == "dispatch").first()
-    value = row.value if row else None
-    return isinstance(value, dict) and value.get("paused") is True
+    return _dispatch_settings(db)[0]
 
 
 def _max_running_tasks(db) -> int:
     """读取 settings.max_running_tasks 并发闸门；缺失或非法时回退默认 3。"""
-    row = db.query(Setting).filter(Setting.key == "max_running_tasks").first()
-    value = row.value if row else None
-    if isinstance(value, bool):
-        return DEFAULT_MAX_RUNNING_TASKS
-    if isinstance(value, int) and value >= 1:
-        return value
-    if isinstance(value, float) and value >= 1:
-        return int(value)
-    return DEFAULT_MAX_RUNNING_TASKS
+    return _dispatch_settings(db)[1]
 
 
 def _run_task(task_id: str) -> None:
@@ -247,6 +265,10 @@ def _expire_stale_case_confirmations(db) -> int:
 def loop() -> None:
     """轮询评测与导入两条独立队列，二者各自受并发闸门和租约约束。"""
     last_expire_scan = 0.0
+    last_reclaim_scan = 0.0
+    last_retire_scan = 0.0
+    # 连续失败次数：数据库不可用时指数退避，恢复后自动清零。
+    error_streak = 0
     # 任务租约使用进程内随机 ID，避免新进程续上已退出进程的租约。
     # 调度星图使用稳定节点 ID，见 dispatch_presence。
     worker_id = uuid4().hex
@@ -256,42 +278,54 @@ def loop() -> None:
         db = SessionLocal()
         task_id: str | None = None
         import_claim: tuple[str, str] | None = None
+        backoff_s = 0.0
         try:
-            cancel_non_testcase_tasks(db)
-            recover_expired_task_leases(db)
+            now = time.monotonic()
+            # 退役扫描与租约回收不需要每秒执行：按各自间隔节流，空闲时几乎零查询。
+            if now - last_retire_scan >= RETIRE_SCAN_INTERVAL_S:
+                cancel_non_testcase_tasks(db)
+                last_retire_scan = now
+            if now - last_reclaim_scan >= RECLAIM_SCAN_INTERVAL_S:
+                recover_expired_task_leases(db)
+                # 导入租约独立于 Task：回收异常退出的领取。
+                recover_expired_dataset_import_leases(db)
+                last_reclaim_scan = now
             # 管理员请求重启：只在本轮还没领到任务时退出，正在执行的任务先跑完。
             if presence.take_idle_restart():
                 logger.info("管理员请求重启节点，空闲退出以便容器重新拉起")
                 print("[worker] restart requested, exiting", flush=True)
                 raise SystemExit(0)
-            # 导入租约独立于 Task；先回收异常退出的领取，再按设置尝试领取一个作业。
-            recover_expired_dataset_import_leases(db)
             # 排空、离线或调度暂停时不领新任务；已经在执行的任务由租约心跳继续。
-            paused = _dispatch_paused(db)
-            if presence.allows_claim() and not paused:
+            paused, max_running = _dispatch_settings(db)
+            claimable = presence.allows_claim() and not paused
+            if claimable:
                 import_claim = claim_next_dataset_import(db)
             # 平台并发闸门（PRD 3.4）：running 任务达到 max_running_tasks 时
             # 不领取新任务，queued 任务保持排队；会话内串行由 tasks 表的
             # 部分唯一索引 uq_tasks_active_session 在创建侧保证。
-            running = db.query(Task).filter(Task.status == "running").count()
-            if presence.allows_claim() and not paused and not import_claim and running < _max_running_tasks(db):
-                task = (
-                    db.query(Task)
-                    .filter(Task.status == "queued", Task.kind == "testcase")
-                    .order_by(Task.created_at.asc())
-                    .with_for_update(skip_locked=True)
-                    .first()
-                )
-                if task:
-                    task.status = "running"
-                    task.started_at = datetime.now(UTC)
-                    task.claimed_by_worker_id = worker_id
-                    task.claim_expires_at = task.started_at + timedelta(seconds=TASK_LEASE_SECONDS)
-                    task.attempt = (task.attempt or 0) + 1
-                    db.commit()
-                    task_id = task.id
+            if claimable and not import_claim:
+                running = db.query(Task).filter(Task.status == "running").count()
+                if running < max_running:
+                    task = (
+                        db.query(Task)
+                        .filter(Task.status == "queued", Task.kind == "testcase")
+                        .order_by(Task.created_at.asc())
+                        .with_for_update(skip_locked=True)
+                        .first()
+                    )
+                    if task:
+                        task.status = "running"
+                        task.started_at = datetime.now(UTC)
+                        task.claimed_by_worker_id = worker_id
+                        task.claim_expires_at = task.started_at + timedelta(seconds=TASK_LEASE_SECONDS)
+                        task.attempt = (task.attempt or 0) + 1
+                        db.commit()
+                        task_id = task.id
+            error_streak = 0
         except Exception:
-            logger.exception("worker loop error")
+            error_streak += 1
+            backoff_s = min(MAX_BACKOFF_S, float(2 ** min(error_streak - 1, 5)))
+            logger.exception("worker loop error (连续 %d 次，退避 %.0fs)", error_streak, backoff_s)
         finally:
             db.close()
         # 执行器自建 Session；主循环绝不将 ORM 实体跨 Session 传递。
@@ -318,7 +352,7 @@ def loop() -> None:
             finally:
                 presence.set_activity(busy=False, task_id=None)
         # 72h 超时扫描：节流执行，避免每秒全表扫（表量级小，代价可忽略）
-        if time.monotonic() - last_expire_scan >= EXPIRE_SCAN_INTERVAL_S:
+        if not backoff_s and time.monotonic() - last_expire_scan >= EXPIRE_SCAN_INTERVAL_S:
             last_expire_scan = time.monotonic()
             scan_db = SessionLocal()
             try:
@@ -328,7 +362,8 @@ def loop() -> None:
                 logger.exception("case confirmation expire scan error")
             finally:
                 scan_db.close()
-        time.sleep(1)
+        # 数据库连续失败时退避，避免故障期间每秒重连与刷日志。
+        time.sleep(backoff_s or 1)
 
 
 if __name__ == "__main__":

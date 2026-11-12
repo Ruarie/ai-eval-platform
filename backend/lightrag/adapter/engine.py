@@ -98,6 +98,15 @@ def _invisible_fingerprint(doc_id: str) -> str:
     return "".join(chars)
 
 
+def _raw_chunk_count(payload: Any) -> int:
+    """引擎原始载荷里的切块数；结构异常按 0 处理（不触发扩窗）。"""
+    if not isinstance(payload, dict):
+        return 0
+    data = payload.get("data")
+    chunks = data.get("chunks") if isinstance(data, dict) else None
+    return len(chunks) if isinstance(chunks, list) else 0
+
+
 def _record_file_path(record: Any) -> str:
     """读取 doc_status 记录里的来源标识；兼容对象与 dict 两种返回形态。"""
     if record is None:
@@ -489,9 +498,19 @@ class LightRAGEngine:
     # ─── 检索 ─────────────────────────────────────────────────────────
 
     async def query(
-        self, query: str, mode: str, top_k: int, kb_id: str = ""
+        self,
+        query: str,
+        mode: str,
+        top_k: int,
+        kb_id: str = "",
+        *,
+        include_similarity: bool = True,
     ) -> dict[str, Any]:
-        """执行一次只有检索、不生成答案的查询，并映射为平台上下文结构。"""
+        """执行一次只有检索、不生成答案的查询，并映射为平台上下文结构。
+
+        ``include_similarity=False`` 时跳过 embedding 补算：评测批量跑召回指标
+        不需要分数，省掉一次向量调用。
+        """
         rag = self._require_rag()
         try:
             from lightrag import QueryParam
@@ -507,18 +526,19 @@ class LightRAGEngine:
             top_k=self.config.entity_top_k,
             chunk_top_k=window,
         )
-        contexts = await self._retrieve(rag, query, param, kb_id, top_k, mode)
+        contexts, raw_total = await self._retrieve(rag, query, param, kb_id, top_k, mode)
         # 过滤后明显不足（低于一半）：多库共享同一向量库/图谱时，目标库的切块
-        # 容易被其它库挤出候选窗口。只在召回明显偏少时扩窗，否则「少 1 条」也会
-        # 触发一次完整重查（关键词抽取 + 向量检索），检索成本翻倍。
+        # 容易被其它库挤出候选窗口。只在「引擎确实召回了切块、但被别库挤掉」时
+        # 扩窗；整库没有切块时再查一次也只会得到空结果，纯属浪费一次完整检索。
         needed = max(1, int(top_k or 1) // 2)
-        if kb_id and len(contexts) < needed and window < 200:
+        if kb_id and raw_total and len(contexts) < needed and window < 200:
             param.chunk_top_k = min(max(window * 3, 60), 200)
-            wider = await self._retrieve(rag, query, param, kb_id, top_k, mode)
+            wider, _ = await self._retrieve(rag, query, param, kb_id, top_k, mode)
             # 扩窗结果更少时保留首次结果：重取不应让已有召回倒退。
             if len(wider) > len(contexts):
                 contexts = wider
-        contexts = await self._attach_similarity(query, contexts)
+        if include_similarity:
+            contexts = await self._attach_similarity(query, contexts)
         return {
             "text": "",
             "contexts": contexts,
@@ -535,16 +555,17 @@ class LightRAGEngine:
         kb_id: str,
         top_k: int,
         mode: str,
-    ) -> list[dict]:
-        """调用引擎并把结果映射为平台上下文；失败统一转引擎不可用。"""
+    ) -> tuple[list[dict], int]:
+        """调用引擎并映射上下文；同时返回引擎原始切块数（判断是否值得扩窗）。"""
         try:
             payload = await rag.aquery_data(query, param=param)
         except Exception as exc:  # noqa: BLE001 - 统一转引擎不可用
             logger.warning("LightRAG 检索失败 mode=%s err=%s", mode, type(exc).__name__)
             raise EngineUnavailable("LightRAG 检索失败") from exc
-        return map_chunks(
+        contexts = map_chunks(
             payload, kb_id, top_k, max_per_doc=self.config.max_chunks_per_doc
         )
+        return contexts, _raw_chunk_count(payload)
 
     async def _attach_similarity(self, query: str, contexts: list[dict]) -> list[dict]:
         """用与索引一致的 embedding 模型补算 query↔chunk 余弦相似度。

@@ -365,6 +365,39 @@ def test_query_does_not_widen_when_hits_are_enough():
     asyncio.run(case())
 
 
+def test_query_skips_widening_when_engine_returned_no_chunks():
+    """整库无切块时扩窗也不可能命中，不做第二次检索。"""
+
+    async def case() -> None:
+        engine = _engine()
+        rag = FakeRag()
+        rag.query_payloads = [{"data": {"chunks": []}}, {"data": {"chunks": []}}]
+        engine._rag = rag
+        result = await engine.query("q", "hybrid", 5, "kb-1")
+        assert len(rag.query_calls) == 1
+        assert result["contexts"] == []
+
+    asyncio.run(case())
+
+
+def test_query_skips_similarity_when_not_requested():
+    """评测批量召回不显示分数，可关闭 embedding 补算省一次向量调用。"""
+
+    async def case() -> None:
+        engine = _engine()
+        rag = FakeRag()
+        rag.query_payloads = [
+            {"data": {"chunks": [{"chunk_id": "c1", "file_path": "kb-1__doc-a__a.txt", "content": "内容"}]}}
+        ]
+        engine._rag = rag
+        result = await engine.query("q", "naive", 3, "kb-1", include_similarity=False)
+        assert len(result["contexts"]) == 1
+        assert rag.embedding_calls == []
+        assert result["contexts"][0].get("similarity") is None
+
+    asyncio.run(case())
+
+
 def test_query_attaches_similarity():
     """检索结果用同一 embedding 模型补算余弦分数，前端不再只显示占位符。"""
 

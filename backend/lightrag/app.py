@@ -91,6 +91,8 @@ class QueryRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=MAX_TOP_K)
     # 指定知识库时按文档来源前缀过滤；留空表示全部知识库（仅调试用）。
     kb_id: str = ""
+    # 是否补算 query↔chunk 余弦相似度：评测批量召回不需要分数，可关掉省一次向量调用。
+    include_similarity: bool = True
 
     @field_validator("query")
     @classmethod
@@ -204,7 +206,10 @@ async def query(
     if mode not in ALLOWED_MODES:
         raise HTTPException(status_code=400, detail="unsupported query mode")
     try:
-        result = await _ENGINE.query(body.query, mode, body.top_k, body.kb_id)
+        result = await _ENGINE.query(
+            body.query, mode, body.top_k, body.kb_id,
+            include_similarity=body.include_similarity,
+        )
     except EngineUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return QueryResponse(**result)

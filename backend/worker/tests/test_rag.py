@@ -82,7 +82,7 @@ def _items():
     ]
 
 
-def _retrieve_mock(db, kb_id, query, mode="hybrid", k=5):
+def _retrieve_mock(db, kb_id, query, mode="hybrid", k=5, **_kwargs):
     """固定检索结果：第 1 行命中期望文档，第 2 行未命中；引擎来源恒为 lightrag。"""
     if "退款" in query:
         return (
@@ -97,13 +97,13 @@ def _retrieve_mock(db, kb_id, query, mode="hybrid", k=5):
     )
 
 
-def _retrieve_local_mock(db, kb_id, query, mode="hybrid", k=5):
+def _retrieve_local_mock(db, kb_id, query, mode="hybrid", k=5, **_kwargs):
     """引擎来源恒为本地关键词检索（LightRAG 不可用降级场景）。"""
     items, _ = _retrieve_mock(db, kb_id, query, mode=mode, k=k)
     return items, "local"
 
 
-def _retrieve_mixed_mock(db, kb_id, query, mode="hybrid", k=5):
+def _retrieve_mixed_mock(db, kb_id, query, mode="hybrid", k=5, **_kwargs):
     """第 1 行走 LightRAG，第 2 行回退本地（部分降级场景）。"""
     if "退款" in query:
         return _retrieve_mock(db, kb_id, query, mode=mode, k=k)

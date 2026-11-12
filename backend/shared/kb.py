@@ -180,17 +180,21 @@ def _score_chunk(chunk_text_: str, terms: list[str]) -> float:
     return hits / len(terms)
 
 
-def _try_lightrag(kb_id: str, query: str, mode: str, k: int) -> list[dict] | None:
+def _try_lightrag(
+    kb_id: str, query: str, mode: str, k: int, *, include_similarity: bool = True
+) -> list[dict] | None:
     """调用适配服务 ``/query``；返回映射后的上下文列表，不可用返回 None。
 
     注意与旧 stub 的差别：引擎可用但召回为空时返回空列表（真实未命中），
     只有未配置 / 不可达 / 5xx 才返回 None 触发本地兜底。
+
+    ``include_similarity=False`` 用于批量召回评测：不需要分数时省掉引擎侧一次
+    embedding 补算。
     """
-    data = _lightrag_post(
-        "/query",
-        {"query": query, "mode": mode or "hybrid", "top_k": min(k, MAX_K), "kb_id": kb_id},
-        timeout=_query_timeout(),
-    )
+    payload = {"query": query, "mode": mode or "hybrid", "top_k": min(k, MAX_K), "kb_id": kb_id}
+    if not include_similarity:
+        payload["include_similarity"] = False
+    data = _lightrag_post("/query", payload, timeout=_query_timeout())
     if data is None:
         return None
     items: list[dict] = []
@@ -417,7 +421,8 @@ RETRIEVE_SOURCE_LOCAL = "local"
 
 
 def retrieve_with_source(
-    db, kb_id: str, query: str, mode: str = "hybrid", k: int = 5
+    db, kb_id: str, query: str, mode: str = "hybrid", k: int = 5,
+    *, include_similarity: bool = True,
 ) -> tuple[list[dict], str]:
     """执行一次 Top-K 检索并返回引擎来源，供评测报告诚实标注降级。
 
@@ -427,15 +432,20 @@ def retrieve_with_source(
     区分引擎来源，禁止把本地兜底结果无标注地当作 LightRAG 引擎成绩对外呈现。
     """
     k = max(1, min(int(k or DEFAULT_K), MAX_K))
-    items = _try_lightrag(kb_id, query, mode, k)
+    items = _try_lightrag(kb_id, query, mode, k, include_similarity=include_similarity)
     if items is not None:
         return items, RETRIEVE_SOURCE_LIGHTRAG
     return _local_retrieve(db, kb_id, query, k), RETRIEVE_SOURCE_LOCAL
 
 
-def retrieve(db, kb_id: str, query: str, mode: str = "hybrid", k: int = 5) -> list[dict]:
+def retrieve(
+    db, kb_id: str, query: str, mode: str = "hybrid", k: int = 5,
+    *, include_similarity: bool = True,
+) -> list[dict]:
     """向后兼容封装：只返回 Top-K 检索结果，不暴露引擎来源（REST 目录等场景）。"""
-    items, _ = retrieve_with_source(db, kb_id, query, mode=mode, k=k)
+    items, _ = retrieve_with_source(
+        db, kb_id, query, mode=mode, k=k, include_similarity=include_similarity,
+    )
     return items
 
 

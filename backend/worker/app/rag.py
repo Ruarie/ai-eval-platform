@@ -162,7 +162,9 @@ def run_rag(task_id: str) -> None:
             row_contexts: list[str] = []
             start = time.perf_counter()
             for mode in modes:
-                retrieved, source = retrieve_with_source(db, kb_id, item.question, mode=mode, k=k)
+                retrieved, source = retrieve_with_source(
+                    db, kb_id, item.question, mode=mode, k=k, include_similarity=False,
+                )
                 source_stats[source] = source_stats.get(source, 0) + 1
                 metrics = compute_metrics(retrieved, expected, reference)
                 row_metrics[mode] = metrics

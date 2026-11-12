@@ -1,5 +1,7 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import Components from 'unplugin-vue-components/vite'
+import { NaiveUiResolver } from 'unplugin-vue-components/resolvers'
 import { execSync } from 'node:child_process'
 
 // 获取当前构建对应的 Git 提交 ID（短 hash）
@@ -25,7 +27,12 @@ const gitCommit = getGitCommit()
 export default defineConfig(({ mode }) => {
   const apiTarget = loadEnv(mode, process.cwd(), '').API_PROXY_TARGET || 'http://localhost:8000'
   return {
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    // Naive UI 组件按模板用到的标签自动引入：只有被路由实际用到的组件才会进入
+    // 对应 chunk，入口不再强依赖整个组件库（原先全局注册 + 手动分包导致首屏必带）。
+    Components({ resolvers: [NaiveUiResolver()], dts: false }),
+  ],
   resolve: {
     alias: {
       mermaid: 'mermaid/dist/mermaid.esm.min.mjs',
@@ -61,9 +68,8 @@ export default defineConfig(({ mode }) => {
           if (id.includes('/node_modules/katex/')) {
             return 'vendor-katex'
           }
-          if (id.includes('/node_modules/naive-ui/')) {
-            return 'vendor-naive'
-          }
+          // naive-ui 不再强制单块：按需引入后让 Rollup 跟随路由分配，
+          // 否则所有组件仍会被并进入口预加载。
         },
       },
     },
