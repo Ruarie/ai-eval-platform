@@ -209,160 +209,25 @@
               </tr>
 
               <!-- 当前页切片数据行 -->
-              <tr
+              <DatasetRowView
                 v-for="r in pagedRows"
-                v-else
                 :key="r.row_no"
-                class="data-row"
-                :class="{
-                  'row-checked': r.checked,
-                  'row-incomplete': !r.q.trim() || !r.r.trim(),
-                  'row-focused': focusedCell?.rowIdx === getDisplayedIndex(r)
-                }"
-                @contextmenu.prevent="openCtxMenu($event, 'row', '', getOriginalRowIndex(r))"
-                @dblclick="openRowEditModal(getOriginalRowIndex(r))"
-              >
-                <!-- 居中自定义多选框列 (支持直接点击与 Shift 连选) -->
-                <td class="td-chk" :class="{ 'cell-cursor': isCellCursor(r, 'chk') }" @click.stop="handleRowCheckClick(r, $event)">
-                  <div class="clean-chk-box" :class="{ checked: r.checked }" :title="`勾选第 ${r.row_no} 行（支持 Shift 连选）`" role="checkbox" :aria-checked="r.checked">
-                    <svg v-if="r.checked" class="chk-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  </div>
-                </td>
-
-                <!-- 行号 -->
-                <td class="mono td-num" :class="{ 'cell-cursor': isCellCursor(r, 'row_no') }" @click="setCellCursor(r, 'row_no')">
-                  {{ r.row_no }}
-                </td>
-
-                <!-- 测试问句 (14px 舒适字阶) -->
-                <td class="cell-edit" :class="{ 'cell-invalid': !r.q.trim(), 'cell-cursor': isCellCursor(r, 'q') }" @click="handleCellClick(r, 'q')">
-                  <input
-                    v-if="editingCell?.row === r && editingCell?.field === 'q'"
-                    v-model="r.q"
-                    class="inline-input"
-                    placeholder="输入测试问题..."
-                    :aria-label="`编辑第 ${r.row_no} 行测试问题`"
-                    autofocus
-                    @blur="finishEditing"
-                    @keyup.enter="finishEditing"
-                    @keyup.esc="cancelEditing"
-                  />
-                  <div v-else class="cell-content primary-text" :class="{ empty: !r.q.trim() }" v-html="highlightMatch(r.q || '（空问句 · 点击录入）')"></div>
-                </td>
-
-                <!-- 参考答案 (14px 舒适字阶) -->
-                <td class="cell-edit" :class="{ 'cell-invalid': !r.r.trim(), 'cell-cursor': isCellCursor(r, 'r') }" @click="handleCellClick(r, 'r')">
-                  <input
-                    v-if="editingCell?.row === r && editingCell?.field === 'r'"
-                    v-model="r.r"
-                    class="inline-input"
-                    placeholder="输入标准答案..."
-                    :aria-label="`编辑第 ${r.row_no} 行标准答案`"
-                    autofocus
-                    @blur="finishEditing"
-                    @keyup.enter="finishEditing"
-                    @keyup.esc="cancelEditing"
-                  />
-                  <div v-else class="cell-content" :class="{ empty: !r.r.trim() }" v-html="highlightMatch(r.r || '（空答案 · 点击录入）')"></div>
-                </td>
-
-                <!-- 上下文注入 -->
-                <td class="cell-edit" :class="{ 'cell-cursor': isCellCursor(r, 'c') }" @click="handleCellClick(r, 'c')">
-                  <input
-                    v-if="editingCell?.row === r && editingCell?.field === 'c'"
-                    v-model="r.c"
-                    class="inline-input"
-                    placeholder="注入 Context..."
-                    :aria-label="`编辑第 ${r.row_no} 行上下文`"
-                    autofocus
-                    @blur="finishEditing"
-                    @keyup.enter="finishEditing"
-                    @keyup.esc="cancelEditing"
-                  />
-                  <div v-else class="cell-content mono-sm" :class="{ placeholder: !r.c }" v-html="highlightMatch(r.c || '—')"></div>
-                </td>
-
-                <!-- 标签 -->
-                <td class="cell-edit" :class="{ 'cell-cursor': isCellCursor(r, 'tags') }" @click="handleCellClick(r, 'tags')">
-                  <input
-                    v-if="editingCell?.row === r && editingCell?.field === 'tags'"
-                    v-model="r.tags"
-                    class="inline-input"
-                    placeholder="业务标签..."
-                    :aria-label="`编辑第 ${r.row_no} 行标签`"
-                    autofocus
-                    @blur="finishEditing"
-                    @keyup.enter="finishEditing"
-                    @keyup.esc="cancelEditing"
-                  />
-                  <div v-else class="cell-content">
-                    <span v-if="r.tags" class="tag-pill" v-html="highlightMatch(r.tags)"></span>
-                    <span v-else class="placeholder">常规</span>
-                  </div>
-                </td>
-
-                <!-- 难度 -->
-                <td class="cell-edit" :class="{ 'cell-cursor': isCellCursor(r, 'difficulty') }" @click="handleCellClick(r, 'difficulty')">
-                  <select
-                    v-if="editingCell?.row === r && editingCell?.field === 'difficulty'"
-                    v-model="r.difficulty"
-                    class="inline-select"
-                    :aria-label="`选择第 ${r.row_no} 行难度`"
-                    autofocus
-                    @blur="finishEditing"
-                    @change="finishEditing"
-                    @keyup.esc="cancelEditing"
-                  >
-                    <option>简单</option>
-                    <option>中等</option>
-                    <option>高</option>
-                  </select>
-                  <div v-else class="cell-content">
-                    <span class="diff-badge" :class="`diff-${r.difficulty}`">
-                      {{ r.difficulty || '简单' }}
-                    </span>
-                  </div>
-                </td>
-
-                <!-- 自定义扩展列 -->
-                <td v-for="col in customCols" :key="col.key" class="cell-edit" :class="{ 'cell-cursor': isCellCursor(r, col.key) }" @click="handleCellClick(r, col.key)">
-                  <input
-                    v-if="editingCell?.row === r && editingCell?.field === col.key"
-                    v-model="r.extras[col.key]"
-                    class="inline-input"
-                    :placeholder="`输入 ${col.name}...`"
-                    :aria-label="`编辑第 ${r.row_no} 行 ${col.name}`"
-                    autofocus
-                    @blur="finishEditing"
-                    @keyup.enter="finishEditing"
-                    @keyup.esc="cancelEditing"
-                  />
-                  <div v-else class="cell-content" :class="{ placeholder: !r.extras[col.key] }">
-                    {{ r.extras[col.key] || '—' }}
-                  </div>
-                </td>
-
-                <!-- 校验状态 -->
-                <td>
-                  <span v-if="!r.q.trim() || !r.r.trim()" class="status-tag-amber" title="缺少问句或答案">待补全</span>
-                  <span v-else class="status-tag-green">达标</span>
-                </td>
-
-                <!-- 操作区 -->
-                <td class="td-actions">
-                  <div class="action-links">
-                    <button class="icon-link" title="详细编辑" :aria-label="`详细编辑第 ${r.row_no} 行`" @click.stop="openRowEditModal(getOriginalRowIndex(r))">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                    </button>
-                    <button class="icon-link danger" title="删除行" :aria-label="`删除第 ${r.row_no} 行`" @click.stop="deleteRow(getOriginalRowIndex(r))">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-
+                :row="r"
+                :columns="customCols"
+                :focused-field="focusedFieldOf(r)"
+                :editing-field="editingFieldOf(r)"
+                :focused="focusedCell?.rowIdx === getDisplayedIndex(r)"
+                :highlight="highlightMatch"
+                @cell-click="(f: string) => handleCellClick(r, f)"
+                @cell-cursor="(f: string) => setCellCursor(r, f)"
+                @check-click="(e: MouseEvent) => handleRowCheckClick(r, e)"
+                @update-field="(f: string, v: string) => updateRowField(r, f, v)"
+                @finish="finishEditing"
+                @cancel="cancelEditing"
+                @edit-row="openRowEditModal(getOriginalRowIndex(r))"
+                @delete-row="deleteRow(getOriginalRowIndex(r))"
+                @row-context="(e: MouseEvent) => openCtxMenu(e, 'row', '', getOriginalRowIndex(r))"
+              />
               <!-- 空列表提示 -->
               <tr v-if="!displayedRows.length">
                 <td :colspan="(isGoldQaActive ? 7 : 9) + customCols.length" class="empty-cell">
@@ -715,6 +580,7 @@ import { ErrorCode, type Dataset, type DatasetRow, type GoldQA } from '../api/ty
 import UploadDatasetModal from '../components/modals/UploadDatasetModal.vue'
 import DatasetTreeSidebar from '../components/datasets/DatasetTreeSidebar.vue'
 import DatasetListFooter from '../components/datasets/DatasetListFooter.vue'
+import DatasetRowView from '../components/datasets/DatasetRow.vue'
 import { escapeHtml, escapeRegex, renderIcon } from '../utils/render'
 
 interface EditableDatasetRow {
@@ -945,10 +811,22 @@ const NAV_FIELDS = computed(() => {
   return [...base, ...extras]
 })
 
-function isCellCursor(row: EditableDatasetRow, field: string): boolean {
-  if (!focusedCell.value) return false
-  const idx = getDisplayedIndex(row)
-  return focusedCell.value.rowIdx === idx && focusedCell.value.field === field
+/** 行组件的聚焦/编辑态：父视图按行计算后下发，避免把整个焦点对象传进子组件。 */
+function focusedFieldOf(row: EditableDatasetRow): string | null {
+  if (!focusedCell.value) return null
+  return focusedCell.value.rowIdx === getDisplayedIndex(row) ? focusedCell.value.field : null
+}
+
+function editingFieldOf(row: EditableDatasetRow): string | null {
+  const cell = editingCell.value
+  return cell && cell.row === row ? cell.field : null
+}
+
+/** 单元格输入：内置字段写 row 本身，扩展列写 extras；脏标记仍由 finishEditing 统一置位。 */
+function updateRowField(row: EditableDatasetRow, field: string, value: string) {
+  const target = row as unknown as Record<string, unknown>
+  if (field in target) target[field] = value
+  else row.extras[field] = value
 }
 
 function setCellCursor(row: EditableDatasetRow, field: string) {
