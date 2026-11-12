@@ -46,6 +46,8 @@ logger = logging.getLogger("lightrag.engine")
 
 # 失败表上限：失败原因只需保留到平台回读一次，无界增长会缓慢泄漏。
 _MAX_FAILED_RECORDS = 1000
+# 删除墓碑上限：只需覆盖"排队中的插入"窗口，过期墓碑可淘汰。
+_MAX_TOMBSTONES = 2000
 # 「引擎在处理、但本进程没有对应任务」的观察窗口：重启后 LightRAG 会从
 # doc_status 恢复未完成的抽取，此刻本地任务表是空的，立刻判 failed 会把
 # 正在恢复的文档误报成失败；超过该窗口仍无进展才认定中断残留。
@@ -187,6 +189,9 @@ class LightRAGEngine:
         # 受理即失败（连入队都没成功）的文档，避免状态永远停在 indexing；
         # 用有序字典做容量上限，避免长期运行后无界增长。
         self._failed: OrderedDict[str, str] = OrderedDict()
+        # 删除墓碑：记录「该文档在何时被删」。排队中的插入任务拿到闸门后据此跳过，
+        # 否则删除完成后任务仍会把文档重新写回图谱（幽灵索引）。
+        self._tombstones: OrderedDict[str, float] = OrderedDict()
         # 无本地任务却仍在 processing 的首见时间，用于判断是"重启恢复"还是"残留"。
         self._stale_since: dict[str, float] = {}
 
@@ -315,6 +320,18 @@ class LightRAGEngine:
         while len(self._failed) > _MAX_FAILED_RECORDS:
             self._failed.popitem(last=False)
 
+    def _mark_deleted(self, doc_id: str) -> None:
+        """登记删除墓碑；排队中的插入任务看到更晚的墓碑就不再写回。"""
+        self._tombstones[doc_id] = time.time()
+        self._tombstones.move_to_end(doc_id)
+        while len(self._tombstones) > _MAX_TOMBSTONES:
+            self._tombstones.popitem(last=False)
+
+    def _deleted_after(self, doc_id: str, enqueued_at: float) -> bool:
+        """该文档是否在入队之后被删除（用于跳过已作废的排队插入）。"""
+        deleted_at = self._tombstones.get(doc_id)
+        return deleted_at is not None and deleted_at >= enqueued_at
+
     # ─── 文档索引 ─────────────────────────────────────────────────────
 
     async def index_document(
@@ -341,6 +358,7 @@ class LightRAGEngine:
 
         file_source = build_file_source(kb_id, doc_id, filename)
         text = await self._avoid_cross_kb_duplicate(rag, kb_id, doc_id, text)
+        enqueued_at = time.time()
         self._queued.add(doc_id)
         self._failed.pop(doc_id, None)
         self._stale_since.pop(doc_id, None)
@@ -349,6 +367,13 @@ class LightRAGEngine:
             try:
                 async with self._pipeline_slots:
                     async with self._mutations.shared():
+                        # 排队期间用户可能已删除该文档：此时再写会把已删内容
+                        # 重新灌回图谱，造成"删不掉"的幽灵索引。
+                        if self._deleted_after(doc_id, enqueued_at):
+                            logger.info(
+                                "文档在排队期间被删除，跳过建索引 doc_id=%s", doc_id
+                            )
+                            return
                         await rag.ainsert(
                             text,
                             ids=[doc_id],
@@ -414,21 +439,27 @@ class LightRAGEngine:
         """
         rag = self._require_rag()
         results: dict[str, str] = {}
+        # 删除前核对来源前缀：平台侧已校验归属，这里再挡一次跨知识库误删。
+        sources: dict[str, Any] = {}
+        try:
+            fetched = await rag.doc_status.get_full_docs_by_ids(list(doc_ids))
+            sources = fetched if isinstance(fetched, dict) else {}
+        except Exception:  # noqa: BLE001 - 校验失败不阻断删除，交给引擎按 ID 精确删
+            logger.warning("删除前读取文档来源失败，跳过归属校验", exc_info=True)
+        allowed: list[str] = []
+        for doc_id in doc_ids:
+            file_source = _record_file_path(sources.get(doc_id))
+            if kb_id and file_source and not belongs_to_kb(file_source, kb_id):
+                logger.warning("拒绝跨知识库删除 doc_id=%s kb_id=%s", doc_id, kb_id)
+                results[doc_id] = "forbidden"
+                continue
+            allowed.append(doc_id)
+        # 先立墓碑再等闸门：排队中的插入任务无论抢到闸门的先后，都不会把已删文档写回。
+        for doc_id in allowed:
+            self._mark_deleted(doc_id)
         # 独占写入闸门：等在途 ainsert 结束再删，避免引擎管线冲突导致删除失败。
         async with self._mutations.exclusive():
-            # 删除前核对来源前缀：平台侧已校验归属，这里再挡一次跨知识库误删。
-            sources: dict[str, Any] = {}
-            try:
-                fetched = await rag.doc_status.get_full_docs_by_ids(list(doc_ids))
-                sources = fetched if isinstance(fetched, dict) else {}
-            except Exception:  # noqa: BLE001 - 校验失败不阻断删除，交给引擎按 ID 精确删
-                logger.warning("删除前读取文档来源失败，跳过归属校验", exc_info=True)
-            for doc_id in doc_ids:
-                file_source = _record_file_path(sources.get(doc_id))
-                if kb_id and file_source and not belongs_to_kb(file_source, kb_id):
-                    logger.warning("拒绝跨知识库删除 doc_id=%s kb_id=%s", doc_id, kb_id)
-                    results[doc_id] = "forbidden"
-                    continue
+            for doc_id in allowed:
                 try:
                     result = await rag.adelete_by_doc_id(doc_id)
                 except Exception as exc:  # noqa: BLE001 - 统一转引擎不可用

@@ -41,6 +41,10 @@ class _FakeDb:
     def filter(self, *_a):
         return self
 
+    def options(self, *_a, **_k):
+        """load_only 等加载选项对桩无意义，链式返回自身。"""
+        return self
+
     def order_by(self, *_a):
         return self
 

@@ -295,6 +295,33 @@ def test_delete_waits_for_inflight_index_before_touching_engine():
     asyncio.run(case())
 
 
+def test_delete_skips_queued_insert_for_same_doc():
+    """排队期间被删除的文档不再写回图谱（幽灵索引），删除本身照常成功。"""
+
+    async def case() -> None:
+        engine = _engine(max_parallel_insert=1)
+        rag = FakeRag(block=True)
+        engine._rag = rag
+        await engine.index_document("kb-1", "doc-a", "a.txt", "正文 A")
+        await asyncio.sleep(0.01)
+        # doc-b 在信号量上排队，插入尚未开始
+        await engine.index_document("kb-1", "doc-b", "b.txt", "正文 B")
+        await asyncio.sleep(0.01)
+
+        deleting = asyncio.create_task(engine.delete_documents("kb-1", ["doc-b"]))
+        await asyncio.sleep(0.02)
+        rag.release.set()
+        result = await asyncio.wait_for(deleting, 2)
+        await asyncio.sleep(0.05)
+
+        assert result["deleted"] is True
+        assert rag.deleted == ["doc-b"]
+        assert rag.inserted == ["doc-a"]
+        await engine.stop()
+
+    asyncio.run(case())
+
+
 def _stub_content_hash(monkeypatch, duplicate: tuple[str, str] | None) -> None:
     """注入 lightrag 内容哈希模块：返回固定重复文档（路径用于判定归属）。"""
     module = ModuleType("lightrag")

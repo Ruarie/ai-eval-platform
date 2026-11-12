@@ -185,3 +185,99 @@ def test_old_executor_cannot_overwrite_recovered_failure(worker_db_factory):
     with worker_db_factory() as db:
         assert db.get(Task, "task").result["error_code"] == "TIMEOUT"
         assert db.query(TaskEvent).count() == 1
+
+
+def test_lease_lost_registry_marks_and_clears():
+    """心跳续租失败登记丢失；任务收尾后清理，避免长进程内累积。"""
+    task_state.clear_lease_lost("lease-task")
+    assert task_state.is_lease_lost("lease-task") is False
+
+    task_state.mark_lease_lost("lease-task")
+    assert task_state.is_lease_lost("lease-task") is True
+
+    task_state.clear_lease_lost("lease-task")
+    assert task_state.is_lease_lost("lease-task") is False
+
+
+def test_generation_stops_after_batch_when_lease_lost(worker_db_factory, monkeypatch):
+    """批次之间发现租约丢失即停：不再调用供应商，也不覆盖他人任务终态。"""
+    from types import SimpleNamespace
+
+    from app.models import CaseItem, CaseSet, ProtocolProfile, Setting
+
+    with worker_db_factory() as db:
+        db.add(ProtocolProfile(
+            id="profile", name="local", protocol="openai_chat",
+            base_url="https://example.test", model="local",
+        ))
+        db.add(Setting(key="agent_profile_id", value="profile"))
+        db.add(Task(
+            id="task", kind="testcase", status="running", created_by="owner",
+            claimed_by_worker_id="worker", claim_expires_at=utcnow() + timedelta(minutes=1),
+            config={
+                "case_source": {"text": "## 登录\nFR-001 支持账号密码登录。\n## 支付\nFR-002 支持余额支付。"},
+                "max_count": 4,
+            },
+        ))
+        db.commit()
+
+    monkeypatch.setattr(testcase, "profile_connection", lambda *_a, **_k: (
+        "https://example.test", "local", "local-test-placeholder",
+    ))
+    monkeypatch.setattr(testcase, "read_profile_env", lambda _id: SimpleNamespace(full_url=False))
+    calls: list[dict] = []
+
+    def model(**kwargs):
+        calls.append(kwargs)
+        # 第一批返回后模拟「租约被别的节点接管」
+        monkeypatch.setattr(testcase, "is_lease_lost", lambda _tid: True)
+        return SimpleNamespace(
+            text='[{"name":"登录成功","strategy":"正向","priority":"HX","expected":"进入工作台"}]',
+            finish_reason="stop",
+        )
+
+    monkeypatch.setattr(testcase, "call_protocol", model)
+    testcase.run_testcase("task")
+
+    assert len(calls) == 1
+    with worker_db_factory() as db:
+        assert db.get(Task, "task").status == "running"
+        assert db.query(CaseSet).count() == 0
+        assert db.query(CaseItem).count() == 0
+
+
+def test_generation_fails_fast_when_total_budget_exhausted(worker_db_factory, monkeypatch):
+    """总预算为 0 时不发起任何模型调用，直接落 TIMEOUT 便于用户改条数重试。"""
+    from types import SimpleNamespace
+
+    from app.models import CaseSet, ProtocolProfile, Setting
+
+    with worker_db_factory() as db:
+        db.add(ProtocolProfile(
+            id="profile", name="local", protocol="openai_chat",
+            base_url="https://example.test", model="local",
+        ))
+        db.add(Setting(key="agent_profile_id", value="profile"))
+        db.add(Task(
+            id="task", kind="testcase", status="running", created_by="owner",
+            claimed_by_worker_id="worker", claim_expires_at=utcnow() + timedelta(minutes=1),
+            config={"case_source": {"text": "## 登录\nFR-001 支持账号密码登录。"}, "max_count": 4},
+        ))
+        db.commit()
+
+    monkeypatch.setattr(testcase, "profile_connection", lambda *_a, **_k: (
+        "https://example.test", "local", "local-test-placeholder",
+    ))
+    monkeypatch.setattr(testcase, "read_profile_env", lambda _id: SimpleNamespace(full_url=False))
+    monkeypatch.setattr(testcase, "TOTAL_GENERATION_BUDGET_S", 0.0)
+    called: list[dict] = []
+    monkeypatch.setattr(testcase, "call_protocol", lambda **kwargs: called.append(kwargs))
+
+    testcase.run_testcase("task")
+
+    assert called == []
+    with worker_db_factory() as db:
+        task = db.get(Task, "task")
+        assert task.status == "failed"
+        assert task.result["error_code"] == "TIMEOUT"
+        assert db.query(CaseSet).count() == 0

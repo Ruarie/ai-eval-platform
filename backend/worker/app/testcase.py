@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -55,12 +56,15 @@ from .models import (
 )
 from .profile_env import profile_connection, read_profile_env
 from .protocol import ProtocolCallError, call_protocol
-from .task_state import claim_running_task_for_terminal_write, is_cancelled
+from .task_state import claim_running_task_for_terminal_write, is_cancelled, is_lease_lost
 
 logger = logging.getLogger("worker.testcase")
 
 # ─── 超时与确认窗口口径（PRD 5.4.1） ───
 LLM_TIMEOUT_S = 280.0  # 单次 LLM 调用超时；总预算 5 分钟留 20s 落库余量
+# 整单生成总预算：分段最多 12 批，串行叠加会把单任务拖到半小时以上。
+# 到预算即停止后续批次，已生成部分照常落库（有结果就能人工审核）。
+TOTAL_GENERATION_BUDGET_S = 300.0
 CONFIRM_WINDOW_H = 72  # 确认窗口：72h 未确认由扫描器取消
 # 输出被 max_tokens 截断时的重试上限，与 api 侧 llm_client 同口径。
 TRUNCATION_RETRY_CEILING = 32768
@@ -301,7 +305,7 @@ def run_testcase(task_id: str) -> None:
             per_section = min(10, max(6, -(-max_count // len(sections))))
             batches = [(item["title"], item["text"], per_section) for item in sections]
 
-        def invoke(system_prompt: str, user_prompt: str, budget: int):
+        def invoke(system_prompt: str, user_prompt: str, budget: int, timeout_s: float = LLM_TIMEOUT_S):
             return call_protocol(
                 protocol=profile.protocol,
                 base_url=base_url,
@@ -313,31 +317,51 @@ def run_testcase(task_id: str) -> None:
                 temperature=0.3,
                 max_tokens=budget,
                 anthropic_version=profile.anthropic_version,
-                timeout_s=LLM_TIMEOUT_S,
+                timeout_s=timeout_s,
             )
 
         collected: list[dict] = []
         failed_batches: list[str] = []
         truncated_batches = 0
         total_batches = len(batches)
+        deadline_at = time.monotonic() + TOTAL_GENERATION_BUDGET_S
+        deadline_hit = False
         for index, (title, body, per_batch) in enumerate(batches, start=1):
             if is_cancelled(db, task.id):
                 logger.info("testcase task %s cancelled during batched generation", task_id)
                 return
+            # 租约丢失说明任务已被其它节点接管：继续调用只会白烧 token，
+            # 且结果无法落库（终止写入会拿不到任务行）。
+            if is_lease_lost(task.id):
+                logger.warning(
+                    "testcase task %s lease lost, stop at batch %d/%d (collected=%d)",
+                    task_id, index, total_batches, len(collected),
+                )
+                return
+            remaining = deadline_at - time.monotonic()
+            if remaining <= 0:
+                deadline_hit = True
+                logger.warning(
+                    "testcase task %s total budget exhausted at batch %d/%d (collected=%d)",
+                    task_id, index, total_batches, len(collected),
+                )
+                break
             # 传小节名约束 module：模型自创模块名会让同一功能域被拆成多块。
             system, user = build_prompts(
                 body, per_batch, weights=weights, module_name=module_label(title)
             )
             budget = generation_token_budget(per_batch)
+            batch_timeout = max(1.0, min(LLM_TIMEOUT_S, remaining))
             try:
-                result = invoke(system, user, budget)
+                result = invoke(system, user, budget, timeout_s=batch_timeout)
                 # 单批被截断时抬预算重试一次，仍截断则记为该批失败。
                 if (
                     getattr(result, "finish_reason", None) == "length"
                     and budget < TRUNCATION_RETRY_CEILING
                 ):
                     budget = min(TRUNCATION_RETRY_CEILING, budget * 2)
-                    result = invoke(system, user, budget)
+                    leftover = max(1.0, min(LLM_TIMEOUT_S, deadline_at - time.monotonic()))
+                    result = invoke(system, user, budget, timeout_s=leftover)
             except ProtocolCallError as exc:
                 failed_batches.append(f"{title}({exc.code})")
                 logger.warning("testcase batch %s failed: %s", title, exc.code)
@@ -378,8 +402,14 @@ def run_testcase(task_id: str) -> None:
             )
 
         if not collected:
+            if deadline_hit:
+                _fail(
+                    db, task, "TIMEOUT",
+                    f"生成超过总预算 {int(TOTAL_GENERATION_BUDGET_S)}s 仍未产出可用用例，"
+                    "请减少条数或拆分需求后重试",
+                )
             # 全部批次都因长度上限失败时，给可操作的预算错误而不是笼统的上游失败。
-            if truncated_batches == total_batches:
+            elif truncated_batches == total_batches:
                 _fail(
                     db, task, "BUDGET_EXCEEDED",
                     f"模型输出被长度上限截断（max_tokens={budget}），"
@@ -392,6 +422,15 @@ def run_testcase(task_id: str) -> None:
                     "可减少条数或拆分需求后重试",
                 )
             return
+        if deadline_hit:
+            db.add(TaskEvent(
+                task_id=task.id, event="progress",
+                message=(
+                    f"生成达到总预算 {int(TOTAL_GENERATION_BUDGET_S)}s，"
+                    f"仅保留已完成的 {len(collected)} 条，剩余批次未执行"
+                ),
+            ))
+            db.commit()
         if failed_batches:
             db.add(TaskEvent(
                 task_id=task.id, event="progress",

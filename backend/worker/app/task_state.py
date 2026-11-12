@@ -3,7 +3,7 @@
 import logging
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 
 from sqlalchemy import or_, true
 from sqlalchemy.orm import Session
@@ -13,6 +13,29 @@ from .events import push_ws
 from .models import Task, TaskEvent
 
 logger = logging.getLogger("worker.task_state")
+
+# 租约丢失登记表：心跳续租失败后置位，执行器在批次边界据此提前收手，
+# 避免"任务已被别的节点接管、这边还在烧模型调用"。
+_lost_leases: set[str] = set()
+_lost_leases_lock = Lock()
+
+
+def mark_lease_lost(task_id: str) -> None:
+    """心跳续租失败：登记为丢失，执行器据此提前停止。"""
+    with _lost_leases_lock:
+        _lost_leases.add(task_id)
+
+
+def is_lease_lost(task_id: str) -> bool:
+    """该任务的租约是否已丢失（进程内视角，仅用于提前停止）。"""
+    with _lost_leases_lock:
+        return task_id in _lost_leases
+
+
+def clear_lease_lost(task_id: str) -> None:
+    """任务收尾时清理登记，避免长进程内无界增长。"""
+    with _lost_leases_lock:
+        _lost_leases.discard(task_id)
 
 # 独立心跳覆盖阻塞模型调用；租约失效只失败收尾，绝不自动重复供应商调用。
 TASK_LEASE_SECONDS = 120
@@ -131,6 +154,8 @@ def task_lease_heartbeat(task_id: str, worker_id: str):
         while not stopped.wait(TASK_HEARTBEAT_SECONDS):
             try:
                 if not renew_task_lease(task_id, worker_id):
+                    mark_lease_lost(task_id)
+                    logger.warning("task lease lost, stop renewing task=%s", task_id)
                     return
             except Exception:
                 logger.warning("task lease heartbeat failed task=%s", task_id)
@@ -142,6 +167,7 @@ def task_lease_heartbeat(task_id: str, worker_id: str):
     finally:
         stopped.set()
         thread.join(timeout=1)
+        clear_lease_lost(task_id)
 
 
 def recover_expired_task_leases(db: Session) -> int:

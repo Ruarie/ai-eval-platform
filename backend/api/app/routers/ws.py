@@ -21,7 +21,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from shared.event_vocab import EVENT_VERSION, PERSISTENT_KINDS
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from ..adapters import StreamAborted
 from ..agent import LangGraphAgent
@@ -985,6 +985,8 @@ async def _heartbeat_loop(
 
 # Worker 进程外写入的事件轮询间隔（秒）；过短打库，过长进度卡顿。
 _FORWARD_POLL_S = 0.4
+# 空闲退避上限：没有新事件时逐次拉长轮询间隔，避免每条连接恒定 2.5 QPS 打库。
+_FORWARD_IDLE_MAX_S = 2.0
 # Worker 直产事件（M6-D5 / M9-D8）；图节点事件已由 _emit_persistent 即时广播。
 _WORKER_FORWARD_EVENTS = frozenset({"progress", "report", "error"})
 
@@ -1016,14 +1018,16 @@ async def _forward_loop(
     ``true`` → fail-closed 拒收并落 ``error`` 事件（锁外 emit，避免锁重入）。
     历史无版本行（旧 Worker / V1.71 前数据）按当前版本解释，宽容放行。
     """
+    interval = _FORWARD_POLL_S
     while not stop.is_set():
         try:
-            await asyncio.wait_for(stop.wait(), timeout=_FORWARD_POLL_S)
+            await asyncio.wait_for(stop.wait(), timeout=interval)
             return
         except TimeoutError:
             pass
         db = SessionLocal()
         rejected: dict[str, str | None] = {}
+        seen = False
         try:
             async with state.lock:
                 rows = (
@@ -1036,6 +1040,7 @@ async def _forward_loop(
                     .order_by(WsEvent.event_id)
                     .all()
                 )
+                seen = bool(rows)
                 for row in rows:
                     if not _should_forward_worker_event(row.event, row.task_id):
                         # 已由本连接 _emit 发出的对话错误：只推进游标，避免每轮重扫。
@@ -1082,6 +1087,8 @@ async def _forward_loop(
             db.close()
         # strict=true：fail-closed 拒收并落 error。必须在连接锁外 emit（_send
         # 会再取 state.lock，锁内调用将死锁）；按 kind 去重避免同轮刷屏。
+        # 有事件立刻恢复高频；连续空轮询逐次拉长到上限，连接空闲时不再恒定打库。
+        interval = _FORWARD_POLL_S if seen else min(_FORWARD_IDLE_MAX_S, interval * 1.5)
         if not rejected:
             continue
         db = SessionLocal()
@@ -2518,12 +2525,15 @@ async def _expire_overdue_approvals_once() -> int:
     expired: list[tuple[str, str]] = []
     db = SessionLocal()
     try:
+        # 只加载标识与卡片，其余会话大字段延迟读取（不产生额外查询）。
         rows = (
             db.query(AgentSession)
+            .options(load_only(AgentSession.id, AgentSession.pending_confirm))
             .filter(AgentSession.pending_confirm.isnot(None))
             .all()
         )
         for session in rows:
+            session_id = session.id
             card = session.pending_confirm or {}
             meta = card.get("meta") if isinstance(card.get("meta"), dict) else {}
             approval_id = str(card.get("id") or "")
@@ -2534,7 +2544,7 @@ async def _expire_overdue_approvals_once() -> int:
             # 锁内二次判定：与 ack 清卡并发时，卡已消费/被刷新则跳过
             locked = (
                 db.query(AgentSession)
-                .filter(AgentSession.id == session.id)
+                .filter(AgentSession.id == session_id)
                 .with_for_update()
                 .first()
             )
@@ -2546,9 +2556,9 @@ async def _expire_overdue_approvals_once() -> int:
                 or str(locked_card.get("id") or "") != approval_id
             ):
                 continue
-            _clear_pending_confirm(db, session.id)
+            _clear_pending_confirm(db, session_id)
             db.commit()
-            expired.append((session.id, approval_id))
+            expired.append((session_id, approval_id))
         state = _ConnectionState()
         for session_id, approval_id in expired:
             # 无在线连接时仅落库（websocket=None）；在线者经 Hub 广播收到，
