@@ -689,6 +689,69 @@ def _prompt_cache_flag(prompt_cache: bool | None) -> bool:
     return settings.prompt_cache_enabled if prompt_cache is None else prompt_cache
 
 
+def _build_request_body(
+    *,
+    protocol: str,
+    base: str,
+    model: str,
+    messages: list[dict],
+    system: str | None,
+    temperature: float,
+    max_tokens: int,
+    reasoning_enabled: bool,
+    reasoning_effort: str,
+    tools: list[dict] | None,
+    system_segments: tuple[SystemSegment, ...] | None,
+    prompt_cache: bool | None,
+) -> dict:
+    """按协议拼装上游请求体；流式与非流式共用同一份逻辑，避免两处漂移。
+
+    ``base`` 只用于识别 OpenAI 兼容端点（Mimo 等）是否需要额外思考字段。
+    """
+    native_tools = _adapt_tools(tools, protocol)
+    if protocol == "openai_chat":
+        chat: list[dict] = (
+            ([{"role": "system", "content": system}] if system else [])
+            + _adapt_messages(messages, protocol)
+        )
+        body: dict = {
+            "model": model,
+            "messages": chat,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if native_tools:
+            body["tools"] = native_tools
+        _apply_compatible_thinking(body, base, model, reasoning_enabled, reasoning_effort)
+        _apply_openai_reasoning(
+            body, model=model, enabled=reasoning_enabled, effort=reasoning_effort
+        )
+        return body
+
+    body = {
+        "model": model,
+        "messages": _adapt_messages(messages, protocol),
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    if native_tools:
+        body["tools"] = native_tools
+    if system:
+        body["system"] = _anthropic_system_param(
+            system,
+            system_segments,
+            cache_enabled=_prompt_cache_flag(prompt_cache),
+        )
+    if reasoning_enabled and _supports_anthropic_thinking(model):
+        body["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": _anthropic_thinking_budget(max_tokens, reasoning_effort),
+        }
+        # Anthropic extended thinking 要求 temperature 使用默认值 1。
+        body["temperature"] = 1.0
+    return body
+
+
 def call_protocol(
     *,
     protocol: str,
@@ -727,49 +790,20 @@ def call_protocol(
     base = base_url.strip() if full_url else _service_base_url(base_url)
     client: object | None = None
 
-    if protocol == "openai_chat":
-        chat: list[dict] = ([{"role": "system", "content": system}] if system else []) + _adapt_messages(messages, protocol)
-        body: dict = {
-            "model": model,
-            "messages": chat,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        native_tools = _adapt_tools(tools, protocol)
-        if native_tools:
-            body["tools"] = native_tools
-        # 非流式调用默认关闭 Mimo 思考，避免规划 JSON 被 reasoning 占满；Agent
-        # 若显式打开则由 ModelGateway 传入 reasoning_enabled=True。
-        _apply_compatible_thinking(body, base, model, reasoning_enabled, reasoning_effort)
-        _apply_openai_reasoning(
-            body,
-            model=model,
-            enabled=reasoning_enabled,
-            effort=reasoning_effort,
-        )
-    else:  # anthropic_messages
-        body = {
-            "model": model,
-            "messages": _adapt_messages(messages, protocol),
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-        native_tools = _adapt_tools(tools, protocol)
-        if native_tools:
-            body["tools"] = native_tools
-        if system:
-            body["system"] = _anthropic_system_param(
-                system,
-                system_segments,
-                cache_enabled=_prompt_cache_flag(prompt_cache),
-            )
-        if reasoning_enabled and _supports_anthropic_thinking(model):
-            body["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": _anthropic_thinking_budget(max_tokens, reasoning_effort),
-            }
-            # Anthropic extended thinking 要求 temperature 使用默认值 1。
-            body["temperature"] = 1.0
+    body = _build_request_body(
+        protocol=protocol,
+        base=base,
+        model=model,
+        messages=messages,
+        system=system,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        reasoning_enabled=reasoning_enabled,
+        reasoning_effort=reasoning_effort,
+        tools=tools,
+        system_segments=system_segments,
+        prompt_cache=prompt_cache,
+    )
     started = time.perf_counter()
     try:
         if protocol == "openai_chat":
@@ -881,26 +915,19 @@ def stream_protocol(
         return completed
 
     if protocol == "openai_chat":
-        chat: list[dict] = (
-            ([{"role": "system", "content": system}] if system else [])
-            + _adapt_messages(messages, protocol)
-        )
-        body: dict = {
-            "model": model,
-            "messages": chat,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        native_tools = _adapt_tools(tools, protocol)
-        if native_tools:
-            body["tools"] = native_tools
-        # 流式思考是否开启由 Agent 设置控制；默认值保持 Mimo 旧行为（开启）。
-        _apply_compatible_thinking(body, base, model, reasoning_enabled, reasoning_effort)
-        _apply_openai_reasoning(
-            body,
+        body = _build_request_body(
+            protocol=protocol,
+            base=base,
             model=model,
-            enabled=reasoning_enabled,
-            effort=reasoning_effort,
+            messages=messages,
+            system=system,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            reasoning_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
+            tools=tools,
+            system_segments=system_segments,
+            prompt_cache=prompt_cache,
         )
 
         def delta_of(data: dict) -> tuple[str, str]:
@@ -948,27 +975,20 @@ def stream_protocol(
             return drain_tool_calls(chat_calls)
 
     else:  # anthropic_messages
-        body = {
-            "model": model,
-            "messages": _adapt_messages(messages, protocol),
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-        native_tools = _adapt_tools(tools, protocol)
-        if native_tools:
-            body["tools"] = native_tools
-        if system:
-            body["system"] = _anthropic_system_param(
-                system,
-                system_segments,
-                cache_enabled=_prompt_cache_flag(prompt_cache),
-            )
-        if reasoning_enabled and _supports_anthropic_thinking(model):
-            body["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": _anthropic_thinking_budget(max_tokens, reasoning_effort),
-            }
-            body["temperature"] = 1.0
+        body = _build_request_body(
+            protocol=protocol,
+            base=base,
+            model=model,
+            messages=messages,
+            system=system,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            reasoning_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
+            tools=tools,
+            system_segments=system_segments,
+            prompt_cache=prompt_cache,
+        )
 
         def delta_of(data: dict) -> tuple[str, str]:  # noqa: F811
             if data.get("type") == "content_block_delta":
