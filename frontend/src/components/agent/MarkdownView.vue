@@ -603,20 +603,49 @@ const structuredValue = computed(() => parseStandaloneJson(renderedSource.value)
 const showStructuredValue = computed(() => !props.isStreaming && structuredValue.value !== undefined)
 const renderedHtml = computed(() => renderMarkdown(renderedSource.value))
 
-/** 流式正文按动画帧合并，避免每个 token 都全量解析 Markdown 和更新 v-html。 */
-function syncRenderedSource(content: string, streaming: boolean): void {
+/**
+ * 流式正文节流：整段 Markdown 重解析是线性成本，逐 token（约 60 次/秒）解析长
+ * 思考链会持续占满主线程。这里按 140ms 合并且总是渲染最新全文，流结束时立即
+ * 补一帧，保证结尾不缺字。
+ */
+const STREAM_RENDER_INTERVAL_MS = 140
+let lastStreamRenderAt = 0
+let pendingStreamContent = ''
+let streamFlushTimer: number | undefined
+
+function clearStreamTimers(): void {
   if (markdownRenderFrame !== undefined) {
     window.cancelAnimationFrame(markdownRenderFrame)
     markdownRenderFrame = undefined
   }
+  if (streamFlushTimer !== undefined) {
+    window.clearTimeout(streamFlushTimer)
+    streamFlushTimer = undefined
+  }
+}
+
+function flushStreamContent(): void {
+  streamFlushTimer = undefined
+  lastStreamRenderAt = Date.now()
+  renderedSource.value = pendingStreamContent
+}
+
+function syncRenderedSource(content: string, streaming: boolean): void {
   if (!streaming) {
+    clearStreamTimers()
+    pendingStreamContent = content
     renderedSource.value = content
     return
   }
-  markdownRenderFrame = window.requestAnimationFrame(() => {
+  pendingStreamContent = content
+  const elapsed = Date.now() - lastStreamRenderAt
+  if (elapsed >= STREAM_RENDER_INTERVAL_MS) {
+    lastStreamRenderAt = Date.now()
     renderedSource.value = content
-    markdownRenderFrame = undefined
-  })
+    return
+  }
+  if (streamFlushTimer !== undefined) return
+  streamFlushTimer = window.setTimeout(flushStreamContent, STREAM_RENDER_INTERVAL_MS - elapsed)
 }
 
 /**
@@ -666,7 +695,7 @@ onBeforeUnmount(() => {
     themeObserver.disconnect()
     themeObserver = null
   }
-  if (markdownRenderFrame !== undefined) window.cancelAnimationFrame(markdownRenderFrame)
+  clearStreamTimers()
   if (mermaidRenderFrame !== undefined) window.cancelAnimationFrame(mermaidRenderFrame)
 })
 

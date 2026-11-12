@@ -59,7 +59,8 @@
     </summary>
 
     <!-- 展开后的思考详情内容（无外边框、无底色背景） -->
-    <div class="reasoning-content">
+    <!-- 折叠态不挂载 Markdown：整段思考链的解析成本不因「用户不展开」而白付。 -->
+    <div v-if="expanded" class="reasoning-content">
       <MarkdownView :content="content" :is-streaming="!ended" />
     </div>
   </details>
