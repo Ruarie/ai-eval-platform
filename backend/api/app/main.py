@@ -193,6 +193,10 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(checkpoint_ttl_loop())
     # #3（V1.73）：审批卡 TTL 扫描（过期 tool_approval 卡清卡 + expired 终态）
     approval_expiry = asyncio.create_task(approval_expiry_loop())
+    # 进程级 WS 事件轮询：替代「每条连接各自轮询 ws_events」，经连接 Hub 广播。
+    from .agent.ws_event_poller import WS_EVENT_POLLER
+
+    WS_EVENT_POLLER.start()
     from .agent.loop_service import LoopService
 
     app.state.loop_service = LoopService()
@@ -208,6 +212,7 @@ async def lifespan(app: FastAPI):
             # 关闭退场必须 fail-closed，不能沿用 configure(None) 的直通语义：
             # 此刻线程池里可能仍有旧执行器在跑，拿不到工厂也不能绕过工作区互斥。
             workspace_guard.shutdown()
+            await WS_EVENT_POLLER.close()
             for task in (cleanup_task, approval_expiry):
                 task.cancel()
             for task in (cleanup_task, approval_expiry):

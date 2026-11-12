@@ -125,52 +125,32 @@ async def test_forward_loop_pushes_worker_events_and_skips_agent_error(monkeypat
             self.task_id = task_id
             self.ts = None
 
-    batches = [
-        [
-            _Row(5, "progress", {"percent": 10}, "t-1"),
-            _Row(6, "error", {"code": "INTERNAL", "message": "对话失败"}, None),
-            _Row(7, "report", {"report_id": "r-1"}, "t-1"),
-        ],
-        [],
-    ]
-
-    class _Query:
-        def filter(self, *_args):
-            return self
-
-        def order_by(self, *_args):
-            return self
-
-        def all(self):
-            return batches.pop(0) if batches else []
-
-    class _Db:
-        def query(self, *_args):
-            return _Query()
-
-        def close(self) -> None:
-            pass
+    from app.agent import ws_event_poller as poller_mod
 
     sent: list[dict] = []
 
-    class _WS:
-        async def send_json(self, frame: dict) -> None:
-            sent.append(frame)
+    async def fake_broadcast(_session_id: str, frame: dict) -> bool:
+        sent.append(frame)
+        return True
 
-    monkeypatch.setattr(ws, "SessionLocal", lambda: _Db())
-    monkeypatch.setattr(ws, "_FORWARD_POLL_S", 0.01)
-    state = ws._ConnectionState()
-    state.cursor = 4
-    stop = asyncio.Event()
+    monkeypatch.setattr(
+        poller_mod.SESSION_CONNECTION_HUB, "broadcast_event", fake_broadcast
+    )
+    poller = poller_mod.WsEventPoller()
 
-    async def _stop_soon() -> None:
-        await asyncio.sleep(0.05)
-        stop.set()
+    await poller._dispatch(
+        {"session_id": "s-1", "task_id": "t-1", "event_id": 5, "event": "progress", "payload": {"percent": 10}, "ts": None}
+    )
+    # error 无 task_id 属于对话内错误，已由 _emit_persistent 发出，不再转发
+    await poller._dispatch(
+        {"session_id": "s-1", "task_id": None, "event_id": 6, "event": "error", "payload": {"code": "INTERNAL"}, "ts": None}
+    )
+    await poller._dispatch(
+        {"session_id": "s-1", "task_id": "t-1", "event_id": 7, "event": "report", "payload": {"report_id": "r-1"}, "ts": None}
+    )
 
-    await asyncio.gather(ws._forward_loop(_WS(), state, "s-1", stop), _stop_soon())
     assert [frame["event"] for frame in sent] == ["progress", "report"]
     assert [frame["event_id"] for frame in sent] == [5, 7]
-    assert state.cursor == 7
 
 
 

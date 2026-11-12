@@ -979,11 +979,8 @@ async def _heartbeat_loop(
             )
 
 
-# Worker 进程外写入的事件轮询间隔（秒）；过短打库，过长进度卡顿。
-_FORWARD_POLL_S = 0.4
-# 空闲退避上限：没有新事件时逐次拉长轮询间隔，避免每条连接恒定 2.5 QPS 打库。
-_FORWARD_IDLE_MAX_S = 2.0
 # Worker 直产事件（M6-D5 / M9-D8）；图节点事件已由 _emit_persistent 即时广播。
+# 这些事件由进程级 WsEventPoller 统一轮询后经连接 Hub 广播。
 _WORKER_FORWARD_EVENTS = frozenset({"progress", "report", "error"})
 
 
@@ -996,116 +993,6 @@ def _should_forward_worker_event(event: str, task_id: str | None) -> bool:
     if event in {"progress", "report"}:
         return True
     return event == "error" and bool(task_id)
-
-
-async def _forward_loop(
-    websocket: WebSocket,
-    state: _ConnectionState,
-    session_id: str,
-    stop: asyncio.Event,
-) -> None:
-    """按游标增量把 Worker 写入的 ws_events 推到当前连接（M9-D8）。
-
-    查询 / 发送 / 游标推进在同一把连接锁内，避免与 ``_emit_persistent``
-    并发重复推送。使用独立 Session，不占用收包循环的 ``db``。
-
-    #4 D3/D4 转发护栏：候选行先剥离词汇版本保留字段并做词汇表校验——
-    ``event_vocab_strict=false``（默认）未知 kind/版本不符 → 告警并跳过转发；
-    ``true`` → fail-closed 拒收并落 ``error`` 事件（锁外 emit，避免锁重入）。
-    历史无版本行（旧 Worker / V1.71 前数据）按当前版本解释，宽容放行。
-    """
-    interval = _FORWARD_POLL_S
-    while not stop.is_set():
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=interval)
-            return
-        except TimeoutError:
-            pass
-        db = SessionLocal()
-        rejected: dict[str, str | None] = {}
-        seen = False
-        try:
-            async with state.lock:
-                rows = (
-                    db.query(WsEvent)
-                    .filter(
-                        WsEvent.session_id == session_id,
-                        WsEvent.event_id > state.cursor,
-                        WsEvent.event.in_(_WORKER_FORWARD_EVENTS),
-                    )
-                    .order_by(WsEvent.event_id)
-                    .all()
-                )
-                seen = bool(rows)
-                for row in rows:
-                    if not _should_forward_worker_event(row.event, row.task_id):
-                        # 已由本连接 _emit 发出的对话错误：只推进游标，避免每轮重扫。
-                        state.cursor = max(state.cursor, row.event_id)
-                        continue
-                    payload, row_version = _split_event_version(row.payload or {})
-                    reason = _event_vocab_mismatch(row.event, row_version)
-                    if reason is not None:
-                        # 无论开关如何都先推进游标，避免同一事件每轮重复告警；
-                        # strict=false 只跳过，strict=true 由锁外统一落 error。
-                        state.cursor = max(state.cursor, row.event_id)
-                        if settings.event_vocab_strict:
-                            rejected.setdefault(row.event, row_version)
-                        else:
-                            logger.warning(
-                                "Agent WS 转发跳过未契约事件 event=%s version=%s reason=%s",
-                                row.event,
-                                row_version,
-                                reason,
-                            )
-                        continue
-                    frame = _frame(
-                        session_id,
-                        row.event,
-                        row.event_id,
-                        payload,
-                        task_id=row.task_id,
-                        ts=row.ts,
-                    )
-                    try:
-                        await websocket.send_json(frame)
-                        state.cursor = max(state.cursor, row.event_id)
-                    except (WebSocketDisconnect, RuntimeError):
-                        return
-                    except Exception as exc:
-                        logger.info(
-                            "Agent WS 转发发送失败 type=%s",
-                            type(exc).__name__,
-                        )
-                        return
-        except Exception as exc:
-            logger.info("Agent WS 转发查询失败 type=%s", type(exc).__name__)
-        finally:
-            db.close()
-        # strict=true：fail-closed 拒收并落 error。必须在连接锁外 emit（_send
-        # 会再取 state.lock，锁内调用将死锁）；按 kind 去重避免同轮刷屏。
-        # 有事件立刻恢复高频；连续空轮询逐次拉长到上限，连接空闲时不再恒定打库。
-        interval = _FORWARD_POLL_S if seen else min(_FORWARD_IDLE_MAX_S, interval * 1.5)
-        if not rejected:
-            continue
-        db = SessionLocal()
-        try:
-            for event, version in rejected.items():
-                logger.error(
-                    "Agent WS fail-closed 拒绝未契约事件 event=%s version=%s",
-                    event,
-                    version,
-                )
-                await _emit_error(
-                    db,
-                    websocket,
-                    state,
-                    session_id,
-                    AppError(ErrorCode.INTERNAL, "收到未契约的 Worker 事件，已拒绝转发"),
-                )
-        except Exception as exc:
-            logger.info("Agent WS fail-closed 落 error 失败 type=%s", type(exc).__name__)
-        finally:
-            db.close()
 
 
 async def _replay_events(
@@ -2256,7 +2143,6 @@ async def agent_websocket(websocket: WebSocket) -> None:
     connection_id = uuid4().hex
     heartbeat_stop = asyncio.Event()
     heartbeat_task: asyncio.Task[None] | None = None
-    forward_task: asyncio.Task[None] | None = None
     active_turn: asyncio.Task[None] | None = None
     try:
         try:
@@ -2313,11 +2199,6 @@ async def agent_websocket(websocket: WebSocket) -> None:
                 heartbeat_stop,
             ),
             name=f"agent-heartbeat-{session.id}",
-        )
-        # Worker 进程外写入的 progress/report/error：在线连接靠本循环实时推送。
-        forward_task = asyncio.create_task(
-            _forward_loop(websocket, state, session.id, heartbeat_stop),
-            name=f"agent-forward-{session.id}",
         )
 
         while True:
@@ -2445,7 +2326,7 @@ async def agent_websocket(websocket: WebSocket) -> None:
         logger.info("Agent WS 断开 session=%s", session.id if session else "unknown")
     finally:
         heartbeat_stop.set()
-        cleanup_tasks = [task for task in (heartbeat_task, forward_task) if task is not None]
+        cleanup_tasks = [task for task in (heartbeat_task,) if task is not None]
         for task in cleanup_tasks:
             task.cancel()
         if cleanup_tasks:

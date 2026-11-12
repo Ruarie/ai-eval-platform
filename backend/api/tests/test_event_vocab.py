@@ -125,79 +125,74 @@ async def test_translate_event_tolerates_version_drift_and_translates(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_forward_loop_skips_unknown_event_in_gray_mode(monkeypatch) -> None:
-    """event_vocab_strict=false：未知 kind / 版本不符 → 告警跳过，正常事件照常转发。"""
-    monkeypatch.setattr(ws, "settings", _FakeSettings(event_vocab_strict=False))
+async def test_poller_skips_unknown_event_in_gray_mode(monkeypatch) -> None:
+    """event_vocab_strict=false：版本漂移的事件告警跳过，当前版本照常广播。"""
+    from app.agent import ws_event_poller as poller_mod
+
+    monkeypatch.setattr(poller_mod, "settings", _FakeSettings(event_vocab_strict=False))
     sent: list[dict] = []
-    batches = [
-        [
-            _Row(5, "progress", {"percent": 10, "event_version": EVENT_VERSION}, "t-1"),
-            _Row(6, "error", {"code": "INTERNAL", "message": "x", "event_version": EVENT_VERSION}, "t-1"),
-            _Row(7, "progress", {"percent": 20, "event_version": "event.v9"}, "t-1"),
-        ],
-        [],
-    ]
 
-    class _WS:
-        async def send_json(self, frame: dict) -> None:
-            sent.append(frame)
+    async def fake_broadcast(_session_id: str, frame: dict) -> bool:
+        sent.append(frame)
+        return True
 
-    monkeypatch.setattr(ws, "SessionLocal", lambda: _BatchesDb(batches))
-    monkeypatch.setattr(ws, "_FORWARD_POLL_S", 0.01)
-    state = ws._ConnectionState()
-    state.cursor = 4
-    stop = asyncio.Event()
+    monkeypatch.setattr(
+        poller_mod.SESSION_CONNECTION_HUB, "broadcast_event", fake_broadcast
+    )
+    poller = poller_mod.WsEventPoller()
 
-    async def _stop_soon() -> None:
-        await asyncio.sleep(0.05)
-        stop.set()
+    await poller._dispatch({
+        "session_id": "s-1", "task_id": "t-1", "event_id": 5,
+        "event": "progress", "payload": {"percent": 10, "event_version": EVENT_VERSION}, "ts": None,
+    })
+    await poller._dispatch({
+        "session_id": "s-1", "task_id": "t-1", "event_id": 7,
+        "event": "progress", "payload": {"percent": 20, "event_version": "event.v9"}, "ts": None,
+    })
 
-    await asyncio.gather(ws._forward_loop(_WS(), state, "s-1", stop), _stop_soon())
-    # 版本漂移行（event.v9）被跳过（灰度告警），当前版本行照常转发
-    assert [frame["event_id"] for frame in sent] == [5, 6]
-    assert state.cursor == 7
-    # 转发帧不含保留字段（剥离后才广播）
-    assert all("event_version" not in frame["payload"] for frame in sent)
-    assert all(frame["vocab_version"] == EVENT_VERSION for frame in sent)
+    assert [frame["event_id"] for frame in sent] == [5]
+    # 广播帧不含保留字段（剥离后才发出）
+    assert "event_version" not in sent[0]["payload"]
+    assert sent[0]["vocab_version"] == EVENT_VERSION
 
 
 @pytest.mark.asyncio
-async def test_forward_loop_fail_closed_emits_error_in_strict_mode(monkeypatch) -> None:
-    """event_vocab_strict=true：fail-closed 拒收并落 error（按 kind 去重）。"""
-    monkeypatch.setattr(ws, "settings", _FakeSettings(event_vocab_strict=True))
+async def test_poller_fail_closed_emits_error_once_in_strict_mode(monkeypatch) -> None:
+    """event_vocab_strict=true：拒收并落一次 error（同会话同 kind 去重）。"""
+    from app.agent import ws_event_poller as poller_mod
+
+    monkeypatch.setattr(poller_mod, "settings", _FakeSettings(event_vocab_strict=True))
     sent: list[dict] = []
-    rejected_errors: list[dict] = []
-    batches = [
-        [
-            _Row(5, "progress", {"percent": 10, "event_version": "event.v9"}, "t-1"),
-            _Row(6, "progress", {"percent": 12, "event_version": "event.v9"}, "t-1"),
-        ],
-        [],
-    ]
+    emitted: list[tuple[str, dict]] = []
 
-    class _WS:
-        async def send_json(self, frame: dict) -> None:
-            sent.append(frame)
+    async def fake_broadcast(_session_id: str, frame: dict) -> bool:
+        sent.append(frame)
+        return True
 
-    async def fake_emit_error(_db, _ws, _state, _session_id, error) -> None:
-        rejected_errors.append({"code": error.code.value, "message": error.message})
+    async def fake_emit(_db, _websocket, _state, _session_id, event, payload, **_kw) -> bool:
+        emitted.append((event, dict(payload)))
+        return True
 
-    monkeypatch.setattr(ws, "_emit_error", fake_emit_error)
-    monkeypatch.setattr(ws, "SessionLocal", lambda: _BatchesDb(batches))
-    monkeypatch.setattr(ws, "_FORWARD_POLL_S", 0.01)
-    state = ws._ConnectionState()
-    state.cursor = 4
-    stop = asyncio.Event()
+    class _Db:
+        def close(self) -> None:
+            pass
 
-    async def _stop_soon() -> None:
-        await asyncio.sleep(0.05)
-        stop.set()
+    monkeypatch.setattr(
+        poller_mod.SESSION_CONNECTION_HUB, "broadcast_event", fake_broadcast
+    )
+    monkeypatch.setattr(poller_mod, "SessionLocal", _Db)
+    monkeypatch.setattr(ws, "_emit_persistent", fake_emit)
+    poller = poller_mod.WsEventPoller()
 
-    await asyncio.gather(ws._forward_loop(_WS(), state, "s-1", stop), _stop_soon())
+    for event_id in (5, 6):
+        await poller._dispatch({
+            "session_id": "s-1", "task_id": "t-1", "event_id": event_id,
+            "event": "progress", "payload": {"percent": 10, "event_version": "event.v9"}, "ts": None,
+        })
+
     assert sent == []
-    assert state.cursor == 6
-    assert len(rejected_errors) == 1  # 同 kind 去重，不刷屏
-    assert rejected_errors[0]["code"] == "INTERNAL"
+    assert len(emitted) == 1
+    assert emitted[0][0] == "error"
 
 
 def _make_fake_emit(emitted: list[tuple[str, dict]]) -> object:
