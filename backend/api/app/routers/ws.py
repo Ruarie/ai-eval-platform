@@ -18,6 +18,8 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from shared.event_seq import next_event_id as take_event_id
+from shared.event_seq import realign_event_seq
 from shared.event_vocab import EVENT_VERSION, PERSISTENT_KINDS
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -813,22 +815,12 @@ def _consume_ws_ticket(db: Session, ticket: str | None) -> User:
 
 
 def _next_event_id(db: Session, session_id: str) -> int:
-    """计算会话内下一个单调事件号；先锁会话行，避免与 Worker 撞号。"""
-    locked = (
-        db.query(AgentSession.id)
-        .filter(AgentSession.id == session_id)
-        .with_for_update()
-        .first()
-    )
-    if not locked:
-        return 1
-    row = (
-        db.query(WsEvent.event_id)
-        .filter(WsEvent.session_id == session_id)
-        .order_by(WsEvent.event_id.desc())
-        .first()
-    )
-    return int(row[0]) + 1 if row else 1
+    """取会话内下一个单调事件号（一条 UPDATE ... RETURNING，见 shared.event_seq）。
+
+    会话不存在时按 1 兜底：随后插入会因外键失败，由调用方按写入失败处理。
+    """
+    event_id = take_event_id(db, session_id)
+    return event_id if event_id is not None else 1
 
 
 async def _emit_persistent(
@@ -867,6 +859,9 @@ async def _emit_persistent(
         except IntegrityError:
             db.rollback()
             if attempt == 0:
+                # 计数器落后于历史（迁移窗口内旧进程写入/人工导入）时对齐后重试。
+                realign_event_seq(db, session_id)
+                db.commit()
                 continue
             logger.error(
                 "Agent WS 事件号冲突 session=%s event=%s",

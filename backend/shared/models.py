@@ -179,6 +179,11 @@ class Session(Base):
     pending_confirm = Column(JSONB(none_as_null=True), nullable=True)
     # 确认卡属于提出该卡的成员，团队协作者不能替其确认、拒绝或覆盖。
     pending_confirm_author_id = Column(String, ForeignKey("users.id"), nullable=True)
+    # 会话内 WS 事件号计数器：取号用 UPDATE ... RETURNING 一条语句完成，
+    # 不再每次 SELECT MAX(event_id) 扫索引；迁移时按历史最大值回填。
+    last_event_id = Column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
     # dsh 借鉴 D7/F1：工作区绑定（数据域归属）。首条消息发送落库时固化、运行期
     # 不可变（换绑 = 新建会话）；null/null = legacy 临时工作区（现状兜底）。
     # FK ON DELETE RESTRICT——purge 需先显式解绑，绝不用 SET NULL（静默回落 legacy）。

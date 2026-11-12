@@ -80,36 +80,28 @@ def test_response_completed_keeps_public_identifiers():
     assert frame["payload"] == {"finish_reason": "stop", "role": "assistant"}
 
 
-def test_next_event_id_locks_session_row():
-    """与 Worker push_ws 共用会话行锁，避免并发撞号后静默丢事件。"""
+def test_next_event_id_uses_session_counter():
+    """事件号来自会话计数器（UPDATE ... RETURNING），会话不存在时按 1 兜底。"""
+
+    class _Result:
+        def __init__(self, row) -> None:
+            self._row = row
+
+        def first(self):
+            return self._row
 
     class _Db:
         def __init__(self) -> None:
-            self.locked = False
-            self._step = 0
+            self.executed: list[str] = []
 
-        def query(self, *_args):
-            return self
-
-        def filter(self, *_args):
-            return self
-
-        def with_for_update(self):
-            self.locked = True
-            return self
-
-        def order_by(self, *_args):
-            return self
-
-        def first(self):
-            self._step += 1
-            if self._step == 1:
-                return ("s-1",)
-            return (4,)
+        def execute(self, _sql, params):
+            self.executed.append(params["session_id"])
+            return _Result((4,) if params["session_id"] == "s-1" else None)
 
     db = _Db()
-    assert ws._next_event_id(db, "s-1") == 5
-    assert db.locked is True
+    assert ws._next_event_id(db, "s-1") == 4
+    assert ws._next_event_id(db, "missing") == 1
+    assert db.executed == ["s-1", "missing"]
 
 
 def test_should_forward_worker_event() -> None:
