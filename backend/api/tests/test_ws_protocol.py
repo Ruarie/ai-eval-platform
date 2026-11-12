@@ -1,7 +1,5 @@
 """WebSocket 流式事件语义回归测试。"""
 
-import asyncio
-
 import pytest
 
 from app.models import Session as AgentSession
