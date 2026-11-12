@@ -1,33 +1,19 @@
 <template>
   <div class="dispatch-page" data-od-id="dispatch-page">
     <!-- ═══ 1. 调度大盘 KPI 趋势带（数字滚动 + 迷你趋势线 + 发光描边） ═══ -->
-    <div class="kpi-grid mb16" data-od-id="dispatch-kpis" style="--glow-c: var(--c-agent)">
-      <div class="kpi kpi-glow">
-        <div class="kpi-num num">{{ overviewReady ? onlineDisplay + ' / ' + totalWorkers : '—' }}</div>
-        <div class="kpi-label">在线 Worker 节点</div>
-      </div>
-      <div class="kpi kpi-trend kpi-glow">
-        <div class="kpi-num num">{{ overviewReady ? queueDisplay : '—' }}</div>
-        <div class="kpi-label">排队队列深度</div>
-        <svg class="spark" viewBox="0 0 76 24" preserveAspectRatio="none"><polyline :points="sparkPoints(histQueue)" /></svg>
-      </div>
-      <div class="kpi kpi-trend kpi-glow">
-        <div class="kpi-num num">{{ overviewReady ? runningDisplay : '—' }}</div>
-        <div class="kpi-label">运行中任务</div>
-        <svg class="spark" viewBox="0 0 76 24" preserveAspectRatio="none"><polyline :points="sparkPoints(histRunning)" /></svg>
-      </div>
-      <div class="kpi kpi-trend kpi-glow">
-        <div class="kpi-num num">{{ overviewReady ? costDisplay : '—' }}<span class="unit">ms</span></div>
-        <div class="kpi-label">平均分发调度延迟</div>
-        <svg class="spark" viewBox="0 0 76 24" preserveAspectRatio="none"><polyline :points="sparkPoints(histCost)" /></svg>
-      </div>
-      <div class="kpi kpi-trend kpi-glow">
-        <div class="kpi-num num">{{ overviewReady ? assignedDisplay : '—' }}</div>
-        <div class="kpi-label">今日已分配任务</div>
-        <svg class="spark" viewBox="0 0 76 24" preserveAspectRatio="none"><polyline :points="sparkPoints(histAssigned)" /></svg>
-      </div>
-    </div>
-
+    <DispatchKpiBand
+      :ready="overviewReady"
+      :online="onlineDisplay"
+      :total-workers="totalWorkers"
+      :queue="queueDisplay"
+      :running="runningDisplay"
+      :cost="costDisplay"
+      :assigned="assignedDisplay"
+      :hist-queue="histQueue"
+      :hist-running="histRunning"
+      :hist-cost="histCost"
+      :hist-assigned="histAssigned"
+    />
     <!-- ═══ 2. 沉浸式大星图与悬浮控制坞 (Immersive Star Constellation & Floating Glass Docks) ═══ -->
     <div
       class="panel glow immersive-monitor-panel mb16"
@@ -595,6 +581,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import KindTag from '../components/common/KindTag.vue'
 import { api } from '../api/http'
+import DispatchKpiBand from '../components/dispatch/DispatchKpiBand.vue'
 import type { DispatchOverview, DispatchWorker, Task, TaskKind, TaskStatus } from '../api/types'
 
 const message = useMessage()
@@ -646,17 +633,6 @@ function useCountUp(source: { value: number }) {
   // 组件卸载时取消未完成的滚动动画，避免回调写入已销毁组件的 ref。
   onBeforeUnmount(() => cancelAnimationFrame(raf))
   return display
-}
-
-/** 迷你趋势线：历史序列 → polyline 坐标点（76×24 视窗） */
-function sparkPoints(hist: number[]): string {
-  if (hist.length < 2) return ''
-  const max = Math.max(...hist, 1)
-  const min = Math.min(...hist, 0)
-  const span = Math.max(max - min, 1)
-  return hist
-    .map((v, i) => `${((i / (hist.length - 1)) * 74 + 1).toFixed(1)},${(22 - ((v - min) / span) * 20).toFixed(1)}`)
-    .join(' ')
 }
 
 // 各 KPI 历史序列（每次全量刷新追加，保留最近 24 点）
