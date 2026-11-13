@@ -224,6 +224,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { api } from '../api/http'
 import { usePollingLoop } from '../composables/usePollingLoop'
+import { buildGanttRows, buildGanttTicks } from '../utils/dispatchGantt'
 import { truncate } from '../utils/dispatchLayout'
 import { buildTopo } from '../utils/dispatchTopo'
 import DispatchKpiBand from '../components/dispatch/DispatchKpiBand.vue'
@@ -1234,37 +1235,14 @@ const ganttBase = computed<Omit<GanttRow, 'left' | 'width'>[]>(() => {
 })
 
 // 父子分组排序：父任务在前，派生压测紧随其后
-const ganttRows = computed<GanttRow[]>(() => {
-  const rows = [...ganttBase.value]
-  if (!rows.length) return []
-  const minStart = Math.min(...rows.map(r => r.start))
-  const maxEnd = Math.max(nowTs.value, ...rows.map(r => r.end))
-  const span = Math.max(maxEnd - minStart, 60_000)
-  const positioned = rows.map(r => ({
-    ...r,
-    left: Math.max(0, ((r.start - minStart) / span) * 100),
-    width: Math.max(1.5, ((Math.max(r.end, r.start + 800) - r.start) / span) * 100),
-  }))
-  // 父任务（含派生子任务的）优先，子任务紧跟其父
-  const ids = new Set(positioned.map(r => r.id))
-  const parents = positioned.filter(r => !r.isChild || !ids.has(r.parentId || ''))
-  const children = positioned.filter(r => r.isChild && ids.has(r.parentId || ''))
-  const ordered: GanttRow[] = []
-  parents.sort((a, b) => a.start - b.start).forEach(p => {
-    ordered.push(p)
-    children.filter(c => c.parentId === p.id).forEach(c => ordered.push(c))
-  })
-  return ordered
-})
+const ganttRows = computed<GanttRow[]>(() =>
+  buildGanttRows(ganttBase.value, nowTs.value) as unknown as GanttRow[],
+)
 
 // 时间轴刻度（起止 + 两个中间点）
-const ganttTicks = computed(() => {
-  const rows = ganttRows.value
-  if (!rows.length) return []
-  const minStart = Math.min(...rows.map(r => r.start))
-  const maxEnd = Math.max(nowTs.value, ...rows.map(r => r.end))
-  return [0, 1 / 3, 2 / 3, 1].map(p => fmtTime(minStart + (maxEnd - minStart) * p))
-})
+const ganttTicks = computed(() =>
+  buildGanttTicks(ganttBase.value, nowTs.value, fmtTime),
+)
 
 function fmtTime(ts: number): string {
   const d = new Date(ts)

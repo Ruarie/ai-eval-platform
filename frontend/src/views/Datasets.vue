@@ -370,6 +370,13 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useMessage, useDialog, type DropdownOption } from 'naive-ui'
 import { api, ApiError } from '../api/http'
+import {
+  countPendingRows,
+  nextRowNo as nextRowNoOf,
+  renumberRows,
+  toApiRow,
+  toEditableRow as toEditableRowOf,
+} from '../utils/datasetRows'
 import { ErrorCode, type Dataset, type DatasetRow, type GoldQA } from '../api/types'
 import UploadDatasetModal from '../components/modals/UploadDatasetModal.vue'
 import DatasetTreeSidebar from '../components/datasets/DatasetTreeSidebar.vue'
@@ -527,7 +534,7 @@ const allFolders = computed<TreeFolder[]>(() =>
   goldQaFolder.value.items.length ? [...folders.value, goldQaFolder.value] : folders.value,
 )
 
-const pendingCount = computed(() => sampleRows.value.filter(row => !row.q.trim() || !row.r.trim()).length)
+const pendingCount = computed(() => countPendingRows(sampleRows.value))
 
 // ─── 分页与即时搜索过滤 (Pagination & Instant Filter) ───
 const page = ref(1)
@@ -770,39 +777,13 @@ async function persistCustomCols(datasetId: string, nextCols: CustomColumn[], pr
   }
 }
 
-const KNOWN_ROW_KEYS = new Set(['row_no', 'question', 'reference', 'context', 'q', 'r', 'c', 'tags', 'difficulty', 'source_case_id', 'is_pending'])
-
+/** 纯映射在 utils/datasetRows；这里保留强类型签名供页面内部使用。 */
 function toEditableRow(row: DatasetRow): EditableDatasetRow {
-  const extendedRow = row as DatasetRow & Record<string, unknown>
-  const extras: Record<string, string> = {}
-  Object.keys(extendedRow).forEach(key => {
-    if (!KNOWN_ROW_KEYS.has(key) && extendedRow[key] != null) extras[key] = String(extendedRow[key])
-  })
-  return {
-    row_no: row.row_no,
-    q: String(row.question || extendedRow.q || ''),
-    r: String(row.reference || extendedRow.r || ''),
-    c: String(row.context || extendedRow.c || ''),
-    tags: String(extendedRow.tags || ''),
-    difficulty: String(extendedRow.difficulty || '简单'),
-    checked: false,
-    extras,
-  }
+  return toEditableRowOf(row as unknown as Parameters<typeof toEditableRowOf>[0]) as EditableDatasetRow
 }
 
 function toApiRows(): Array<DatasetRow & Record<string, unknown>> {
-  return sampleRows.value.map(row => ({
-    row_no: row.row_no,
-    question: row.q,
-    reference: row.r,
-    context: row.c || null,
-    q: row.q,
-    r: row.r,
-    c: row.c,
-    tags: row.tags,
-    difficulty: row.difficulty,
-    ...row.extras,
-  }))
+  return sampleRows.value.map(row => toApiRow(row) as DatasetRow & Record<string, unknown>)
 }
 
 function syncDatasetTree(list: Dataset[]) {
@@ -899,7 +880,7 @@ function batchDeleteRows() {
     negativeText: '取消',
     onPositiveClick: () => {
       sampleRows.value = sampleRows.value.filter(row => !row.checked)
-      sampleRows.value.forEach((r, i) => { r.row_no = i + 1 })
+      renumberRows(sampleRows.value)
       hasUnsavedChanges.value = true
       const maxPage = Math.max(1, Math.ceil(displayedRows.value.length / pageSize.value))
       if (page.value > maxPage) {
@@ -1635,7 +1616,7 @@ function openAiGenDrawer() {
 /** 合成抽屉确认后把候选追加到本地行（仍走「保存修改」落库）。 */
 function onAiCandidatesCommitted(candidates: { q: string; r: string; c: string; tags: string; difficulty: string }[]) {
   if (!candidates.length) return
-  let nextRowNo = Math.max(0, ...sampleRows.value.map(row => row.row_no)) + 1
+  let nextRowNo = nextRowNoOf(sampleRows.value)
   candidates.forEach(c => {
     sampleRows.value.push({
       row_no: nextRowNo++, q: c.q, r: c.r, c: c.c,
