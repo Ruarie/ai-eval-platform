@@ -23,7 +23,7 @@ from shared.event_seq import realign_event_seq
 from shared.event_vocab import EVENT_VERSION, PERSISTENT_KINDS
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, load_only
+from sqlalchemy.orm import Session
 
 from ..adapters import StreamAborted
 from ..agent import LangGraphAgent
