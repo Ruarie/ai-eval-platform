@@ -201,59 +201,16 @@
           @flash-task="flashTask"
         />
         <!-- ═══ 底部悬浮甘特图抽屉 (可展开/收起) ═══ -->
-        <div class="floating-dock dock-bottom" :class="{ collapsed: isBottomDockCollapsed }">
-          <div class="dock-header dock-bottom-header" @click="isBottomDockCollapsed = !isBottomDockCollapsed">
-            <div class="dock-header-title">
-              <span class="dock-ico">⏱</span>
-              <span class="dock-title-text font-bold">先评后压全链路编排甘特图</span>
-              <span class="dock-subtitle tertiary small">（多阶段流转与父子派生闭环）</span>
-            </div>
-            <div class="row" style="gap: 8px; font-size: 11px; margin-left: auto; margin-right: 12px">
-              <span v-for="lg in ganttLegend" :key="lg.label" class="row" style="gap: 4px; align-items: center">
-                <i class="gantt-dot" :style="{ background: lg.color }"></i>
-                <span class="tertiary" style="font-size: 10px">{{ lg.label }}</span>
-              </span>
-            </div>
-            <button class="dock-toggle-btn" :title="isBottomDockCollapsed ? '展开甘特抽屉' : '收折甘特抽屉'">
-              {{ isBottomDockCollapsed ? '▲ 展开' : '▼ 收起' }}
-            </button>
-          </div>
-
-          <div v-show="!isBottomDockCollapsed" class="dock-bottom-content">
-            <div v-if="ganttRows.length" class="gantt">
-              <div class="gantt-axis">
-                <span v-for="(tick, i) in ganttTicks" :key="i" class="mono">{{ tick }}</span>
-              </div>
-              <div
-                v-for="row in ganttRows"
-                :key="row.id"
-                class="gantt-row"
-                :class="{ child: row.isChild }"
-                :title="`${row.label}\n${statusLabel(row.status)} · ${fmtTime(row.start)} → ${fmtTime(row.end)}\n点击前往任务中心查看详情`"
-                @click="goToTaskDetail(row.id)"
-              >
-                <div class="gantt-name">
-                  <span v-if="row.isChild" class="tertiary" style="font-size: 10px">↳ 派生压测</span>
-                  <KindTag :kind="row.kind" />
-                  <span class="mono gantt-tid" style="font-size: 10.5px">{{ row.shortId }}</span>
-                </div>
-                <div class="gantt-track">
-                  <div
-                    class="gantt-bar"
-                    :class="`st-${row.status}`"
-                    :style="{ left: row.left + '%', width: Math.max(10, row.width) + '%' }"
-                  >
-                    <span class="gantt-bar-text">{{ statusLabel(row.status) }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div v-else class="empty" style="padding: 16px 10px">
-              <div class="small tertiary">暂无任务记录，发起评测任务后此处将展示完整阶段编排流转</div>
-            </div>
-          </div>
-        </div>
-
+        <DispatchGanttDrawer
+          :collapsed="isBottomDockCollapsed"
+          :rows="ganttRows"
+          :legend="ganttLegend"
+          :ticks="ganttTicks"
+          :status-label="(v: string) => statusLabel(v)"
+          :fmt-time="(v: number) => fmtTime(v)"
+          @update:collapsed="isBottomDockCollapsed = $event"
+          @open-task="goToTaskDetail"
+        />
         <!-- 悬停详情 tooltip -->
         <div v-if="tooltip" class="topo-tip" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
           <div class="tt-title">{{ tooltip.title }}</div>
@@ -396,7 +353,6 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
-import KindTag from '../components/common/KindTag.vue'
 import { api } from '../api/http'
 import { truncate } from '../utils/dispatchLayout'
 import { buildTopo } from '../utils/dispatchTopo'
@@ -1664,26 +1620,9 @@ onBeforeUnmount(() => {
   padding: 8px 6px;
   justify-content: center;
 }
-
-/* 底部甘特浮坞 (Dock Bottom) */
-.dock-bottom {
-  bottom: 14px;
-  left: 14px;
-  right: 14px;
-  max-height: 240px;
-}
 .dock-bottom.collapsed {
   max-height: 38px;
   overflow: hidden;
-}
-.dock-bottom-header {
-  cursor: pointer;
-  padding: 6px 12px;
-}
-.dock-bottom-content {
-  padding: 8px 12px;
-  overflow-y: auto;
-  max-height: 180px;
 }
 
 /* 调度内核核心指标快览 */
@@ -1932,32 +1871,12 @@ onBeforeUnmount(() => {
 .pc-lines {
   margin-top: 6px;
 }
-
-/* 甘特图 */
-.gantt {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
 .gantt-axis {
   display: flex;
   justify-content: space-between;
   font-size: 9.5px;
   color: var(--text-tertiary);
   padding: 0 4px 2px 160px;
-}
-.gantt-row {
-  display: grid;
-  grid-template-columns: 160px 1fr;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 4px;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.gantt-row:hover {
-  background: var(--row-hover);
 }
 .gantt-row.child .gantt-name {
   padding-left: 10px;
@@ -1973,50 +1892,12 @@ onBeforeUnmount(() => {
 .gantt-tid {
   color: var(--text-secondary);
 }
-.gantt-track {
-  position: relative;
-  height: 16px;
-  border-radius: 4px;
-  background: var(--bg-elevated);
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-}
-.gantt-bar {
-  position: absolute;
-  top: 1px;
-  bottom: 1px;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  padding-left: 5px;
-  transition: left 0.6s ease, width 0.6s ease;
-}
-.gantt-bar-text {
-  font-size: 8.5px;
-  font-weight: 600;
-  color: #fff;
-  white-space: nowrap;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-}
-.gantt-bar.st-queued { background: #9ca3af; }
-.gantt-bar.st-running {
-  background: repeating-linear-gradient(45deg, var(--accent-ai) 0 8px, color-mix(in srgb, var(--accent-ai) 55%, #fff) 8px 16px);
-  background-size: 23px 100%;
-  animation: bar-stripes 0.9s linear infinite;
-}
 @keyframes bar-stripes {
   to { background-position: 23px 0; }
 }
 .gantt-bar.st-awaiting_case_confirm { background: var(--accent-warning); }
-.gantt-bar.st-succeeded { background: var(--accent-success); }
 .gantt-bar.st-failed,
 .gantt-bar.st-cancelled { background: var(--accent-error); opacity: 0.75; }
-.gantt-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-}
 
 /* 图例 */
 .legend-line {
@@ -2153,23 +2034,8 @@ onBeforeUnmount(() => {
   .dock-scroll-content {
     max-height: 44vh;
   }
-  .dock-bottom {
-    left: 10px;
-    right: 10px;
-    bottom: 10px;
-    max-height: 220px;
-    z-index: 35;
-  }
-  .dock-bottom-header {
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 8px 10px;
-  }
   .dock-bottom-header .row {
     display: none;
-  }
-  .gantt-row {
-    grid-template-columns: 100px 1fr;
   }
   .gantt-axis {
     padding-left: 100px;
