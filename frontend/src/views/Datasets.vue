@@ -98,75 +98,19 @@
         </div>
 
         <!-- 2. 数据指标与交互式胶囊筛选条 -->
-        <div class="metrics-strip">
-          <div class="strip-left">
-            <span class="strip-label">样本筛选:</span>
-            <div class="filter-pills-bar" v-if="!isGoldQaActive">
-              <button
-                class="filter-pill"
-                :class="{ active: filterPendingMode === 'all' }"
-                @click="filterPendingMode = 'all'"
-              >
-                全部 <b class="pill-num">{{ sampleRows.length }}</b>
-              </button>
-              <button
-                class="filter-pill pill-clean"
-                :class="{ active: filterPendingMode === 'clean' }"
-                @click="filterPendingMode = 'clean'"
-              >
-                达标 <b class="pill-num">{{ sampleRows.length - pendingCount }}</b>
-              </button>
-              <button
-                v-if="pendingCount > 0"
-                class="filter-pill pill-amber"
-                :class="{ active: filterPendingMode === 'pending' }"
-                @click="filterPendingMode = filterPendingMode === 'pending' ? 'all' : 'pending'"
-              >
-                待补全 <b class="pill-num">{{ pendingCount }}</b>
-              </button>
-            </div>
-            <span v-else class="strip-text mono">{{ activeGoldQa?.row_count || 0 }} 行</span>
-
-            <template v-if="!isGoldQaActive">
-              <span class="strip-divider"></span>
-              <span v-if="pendingCount === 0" class="status-indicator-success">
-                ✓ 100% 格式达标
-              </span>
-              <span v-else class="status-indicator-warning">
-                需补全 {{ pendingCount }} 行样本
-              </span>
-
-              <template v-if="customCols.length">
-                <span class="strip-divider"></span>
-                <span class="strip-text">扩展列: {{ customCols.length }}</span>
-              </template>
-            </template>
-          </div>
-
-          <div class="grow"></div>
-
-          <!-- 键盘流提示 (可悬停查看) -->
-          <div class="keyboard-flow-hint" title="支持键盘方向键与快捷键无障碍操作">
-            <span class="kbd-hint"><kbd>↑↓←→</kbd> 移动</span>
-            <span class="kbd-hint"><kbd>Enter</kbd> 编辑</span>
-            <span class="kbd-hint"><kbd>Space</kbd> 勾选</span>
-          </div>
-
-          <span class="strip-divider"></span>
-
-          <!-- 主评分指标选择器 -->
-          <div v-if="!isGoldQaActive && currentDataset" class="metric-control">
-            <span class="metric-label">主评分指标:</span>
-            <select v-model="currentDataset.metric" class="metric-select" aria-label="选择主评分指标" @change="saveMetric">
-              <option value="contain">Contain (包含匹配)</option>
-              <option value="exact">Exact (完全一致)</option>
-              <option value="regex">Regex (正则表达式)</option>
-              <option value="rouge_l">ROUGE-L (最长公共子序列)</option>
-              <option value="bleu">BLEU (自然语言平滑)</option>
-            </select>
-          </div>
-        </div>
-
+        <DatasetMetricsStrip
+          :total="sampleRows.length"
+          :clean-count="sampleRows.length - pendingCount"
+          :pending-count="pendingCount"
+          :is-gold-qa="isGoldQaActive"
+          :gold-qa-rows="activeGoldQa?.row_count || 0"
+          :custom-col-count="customCols.length"
+          :mode="filterPendingMode"
+          :metric="currentDataset?.metric || 'contain'"
+          :show-metric="!!currentDataset"
+          @update:mode="filterPendingMode = $event"
+          @update:metric="onMetricChange"
+        />
         <!-- 3. 数据表格：分页网格 + 居中自定义多选框 -->
         <div ref="tableContainerRef" class="table-container custom-scroll" tabindex="0">
           <table class="nordic-table">
@@ -430,6 +374,7 @@ import { ErrorCode, type Dataset, type DatasetRow, type GoldQA } from '../api/ty
 import UploadDatasetModal from '../components/modals/UploadDatasetModal.vue'
 import DatasetTreeSidebar from '../components/datasets/DatasetTreeSidebar.vue'
 import DatasetListFooter from '../components/datasets/DatasetListFooter.vue'
+import DatasetMetricsStrip from '../components/datasets/DatasetMetricsStrip.vue'
 import DatasetAiGenDrawer from '../components/datasets/DatasetAiGenDrawer.vue'
 import DatasetRowView from '../components/datasets/DatasetRow.vue'
 import { escapeHtml, escapeRegex, renderIcon } from '../utils/render'
@@ -1701,6 +1646,13 @@ function onAiCandidatesCommitted(candidates: { q: string; r: string; c: string; 
   message.success(`已导入 ${candidates.length} 条样本，点击“保存修改”落库`)
 }
 
+/** 指标切换：先写回数据集对象再复用原有保存逻辑。 */
+function onMetricChange(value: string) {
+  if (!currentDataset.value) return
+  currentDataset.value.metric = value as typeof currentDataset.value.metric
+  void saveMetric()
+}
+
 // 补全弹窗
 const aiFill = ref({
   show: false,
@@ -1812,27 +1764,27 @@ onUnmounted(() => {
 .datasets-workbench {
   height: calc(100vh - var(--topbar-h) - 20px);
   min-height: 0;
-  display: flex;
+
   flex-direction: column;
-  outline: none;
+
   font-size: 13.5px;
-  color: var(--text-primary);
-}
+
+
 
 .mode-context-panel {
   max-width: 620px;
   margin: 64px auto;
   padding: 40px 36px;
   text-align: center;
-  display: flex;
+
   flex-direction: column;
-  align-items: center;
+
   gap: 16px;
-  background: var(--bg-main);
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+
+
+
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
-}
+
 .mode-icon-wrapper {
   width: 56px;
   height: 56px;
@@ -1841,17 +1793,17 @@ onUnmounted(() => {
   color: var(--c-kb);
   display: grid;
   place-items: center;
-}
+
 .mode-context-panel h2 {
   font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
+
+
+
 .mode-context-panel p {
   font-size: 13.5px;
-  color: var(--text-secondary);
+
   line-height: 1.6;
-}
+
 
 /* ─── 布局骨架 ─── */
 .nordic-layout {
@@ -1859,73 +1811,73 @@ onUnmounted(() => {
   grid-template-columns: var(--tree-w, 280px) minmax(0, 1fr);
   height: 100%;
   min-width: 0;
-  background: var(--bg-main);
+
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid var(--border-subtle);
-}
+
+
 
 /* ─── 侧边栏 ─── */
 .nordic-main {
-  display: flex;
+
   flex-direction: column;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  background: var(--bg-main);
+
   position: relative;
-}
+
 
 /* 顶栏 */
 .main-toolbar {
   padding: 10px 18px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-main);
+
+
   min-height: 56px;
-  display: flex;
-  align-items: center;
-}
+
+
+
 
 .toolbar-default {
-  display: flex;
-  align-items: center;
+
+
   width: 100%;
-  gap: 12px;
-}
+
+
 
 .toolbar-title-group {
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
+
 .title-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-}
+
+
+
 .main-dataset-title {
   font-size: 16.5px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
+
+
+
 .version-tag {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  font-weight: 500;
+
+
+
   padding: 1px 7px;
-  border-radius: 4px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-}
+
+
+
+
+
 .asset-type-badge {
   font-size: 11.5px;
-  font-weight: 500;
+
   padding: 1px 7px;
   border-radius: 4px;
-}
-.type-dataset { background: var(--t-datasets); color: var(--c-datasets); }
-.type-gold { background: var(--t-profiles); color: var(--c-profiles); }
+
+.type-dataset { background: var(--t-datasets); color: var(--c-datasets); 
+.type-gold { background: var(--t-profiles); color: var(--c-profiles); 
 
 .status-badge-amber {
   font-size: 11.5px;
@@ -1933,56 +1885,56 @@ onUnmounted(() => {
   border-radius: 4px;
   background: var(--t-profiles);
   color: var(--c-profiles);
-}
+
 
 .breadcrumb-row {
-  font-size: 12px;
-  color: var(--text-tertiary);
+
+
   display: flex;
-  align-items: center;
-  gap: 5px;
-}
+
+
+
 .breadcrumb-row .cur {
   color: var(--text-secondary);
-}
+
 
 /* 极速表内筛选框 */
 .table-search-box {
   position: relative;
   display: flex;
-  align-items: center;
+
   margin-left: 8px;
-}
+
 .table-search-icon {
   position: absolute;
   left: 8px;
-  color: var(--text-tertiary);
+
   pointer-events: none;
-}
+
 .table-search-input {
   width: 200px;
   height: 28px;
   padding-left: 26px;
   padding-right: 50px;
-  font-size: 12.5px;
+
   border-radius: 6px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-elevated);
-  color: var(--text-primary);
+
   outline: none;
   transition: all 0.15s ease;
-}
+
 .table-search-input:focus {
   width: 250px;
   background: var(--bg-main);
-  border-color: var(--accent-ai);
+
   box-shadow: var(--focus-ring);
-}
+
 .grid-search-count {
   position: absolute;
   right: 18px;
-  font-size: 11px;
-  color: var(--text-tertiary);
+
+
 }
 
 .toolbar-action-group {
@@ -1998,15 +1950,15 @@ onUnmounted(() => {
 
 /* 按钮通用 */
 .btn {
-  display: inline-flex;
+
   align-items: center;
   justify-content: center;
-  gap: 6px;
+
   font-size: 13px;
-  font-weight: 500;
+
   border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.12s ease;
+
+
   white-space: nowrap;
 }
 .btn-md {
@@ -2019,8 +1971,8 @@ onUnmounted(() => {
   font-size: 12.5px;
 }
 .btn-primary {
-  background: var(--accent-ai);
-  color: #FFFFFF;
+
+
   border: 1px solid var(--accent-ai);
 }
 .btn-primary:hover {
@@ -2046,7 +1998,7 @@ onUnmounted(() => {
 }
 .btn-danger {
   background: var(--accent-error);
-  color: #FFFFFF;
+
   border: 1px solid var(--accent-error);
 }
 .btn-danger:hover {
@@ -2068,9 +2020,9 @@ onUnmounted(() => {
   border: 1px solid var(--border-subtle);
 }
 .btn-save.dirty {
-  background: var(--accent-warning);
-  color: #FFFFFF;
-  border-color: var(--accent-warning);
+
+
+
 }
 .btn-save.saved {
   background: var(--accent-success) !important;
@@ -2082,7 +2034,7 @@ onUnmounted(() => {
 }
 .shortcut-key {
   font-size: 10px;
-  font-family: var(--font-mono);
+
   padding: 0 4px;
   border-radius: 2px;
   background: rgba(0, 0, 0, 0.08);
@@ -2093,8 +2045,8 @@ onUnmounted(() => {
 }
 
 /* ─── 指标与胶囊筛选条 ─── */
-.metrics-strip {
-  padding: 8px 18px;
+
+
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
@@ -2102,36 +2054,36 @@ onUnmounted(() => {
   gap: 12px;
   font-size: 12.5px;
 }
-.strip-left {
+
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+
+
 }
-.strip-label {
+
   color: var(--text-tertiary);
 }
-.strip-text {
+
   color: var(--text-primary);
   font-weight: 500;
 }
-.strip-divider {
-  width: 1px;
-  height: 14px;
-  background: var(--border-subtle);
+
+
+
+
 }
 
-.filter-pills-bar {
+
   display: flex;
   align-items: center;
-  gap: 6px;
+
 }
-.filter-pill {
+
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 2px 9px;
-  font-size: 12px;
+
+
   border-radius: 14px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-main);
@@ -2139,78 +2091,78 @@ onUnmounted(() => {
   cursor: pointer;
   transition: all 0.12s ease;
 }
-.filter-pill:hover {
-  border-color: var(--accent-ai);
+
+
   color: var(--text-primary);
 }
-.filter-pill.active {
-  background: var(--text-primary);
-  color: var(--bg-main);
-  border-color: var(--text-primary);
-  font-weight: 600;
+
+
+
+
+
 }
-.filter-pill.pill-clean.active {
-  background: var(--accent-success);
-  border-color: var(--accent-success);
+
+
+
   color: #FFFFFF;
 }
-.filter-pill.pill-amber.active {
+
   background: var(--accent-warning);
   border-color: var(--accent-warning);
   color: #FFFFFF;
 }
-.pill-num {
+
   font-family: var(--font-mono);
   font-size: 11px;
 }
 
-.status-indicator-warning {
-  color: var(--accent-warning);
-  font-weight: 500;
-}
-.status-indicator-success {
-  color: var(--accent-success);
+
+
   font-weight: 500;
 }
 
-.keyboard-flow-hint {
+
+  font-weight: 500;
+}
+
+
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 11.5px;
   color: var(--text-tertiary);
 }
-.kbd-hint kbd {
+
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  padding: 1px 4px;
-  border-radius: 3px;
+
+
+
   background: var(--bg-main);
   color: var(--text-secondary);
   border: 1px solid var(--border-subtle);
 }
 
-.metric-control {
+
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.metric-label {
+
   color: var(--text-tertiary);
-  font-size: 12px;
+
 }
-.metric-select {
-  height: 26px;
+
+
   font-size: 12px;
-  padding: 1px 6px;
+
   border-radius: 4px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-main);
   color: var(--text-primary);
   outline: none;
 }
-.metric-select:focus {
-  border-color: var(--accent-ai);
+
+
 }
 
 /* ─── 表格与固定列 ─── */
@@ -2322,8 +2274,8 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--text-tertiary);
 }
-.step-badge.active {
-  color: var(--accent-ai);
+
+
   font-weight: 600;
 }
 .step-badge.done {
@@ -2340,7 +2292,7 @@ onUnmounted(() => {
   font-size: 11px;
   font-family: var(--font-mono);
 }
-.step-badge.active .step-idx {
+
   background: var(--accent-ai);
   color: #FFFFFF;
   border-color: var(--accent-ai);
@@ -2381,11 +2333,11 @@ onUnmounted(() => {
   cursor: pointer;
   transition: all 0.1s ease;
 }
-.tab-pill.active {
+
   background: var(--bg-main);
   color: var(--text-primary);
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+
 }
 
 .divider-title {
