@@ -13,6 +13,7 @@ import pytest
 from app.config import settings
 from app.errors import AppError, ErrorCode
 from app.routers import ws
+from app.agent import pending_approvals
 
 _EMIT = "_emit_persistent"
 
@@ -249,7 +250,8 @@ async def test_expiry_scan_clears_only_overdue_and_is_idempotent(monkeypatch) ->
         return True
 
     monkeypatch.setattr(ws, _EMIT, fake_emit)
-    monkeypatch.setattr(ws, "SessionLocal", lambda: db)
+    # TTL 扫描已迁到 agent.pending_approvals：会话工厂须在该模块上打桩
+    monkeypatch.setattr(pending_approvals, "SessionLocal", lambda: db)
     # _expire 内锁内二次查询 first() 需返回对应行；_FakeDb.first 固定 rows[0]，
     # 故只验证 s-overdue 在 rows 首位时的单轮语义
     assert db.rows[0] is expired_row

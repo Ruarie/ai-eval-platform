@@ -35,6 +35,13 @@ from ..agent.graph import (
 )
 from ..agent.log import agent_trace
 from ..agent.pending_cards import card_meta, lock_idle_session, store_card
+from ..agent.pending_approvals import (
+    approval_expiry_loop,
+    approval_overdue as _approval_overdue,
+    card_age_seconds as _card_age_seconds,
+    clear_pending_confirm as _clear_pending_confirm,
+    expire_overdue_approvals_once as _expire_overdue_approvals_once,
+)
 from ..agent.title import generate_title_text
 from ..agent_prompt_settings import get_agent_prompt_overlay
 from ..config import settings
@@ -1288,27 +1295,6 @@ _CONFIRM_SCHEMA_VERSION = 2
 # #3 审批终态：TTL 失效判定辅助（幂等，不依赖扫描进程存活性，API.md §4.3 V1.73）
 
 
-def _card_age_seconds(card: Mapping[str, Any] | None) -> float | None:
-    """解析卡 meta.created_at（UTC ISO）相对当前时间的年龄秒数。
-
-    卡无 meta / created_at 缺失或不可解析时返回 None（调用方按不判龄处理——
-    旧版无时间戳卡保持原语义，由扫描或重启后自然消费/清理）。
-    """
-    if not isinstance(card, Mapping):
-        return None
-    meta = card.get("meta")
-    if not isinstance(meta, Mapping):
-        return None
-    raw = meta.get("created_at")
-    try:
-        parsed = datetime.fromisoformat(str(raw or "").replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return (datetime.now(UTC) - parsed).total_seconds()
-
-
 def _approval_overdue(card: Mapping[str, Any] | None) -> bool:
     """审批卡是否已超 TTL 失效（TTL ≤ 0 表示不启用过期，config 可关）。
 
@@ -1425,17 +1411,6 @@ def _persist_pending_clarify(
         payload=payload,
         meta=_card_meta(user_id, thread_id, "clarify", resume_nonce=uuid4().hex),
         author_id=user_id,
-    )
-
-
-def _clear_pending_confirm(db: Session, session_id: str) -> None:
-    """清空待确认卡（与回执同事务提交，避免入队成功而卡标残留）。"""
-    db.execute(
-        text(
-            "UPDATE sessions SET pending_confirm = NULL, pending_confirm_author_id = NULL "
-            "WHERE id = :session_id"
-        ),
-        {"session_id": session_id},
     )
 
 
@@ -2339,83 +2314,3 @@ async def agent_websocket(websocket: WebSocket) -> None:
 # #3（V1.73）：审批卡 TTL 扫描轮询间隔（秒）。失效判定以卡 meta.created_at
 # 幂等兜底（_approval_overdue），扫描进程缺席时 ack 路径同样拒绝过期卡——
 # 本循环只负责「主动收尸 + 广播 expired 终态」，不承担失效语义本身。
-_APPROVAL_EXPIRY_POLL_S = 30.0
-
-
-async def _expire_overdue_approvals_once() -> int:
-    """单轮 TTL 扫描：行锁清过期 tool_approval 卡并广播 expired 终态。
-
-    只处理 ``meta.confirm_type=tool_approval`` 的卡（task_confirm / clarify
-    不受审批 TTL 约束，保持各自生命周期）；锁内二次判龄与清卡同事务，
-    与 ack/stop 并发竞争时后到者行锁读空自然跳过，幂等不重复广播。
-    返回本轮过期清卡数。
-    """
-    expired: list[tuple[str, str]] = []
-    db = SessionLocal()
-    try:
-        # 只加载标识与卡片，其余会话大字段延迟读取（不产生额外查询）。
-        rows = (
-            db.query(AgentSession)
-            .options(load_only(AgentSession.id, AgentSession.pending_confirm))
-            .filter(AgentSession.pending_confirm.isnot(None))
-            .all()
-        )
-        for session in rows:
-            session_id = session.id
-            card = session.pending_confirm or {}
-            meta = card.get("meta") if isinstance(card.get("meta"), dict) else {}
-            approval_id = str(card.get("id") or "")
-            if meta.get("confirm_type") != "tool_approval" or not approval_id:
-                continue
-            if not _approval_overdue(card):
-                continue
-            # 锁内二次判定：与 ack 清卡并发时，卡已消费/被刷新则跳过
-            locked = (
-                db.query(AgentSession)
-                .filter(AgentSession.id == session_id)
-                .with_for_update()
-                .first()
-            )
-            if locked is None or locked.pending_confirm is None:
-                continue
-            locked_card = dict(locked.pending_confirm)
-            if (
-                not _approval_overdue(locked_card)
-                or str(locked_card.get("id") or "") != approval_id
-            ):
-                continue
-            _clear_pending_confirm(db, session_id)
-            db.commit()
-            expired.append((session_id, approval_id))
-        state = _ConnectionState()
-        for session_id, approval_id in expired:
-            # 无在线连接时仅落库（websocket=None）；在线者经 Hub 广播收到，
-            # 离线者断线重连按 last_event_id 回放补齐终态。
-            await _emit_persistent(
-                db,
-                None,
-                state,
-                session_id,
-                "approval_terminal",
-                {
-                    "approval_id": approval_id,
-                    "outcome": "expired",
-                    "card_type": "approval",
-                    "reason": "审批超时已失效",
-                },
-                task_id=None,
-            )
-        return len(expired)
-    except Exception as exc:
-        db.rollback()
-        logger.info("Agent 审批 TTL 扫描失败 type=%s", type(exc).__name__)
-        return 0
-    finally:
-        db.close()
-
-
-async def approval_expiry_loop() -> None:
-    """后台审批卡 TTL 扫描循环（api lifespan 注册，参照 checkpoint_ttl_loop）。"""
-    while True:
-        await asyncio.sleep(_APPROVAL_EXPIRY_POLL_S)
-        await _expire_overdue_approvals_once()
