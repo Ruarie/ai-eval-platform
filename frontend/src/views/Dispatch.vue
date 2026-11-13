@@ -225,6 +225,13 @@ import { useMessage } from 'naive-ui'
 import { api } from '../api/http'
 import { usePollingLoop } from '../composables/usePollingLoop'
 import { buildGanttRows, buildGanttTicks } from '../utils/dispatchGantt'
+import {
+  buildLogEntry,
+  eventCategory,
+  mapWorkerRow,
+  mergeActiveTasks,
+  pushBoundedHistory,
+} from '../utils/dispatchFeed'
 import { truncate } from '../utils/dispatchLayout'
 import { buildTopo } from '../utils/dispatchTopo'
 import DispatchKpiBand from '../components/dispatch/DispatchKpiBand.vue'
@@ -292,8 +299,7 @@ const histCost = ref<number[]>([])
 const histAssigned = ref<number[]>([])
 
 function pushHist(hist: number[], v: number) {
-  hist.push(v)
-  if (hist.length > 24) hist.shift()
+  pushBoundedHistory(hist, v)
 }
 
 /* ─── 星图数据模型 ─── */
@@ -708,16 +714,12 @@ const filteredLogs = computed(() => (logCat.value === 'all' ? logs.value : logs.
 
 /** 事件类型归一化为展示分类 */
 function eventCat(kind: string): LogItem['cat'] {
-  const k = kind.toUpperCase()
-  if (['ASSIGN', 'ENQUEUE', 'HOLD', 'START'].some(x => k.includes(x))) return 'assign'
-  if (['DONE', 'SUCCEEDED', 'COMPLETE', 'FINISH'].some(x => k.includes(x))) return 'done'
-  if (['FAIL', 'ERROR', 'TIMEOUT', 'CANCEL'].some(x => k.includes(x))) return 'error'
-  return 'node'
+  return eventCategory(kind)
 }
 
 /** 统一日志入口：prepend 并截断至 50 条，与原型 log() 语义一致。 */
 function addLog(kind: string, html: string, tid?: string) {
-  logs.value.unshift({ time: new Date().toTimeString().slice(0, 8), kind, cat: eventCat(kind), html, tid })
+  logs.value.unshift(buildLogEntry(kind, html, tid))
   if (logs.value.length > 50) logs.value.pop()
 }
 
@@ -1108,16 +1110,7 @@ let pollRound = 0
 
 /** 服务端 Worker 快照映射为星图节点模型；RAM 用量契约未提供时显示占位。 */
 function mapWorker(w: DispatchWorker): WorkerNode {
-  return {
-    id: w.id,
-    name: w.name,
-    caps: w.caps || [],
-    state: w.state,
-    load: Math.round(w.load_percent ?? 0),
-    ram: '—',
-    task: w.current_task || null,
-    weight: w.weight,
-  }
+  return mapWorkerRow(w as unknown as Parameters<typeof mapWorkerRow>[0]) as unknown as WorkerNode
 }
 
 function escapeHtml(s: string): string {
@@ -1148,8 +1141,7 @@ async function loadLiveAll() {
     if (workers) workerPool.value = workers.map(mapWorker)
     liveRunningTotal.value = runningPage.total
     liveAwaitingTotal.value = awaitingPage.total
-    const activeById = new Map([...queuedPage.items, ...runningPage.items, ...awaitingPage.items].map(task => [task.id, task]))
-    liveActiveTasks.value = [...activeById.values()].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))
+    liveActiveTasks.value = mergeActiveTasks(queuedPage.items, runningPage.items, awaitingPage.items)
     liveRecentTasks.value = recentPage.items
     nowTs.value = Date.now()
     pushHist(histQueue.value, queueDepth.value)
