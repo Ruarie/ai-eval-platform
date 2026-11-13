@@ -223,6 +223,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { api } from '../api/http'
+import { usePollingLoop } from '../composables/usePollingLoop'
 import { truncate } from '../utils/dispatchLayout'
 import { buildTopo } from '../utils/dispatchTopo'
 import DispatchKpiBand from '../components/dispatch/DispatchKpiBand.vue'
@@ -1102,7 +1103,6 @@ async function handleRegisterWorker() {
 
 /* ─── live 模式数据接入：大盘/节点/任务周期拉取 + 调度事件增量轮询（§3.13） ─── */
 let lastEventId = 0
-let pollTimer: number | null = null
 let pollRound = 0
 
 /** 服务端 Worker 快照映射为星图节点模型；RAM 用量契约未提供时显示占位。 */
@@ -1284,9 +1284,22 @@ function statusLabel(s: string): string {
 }
 
 // 调度心跳
-let timer: any = null
-let dispatchTimer: any = null
-let nowTimer: any = null
+// 轮询循环：可见性暂停 + 在飞去重 + 卸载清理统一交给 usePollingLoop
+const nowPoll = usePollingLoop({ intervalMs: 1000, run: () => { nowTs.value = Date.now() } })
+const simLoadPoll = usePollingLoop({
+  intervalMs: 2000,
+  enabled: () => isRunning.value,
+  run: () => {
+    workerPool.value.forEach(w => {
+      if (w.state === 'busy') {
+        w.load = Math.max(10, Math.min(96, w.load + (Math.random() < 0.5 ? -2 : 2)))
+      }
+    })
+  },
+})
+const simDispatchPoll = usePollingLoop({ intervalMs: 2600, run: () => dispatchTick() })
+const livePoll = usePollingLoop({ intervalMs: 3000, run: () => liveTick() })
+
 /** 分发模拟的延时句柄登记：组件卸载时统一清理，避免回调写入已销毁状态 */
 const assignTimers = new Set<number>()
 /** 刷新容器尺寸缓存：锁定卡定位换算依据 */
@@ -1302,31 +1315,20 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   syncWrapSize()
   document.addEventListener('visibilitychange', onVisibilityChange)
-  // 甘特时间游标：运行中条形每秒延展；后台标签页不必刷新
-  nowTimer = window.setInterval(() => {
-    if (document.hidden) return
-    nowTs.value = Date.now()
-  }, 1000)
+  // 甘特时间游标：运行中条形每秒延展；后台标签页自动暂停
+  nowPoll.start()
   if (liveMode) {
     // 真实模式：首屏全量加载后按 3s 节拍轮询事件，6s 全量刷新，不启动本地仿真
     await loadLiveAll()
     await pollLiveEvents()
     handleRouteTaskFocus()
-    pollTimer = window.setInterval(() => { if (!document.hidden) void liveTick() }, 3000)
+    livePoll.start()
     return
   }
   handleRouteTaskFocus()
-  timer = setInterval(() => {
-    if (document.hidden || !isRunning.value) return
-    // 随机微调负载
-    workerPool.value.forEach(w => {
-      if (w.state === 'busy') {
-        w.load = Math.max(10, Math.min(96, w.load + (Math.random() < 0.5 ? -2 : 2)))
-      }
-    })
-  }, 2000)
-
-  dispatchTimer = setInterval(() => { if (!document.hidden) dispatchTick() }, 2600)
+  // 仿真模式：负载抖动 + 派单节拍
+  simLoadPoll.start()
+  simDispatchPoll.start()
 })
 
 /**
@@ -1346,10 +1348,10 @@ watch(() => route.query.task_id || route.query.highlight_task, () => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
-  if (timer) clearInterval(timer)
-  if (dispatchTimer) clearInterval(dispatchTimer)
-  if (nowTimer) clearInterval(nowTimer)
-  if (pollTimer !== null) window.clearInterval(pollTimer)
+  nowPoll.stop()
+  simLoadPoll.stop()
+  simDispatchPoll.stop()
+  livePoll.stop()
   assignTimers.forEach(id => { window.clearTimeout(id); window.clearInterval(id) })
   assignTimers.clear()
   window.clearTimeout(flashTimer)
