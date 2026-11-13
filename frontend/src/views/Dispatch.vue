@@ -190,54 +190,16 @@
         </div>
 
         <!-- ═══ 右侧悬浮审计坞 (可收折) ═══ -->
-        <div class="floating-dock dock-right" :class="{ collapsed: isRightDockCollapsed }">
-          <div class="dock-header">
-            <button class="dock-toggle-btn" :title="isRightDockCollapsed ? '展开审计面板' : '收折审计面板'" @click="isRightDockCollapsed = !isRightDockCollapsed">
-              {{ isRightDockCollapsed ? '⇤' : '⇥' }}
-            </button>
-            <div class="dock-header-title">
-              <span class="dock-ico">📋</span>
-              <span v-show="!isRightDockCollapsed" class="dock-title-text font-bold">调度事件审计流</span>
-            </div>
-            <button v-show="!isRightDockCollapsed" class="link-btn" style="font-size: 10.5px; margin-left: auto" @click="logs = []">清空</button>
-          </div>
-
-          <div v-show="!isRightDockCollapsed" class="dock-scroll-content">
-            <div class="chip-group mb8" style="gap: 4px">
-              <button
-                v-for="c in logCats"
-                :key="c.key"
-                class="chip chip-xs"
-                :class="{ on: logCat === c.key }"
-                @click="logCat = c.key"
-              >
-                {{ c.label }}
-              </button>
-            </div>
-
-            <div class="log-stream">
-              <div
-                v-for="(l, idx) in filteredLogs"
-                :key="idx"
-                class="log-card-item"
-                :class="[`cat-${l.cat}`, { clickable: !!l.tid }]"
-                :title="l.tid ? '点击定位并高亮星图工单' : ''"
-                @click="l.tid && flashTask(l.tid)"
-              >
-                <div class="lci-head">
-                  <span class="lci-time mono">{{ l.time }}</span>
-                  <span class="lci-tag" :class="l.cat">{{ l.kind }}</span>
-                  <span v-if="l.tid" class="lci-tid mono">{{ l.tid.substring(0, 8) }}</span>
-                </div>
-                <div class="lci-body" v-html="l.html"></div>
-              </div>
-              <div v-if="!filteredLogs.length" class="empty" style="padding: 28px 10px">
-                <div class="small tertiary">暂无调度事件流</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
+        <DispatchAuditDock
+          :collapsed="isRightDockCollapsed"
+          :categories="logCats"
+          :category="logCat"
+          :logs="filteredLogs"
+          @update:collapsed="isRightDockCollapsed = $event"
+          @update:category="setLogCategory"
+          @clear="logs = []"
+          @flash-task="flashTask"
+        />
         <!-- ═══ 底部悬浮甘特图抽屉 (可展开/收起) ═══ -->
         <div class="floating-dock dock-bottom" :class="{ collapsed: isBottomDockCollapsed }">
           <div class="dock-header dock-bottom-header" @click="isBottomDockCollapsed = !isBottomDockCollapsed">
@@ -439,6 +401,7 @@ import { api } from '../api/http'
 import { truncate } from '../utils/dispatchLayout'
 import { buildTopo } from '../utils/dispatchTopo'
 import DispatchKpiBand from '../components/dispatch/DispatchKpiBand.vue'
+import DispatchAuditDock from '../components/dispatch/DispatchAuditDock.vue'
 import DispatchStarMap from '../components/dispatch/DispatchStarMap.vue'
 import type { DispatchOverview, DispatchWorker, Task, TaskKind, TaskStatus } from '../api/types'
 
@@ -932,6 +895,11 @@ function addLog(kind: string, html: string, tid?: string) {
 // 点击日志定位：闪烁星图中对应任务工单
 const flashTaskId = ref('')
 let flashTimer = 0
+/** 审计坞上报的筛选 key 是字符串，这里收敛回页面的联合类型。 */
+function setLogCategory(value: string) {
+  logCat.value = value as typeof logCat.value
+}
+
 function flashTask(tid: string) {
   flashTaskId.value = tid
   window.clearTimeout(flashTimer)
@@ -1837,16 +1805,6 @@ onBeforeUnmount(() => {
   height: 100%;
   transition: width 0.3s;
 }
-
-/* 结构化日志卡片 */
-.log-card-item {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  padding: 6px 8px;
-  margin-bottom: 5px;
-  transition: background 0.15s ease;
-}
 .log-card-item.clickable {
   cursor: pointer;
 }
@@ -1854,37 +1812,9 @@ onBeforeUnmount(() => {
   border-color: var(--accent-ai);
   background: var(--row-hover);
 }
-.lci-head {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 2px;
-}
-.lci-time {
-  font-size: 9.5px;
-  color: var(--text-tertiary);
-}
-.lci-tag {
-  font-size: 9px;
-  padding: 0 4px;
-  border-radius: 3px;
-  font-weight: 600;
-  background: var(--bg-main);
-  border: 1px solid var(--border-subtle);
-}
 .lci-tag.done { color: var(--accent-success); border-color: color-mix(in srgb, var(--accent-success) 30%, transparent); }
 .lci-tag.error { color: var(--accent-error); border-color: color-mix(in srgb, var(--accent-error) 30%, transparent); }
 .lci-tag.node { color: var(--text-secondary); }
-.lci-tid {
-  font-size: 9px;
-  color: var(--accent-ai);
-  margin-left: auto;
-}
-.lci-body {
-  font-size: 10.5px;
-  line-height: 1.35;
-  color: var(--text-primary);
-}
 @keyframes chip-flash {
   0%, 100% { stroke: var(--border-subtle); }
   50% { stroke: var(--accent-ai); stroke-width: 2.4; }
