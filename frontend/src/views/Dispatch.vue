@@ -56,139 +56,30 @@
           @task-click="(t: any) => pinTask(t as TaskNode)" @skill-click="(k: string) => toggleFocus(k as TaskKind)" @worker-click="(v: any) => openWorkerModal(v as WorkerNode)"
         />
         <!-- ═══ 左侧悬浮控制坞 (可收折) ═══ -->
-        <div class="floating-dock dock-left" :class="{ collapsed: isLeftDockCollapsed }">
-          <div class="dock-header">
-            <div class="dock-header-title">
-              <span class="dock-ico">🛰</span>
-              <span v-show="!isLeftDockCollapsed" class="dock-title-text font-bold">调度内核与算力</span>
-            </div>
-            <button class="dock-toggle-btn" :title="isLeftDockCollapsed ? '展开左侧面板' : '收折左侧面板'" @click="isLeftDockCollapsed = !isLeftDockCollapsed">
-              {{ isLeftDockCollapsed ? '⇥' : '⇤' }}
-            </button>
-          </div>
-
-          <div v-show="!isLeftDockCollapsed" class="dock-scroll-content">
-            <!-- 调度内核状态与指标 -->
-            <div class="dock-card mb10">
-              <div class="dock-card-title">
-                <span>内核状态</span>
-                <span class="badge" :class="isRunning ? 'badge-running' : 'badge-cancelled'">
-                  <i class="bdot"></i>{{ kernelStateLabel }}
-                </span>
-              </div>
-              <div class="kernel-metric-row mb8">
-                <div class="k-stat">
-                  <span class="k-label tertiary">健康度</span>
-                  <!-- 契约未提供健康度指标，不再用固定 99.4% 冒充真实值 -->
-                  <span class="k-val font-bold" :style="{ color: 'var(--text-tertiary)' }">—</span>
-                </div>
-                <div class="k-stat">
-                  <span class="k-label tertiary">活跃并发</span>
-                  <span class="k-val font-bold mono" style="color: var(--accent-ai)">{{ overviewReady ? runningDisplay + '/' + capacity : '—' }}</span>
-                </div>
-                <div class="k-stat">
-                  <span class="k-label tertiary">心跳</span>
-                  <span class="k-val font-bold mono">{{ overviewReady ? heartbeatMs + 'ms' : '—' }}</span>
-                </div>
-              </div>
-              <div class="row" style="gap: 6px">
-                <button
-                  class="btn btn-secondary btn-xs"
-                  style="flex: 1"
-                  :disabled="schedulerBusy"
-                  @click="toggleScheduler"
-                >
-                  {{ isRunning ? '⏸ 暂停' : '▶ 恢复' }}
-                </button>
-                <button class="btn btn-primary btn-xs" style="flex: 1" @click="showRegisterModal = true">
-                  + 注册节点
-                </button>
-              </div>
-            </div>
-
-            <!-- 分发策略与并发滑块 -->
-            <div class="dock-card mb10">
-              <div class="dock-card-title">分发策略</div>
-              <div class="chip-group mb8">
-                <button
-                  v-for="s in ['负载均衡', '优先级抢占', '亲和性']"
-                  :key="s"
-                  class="chip chip-xs"
-                  :class="{ on: strategy === s }"
-                  @click="handleStrategyChange(s)"
-                >
-                  {{ s }}
-                </button>
-              </div>
-              <div class="field" style="margin: 6px 0 0">
-                <div class="row-between">
-                  <span class="field-label" style="margin: 0; font-size: 11px">并发容量</span>
-                  <b class="num font-bold" style="color: var(--accent-ai); font-size: 13px">{{ overviewReady ? capacity : '—' }}</b>
-                </div>
-                <input
-                  v-model.number="capacity"
-                  type="range"
-                  class="cap-slider"
-                  min="1"
-                  max="8"
-                  step="1"
-                  style="margin-top: 4px"
-                  :disabled="!overviewReady"
-                  @change="handleCapacityChange"
-                />
-              </div>
-            </div>
-
-            <!-- Worker 专精计算节点池 -->
-            <div class="dock-card mb10">
-              <div class="dock-card-title">
-                <span>Worker 专精集群</span>
-                <span class="small tertiary mono">{{ onlineCount }}/{{ totalWorkers }} 在线</span>
-              </div>
-              <div class="worker-card-list">
-                <div
-                  v-for="w in workerPool.slice(0, 4)"
-                  :key="w.id"
-                  class="worker-rich-card"
-                  :class="w.state"
-                  @click="openWorkerModal(w)"
-                >
-                  <div class="wrc-head">
-                    <span class="wrc-dot" :class="w.state"></span>
-                    <span class="wrc-name font-bold">{{ w.name }}</span>
-                    <span class="wrc-state-tag" :class="w.state">{{ stateLabel(w.state) }}</span>
-                  </div>
-                  <div class="wrc-body">
-                    <div class="wrc-caps">
-                      <span v-for="c in w.caps" :key="c" class="cap-tag">{{ c }}</span>
-                    </div>
-                    <div class="wrc-load-wrap">
-                      <span class="wrc-load-text mono small">{{ w.load }}%</span>
-                      <div class="wrc-load-bar">
-                        <div class="wrc-load-fill" :style="{ width: `${w.load}%`, background: w.load > 70 ? 'var(--accent-warning)' : 'var(--accent-ai)' }"></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- AI 调度调优建议 -->
-            <div class="dock-card ai-dock-card">
-              <div class="dock-card-title">
-                <span class="ai-badge"><i class="ai-dot"></i>AI 调度优化建议</span>
-                <button class="link-btn" style="font-size: 11px" @click="nextAiAdvice">换一条</button>
-              </div>
-              <div class="small" style="line-height: 1.45; color: var(--text-secondary); margin-top: 4px">
-                {{ currentAiAdvice }}
-              </div>
-              <div class="row mt6" style="justify-content: flex-end">
-                <button class="btn btn-ai btn-xs" @click="applyAiAdvice">采纳建议</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
+        <DispatchControlDock
+          :collapsed="isLeftDockCollapsed"
+          :overview-ready="overviewReady"
+          :is-running="isRunning"
+          :strategy="strategy"
+          :capacity="capacity"
+          :scheduler-busy="schedulerBusy"
+          :workers="workerPool.slice(0, 4)"
+          :online-count="onlineCount"
+          :total-workers="totalWorkers"
+          :running-count="runningDisplay"
+          :heartbeat-ms="heartbeatMs"
+          :kernel-state-label="kernelStateLabel"
+          :advice="currentAiAdvice"
+          :state-label="(s: string) => stateLabel(s)"
+          @update:collapsed="isLeftDockCollapsed = $event"
+          @capacity-change="onCapacityChange"
+          @strategy-change="handleStrategyChange"
+          @toggle-scheduler="toggleScheduler"
+          @register-worker="showRegisterModal = true"
+          @open-worker="(w: any) => openWorkerModal(w as WorkerNode)"
+          @next-advice="nextAiAdvice"
+          @apply-advice="applyAiAdvice"
+        />
         <!-- ═══ 右侧悬浮审计坞 (可收折) ═══ -->
         <DispatchAuditDock
           :collapsed="isRightDockCollapsed"
@@ -357,6 +248,7 @@ import { api } from '../api/http'
 import { truncate } from '../utils/dispatchLayout'
 import { buildTopo } from '../utils/dispatchTopo'
 import DispatchKpiBand from '../components/dispatch/DispatchKpiBand.vue'
+import DispatchControlDock from '../components/dispatch/DispatchControlDock.vue'
 import DispatchAuditDock from '../components/dispatch/DispatchAuditDock.vue'
 import DispatchStarMap from '../components/dispatch/DispatchStarMap.vue'
 import type { DispatchOverview, DispatchWorker, Task, TaskKind, TaskStatus } from '../api/types'
@@ -1169,6 +1061,12 @@ async function handleStrategyChange(s: string) {
 }
 
 /** 调整全局并发容量：live 模式在滑块释放时落库 */
+/** 子组件上报新容量：先落本地再复用原有保存流程。 */
+async function onCapacityChange(value: number) {
+  capacity.value = value
+  await handleCapacityChange()
+}
+
 async function handleCapacityChange() {
   if (!liveMode) return
   try {
@@ -1574,29 +1472,6 @@ onBeforeUnmount(() => {
   flex: 1;
   max-height: calc(100vh - 360px);
 }
-
-.dock-card {
-  background: var(--bg-main);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 8px 10px;
-}
-
-.dock-card-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11.5px;
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-
-/* 左侧浮坞 (Dock Left) */
-.dock-left {
-  top: 14px;
-  left: 14px;
-  width: 290px;
-}
 .dock-left.collapsed {
   width: 44px;
   overflow: hidden;
@@ -1635,19 +1510,6 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   border: 1px solid var(--border-subtle);
 }
-.k-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 2px;
-}
-.k-label {
-  font-size: 9.5px;
-}
-.k-val {
-  font-size: 11.5px;
-}
 
 /* Worker 专精集群卡片列表 */
 .worker-card-list {
@@ -1673,12 +1535,6 @@ onBeforeUnmount(() => {
 .worker-rich-card.offline {
   opacity: 0.55;
 }
-.wrc-head {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 3px;
-}
 .wrc-dot {
   width: 5px;
   height: 5px;
@@ -1688,10 +1544,6 @@ onBeforeUnmount(() => {
 .wrc-dot.idle { background: var(--accent-success); }
 .wrc-dot.busy { background: var(--accent-ai); animation: dot-breathe 1.4s ease-in-out infinite; }
 .wrc-dot.draining { background: var(--accent-warning); }
-.wrc-name {
-  font-size: 11px;
-  color: var(--text-primary);
-}
 .wrc-state-tag {
   margin-left: auto;
   font-size: 9px;
@@ -1703,47 +1555,6 @@ onBeforeUnmount(() => {
 }
 .wrc-state-tag.idle { color: var(--accent-success); }
 .wrc-state-tag.busy { color: var(--accent-ai); }
-.wrc-body {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-.wrc-caps {
-  display: flex;
-  gap: 3px;
-  flex-wrap: wrap;
-}
-.cap-tag {
-  font-size: 8.5px;
-  font-family: var(--font-mono);
-  background: var(--bg-main);
-  border: 1px solid var(--border-subtle);
-  padding: 0 3px;
-  border-radius: 2px;
-  color: var(--text-tertiary);
-}
-.wrc-load-wrap {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-.wrc-load-text {
-  font-size: 9.5px;
-  color: var(--text-secondary);
-}
-.wrc-load-bar {
-  width: 32px;
-  height: 3.5px;
-  background: var(--bg-main);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.wrc-load-fill {
-  height: 100%;
-  transition: width 0.3s;
-}
 .log-card-item.clickable {
   cursor: pointer;
 }
@@ -1979,9 +1790,6 @@ onBeforeUnmount(() => {
     grid-template-columns: repeat(3, 1fr);
     gap: 10px;
   }
-  .dock-left {
-    width: 260px;
-  }
   .dock-right {
     width: 280px;
   }
@@ -2022,10 +1830,6 @@ onBeforeUnmount(() => {
     width: min(320px, calc(100vw - 32px));
     z-index: 40;
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
-  }
-  .dock-left {
-    left: 12px;
-    top: 12px;
   }
   .dock-right {
     right: 12px;
