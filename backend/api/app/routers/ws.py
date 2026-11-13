@@ -36,6 +36,7 @@ from ..agent.graph import (
 from ..agent.log import agent_trace
 from ..agent.pending_cards import card_meta, lock_idle_session, store_card
 from ..agent.ws_stop import handle_stop as _handle_stop
+from ..agent.ws_session_assets import session_owned_file_ids as _session_owned_file_ids
 from ..agent.ws_turn_events import translate_event as _translate_event
 from ..agent.ws_replay import (
     history_with_trim as _history_with_trim,
@@ -1379,32 +1380,6 @@ def _error_code_from_payload(value: object) -> ErrorCode:
         return ErrorCode(str(value))
     except ValueError:
         return ErrorCode.INTERNAL
-
-
-def _session_owned_file_ids(db: Session, session_id: str) -> frozenset[str]:
-    """本会话用户消息引用过的附件 ``file_id`` 集合。
-
-    供资产溯源门禁（``feedback/rules.py``）使用：只对真正引用过的附件做归属
-    校验，空集时门禁保持短路（既有语义）。注入 ``configurable["assets"]``。
-    """
-
-    try:
-        rows = (
-            db.query(Message.attachments)
-            .filter(Message.session_id == session_id, Message.role == "user")
-            .all()
-        )
-    except Exception:  # noqa: BLE001 —— 桩 DB/查询失败降级为空集（门禁短路=未注入语义）
-        return frozenset()
-    ids: set[str] = set()
-    for (attachments,) in rows:
-        for item in attachments or []:
-            if not isinstance(item, Mapping):
-                continue
-            file_id = item.get("file_id")
-            if isinstance(file_id, str) and file_id:
-                ids.add(file_id)
-    return frozenset(ids)
 
 
 async def _run_turn(
