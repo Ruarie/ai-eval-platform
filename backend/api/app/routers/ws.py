@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from ..adapters import StreamAborted
 from ..agent import LangGraphAgent
-from ..agent.attachments import model_content_for_message, normalize_attachment_refs
+from ..agent.attachments import normalize_attachment_refs
 from ..agent.graph import (
     enqueued_task_id_from_update,
     iter_pending_events,
@@ -35,6 +35,11 @@ from ..agent.graph import (
 )
 from ..agent.log import agent_trace
 from ..agent.pending_cards import card_meta, lock_idle_session, store_card
+from ..agent.ws_replay import (
+    history_with_trim as _history_with_trim,
+    replay_events as _replay_events,
+    window_messages as _window_messages,
+)
 from ..agent.pending_approvals import (
     approval_expiry_loop,
     approval_overdue as _approval_overdue,
@@ -47,7 +52,7 @@ from ..agent_prompt_settings import get_agent_prompt_overlay
 from ..config import settings
 from ..db import SessionLocal
 from ..errors import AppError, ErrorCode
-from ..harness.context import skill_hint_lines, window_trim_stats
+from ..harness.context import skill_hint_lines
 from ..harness.execution.ask_user import validate_answers
 from ..harness.execution.context import ToolExecutionContext
 from ..harness.execution.task_tools import cancel_task_safe
@@ -1002,42 +1007,6 @@ def _should_forward_worker_event(event: str, task_id: str | None) -> bool:
     return event == "error" and bool(task_id)
 
 
-async def _replay_events(
-    db: Session,
-    websocket: WebSocket,
-    state: _ConnectionState,
-    session_id: str,
-    last_event_id: int,
-) -> None:
-    """按 last_event_id 补发持久化事件，并先推进游标避免 Worker 旧事件重发。"""
-    # 即使没有待补发事件，也必须承接客户端游标；否则 forward_loop 会从 0 重扫。
-    state.cursor = max(state.cursor, last_event_id)
-    rows = (
-        db.query(WsEvent)
-        .filter(WsEvent.session_id == session_id, WsEvent.event_id > last_event_id)
-        .order_by(WsEvent.event_id)
-        .all()
-    )
-    # 回放与当前连接的广播共用同一把锁；Hub 会在锁外登记/排队新事件。
-    async with state.lock:
-        for row in rows:
-            if row.event_id <= state.cursor:
-                continue
-            # #4：剥离词汇版本保留字段再回放；历史无版本行（V1.71 前）宽容兼容
-            payload, _row_version = _split_event_version(row.payload or {})
-            frame = _frame(
-                session_id,
-                row.event,
-                row.event_id,
-                payload,
-                task_id=row.task_id,
-                ts=row.ts,
-            )
-            if not await _send_unlocked(websocket, frame):
-                return
-            state.cursor = row.event_id
-
-
 @dataclass(frozen=True)
 class _ProfileSnapshot:
     """协议档纯数据快照：仅含回合所需的已加载标量字段，缓存安全。
@@ -1135,49 +1104,6 @@ def _output_budget(profile: object) -> int:
     if any(hint in template for hint in _EFFORT_TEMPLATE_HINTS) and base < _EFFORT_DOUBLE_THRESHOLD:
         return min(base * 2, _MAX_OUTPUT_BUDGET)
     return base
-
-
-def _window_messages(db: Session, session_id: str) -> tuple[list[dict], dict[str, object]]:
-    """读取会话消息，经 Harness 窗口算法（CX-1）投影（含 source_id）。
-
-    ``compact_keep_from`` 指定保留起点时截断更早消息；思考/工具/确认/进度
-    事件不进窗口（CX-2）。窗口算法唯一来源为
-    ``app.harness.context.window.recent_window``（#2 起经 window_trim_stats
-    同源实现返回裁剪元信息，供 context_trim 留痕事件使用）。
-    返回 ``(窗口消息, trim_meta)``；trim_meta.dropped>0 即本回合发生了窗口裁剪。
-    """
-    session = db.query(AgentSession).filter(AgentSession.id == session_id).first()
-    # getattr 容错：会话行缺少该列（测试桩/旧快照）时按未压缩处理
-    keep_from = getattr(session, "compact_keep_from", None) if session else None
-    rows = (
-        db.query(Message)
-        .filter(Message.session_id == session_id, Message.role.in_(("user", "assistant")))
-        .order_by(Message.created_at.desc(), Message.id.desc())
-        .limit(200)
-        .all()
-    )
-    ordered = [
-        {
-            "role": row.role,
-            # 附件装配（staging）在 model_content_for_message 内按会话绑定自行
-            # 解析（resolve_session_sandbox_db，与 _run_turn 注入同源同态——BLK-1）
-            "content": model_content_for_message(db, row) if row.role == "user" else row.content,
-            "source_id": row.source_id,
-        }
-        for row in reversed(rows)
-    ]
-    return window_trim_stats(ordered, limit=20, keep_from=keep_from)
-
-
-def _history_with_trim(
-    db: Session, session_id: str
-) -> tuple[list[dict[str, str]], dict[str, object]]:
-    """窗口投影消息 + 裁剪元信息（#2 留痕用，与 _window_messages 同一次查询）。"""
-    windowed, meta = _window_messages(db, session_id)
-    return [
-        {"role": item["role"], "content": item["content"]}
-        for item in windowed
-    ], meta
 
 
 def _infer_provider(profile: _ProfileSnapshot | None) -> str | None:
