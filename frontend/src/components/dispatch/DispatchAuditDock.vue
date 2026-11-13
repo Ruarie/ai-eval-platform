@@ -271,4 +271,28 @@ void props
   font-weight: 600;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
+
+/* ── 自父视图补回的基础样式（拆分迁移时遗漏） ── */
+
+@media (max-width: 640px) {
+.dock-left,
+  .dock-right {
+    width: calc(100vw - 24px);
+    left: 12px;
+    right: 12px;
+  }
+.panel-title .small {
+    display: none;
+  }
+}
+
+/* ── 补回动画关键帧 ── */
+@keyframes chip-flash {
+  0%, 100% { stroke: var(--border-subtle); }
+  50% { stroke: var(--accent-ai); stroke-width: 2.4; }
+}
+@keyframes halo-breathe {
+  0%, 100% { opacity: 0.14; }
+  50% { opacity: 0.28; }
+}
 </style>

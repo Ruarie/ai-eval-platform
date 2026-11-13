@@ -373,4 +373,205 @@ const emit = defineEmits<{
   font-weight: 600;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
+
+/* ── 自父视图补回的基础样式（拆分迁移时遗漏） ── */
+.task-chip,
+.skill-node,
+.worker-node {
+  transition: opacity 0.3s ease;
+}
+.task-chip {
+  cursor: pointer;
+  transition:
+    transform 0.75s cubic-bezier(0.2, 0.9, 0.3, 1),
+    opacity 0.3s ease;
+}
+.tc-box {
+  fill: var(--bg-main);
+  stroke: var(--border-subtle);
+  stroke-width: 1;
+  filter: drop-shadow(0 2px 5px rgba(17, 24, 39, 0.10));
+  transition: stroke 0.2s ease;
+}
+.task-chip:hover .tc-box {
+  stroke: var(--accent-ai);
+}
+.tc-dot {
+  fill: var(--text-tertiary);
+}
+.tc-id {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: var(--text-secondary);
+}
+.tc-status {
+  font-size: 9px;
+  fill: var(--text-tertiary);
+}
+.tc-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  fill: var(--text-primary);
+}
+.tc-progress-bg {
+  fill: var(--bg-elevated);
+}
+.tc-progress {
+  fill: var(--accent-ai);
+  transition: width 0.4s ease;
+}
+.skill-node {
+  cursor: pointer;
+}
+.sn-halo {
+  fill: var(--sk, var(--accent-ai));
+  opacity: 0.10;
+  transition: opacity 0.25s ease, r 0.25s ease;
+}
+.sn-core {
+  fill: var(--bg-main);
+  stroke: var(--sk, var(--border-subtle));
+  stroke-width: 1.6;
+  filter: drop-shadow(0 2px 6px rgba(17, 24, 39, 0.10));
+  transition: stroke-width 0.2s ease;
+}
+.sn-ico {
+  font-size: 17px;
+}
+.sn-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  fill: var(--text-primary);
+}
+.sn-count {
+  font-size: 9.5px;
+  fill: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+.worker-node {
+  cursor: pointer;
+}
+.wn-ring-bg {
+  fill: none;
+  stroke: var(--border-subtle);
+  stroke-width: 3;
+  opacity: 0.6;
+}
+.wn-load {
+  fill: none;
+  stroke: var(--accent-ai);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.6s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.wn-load.hot {
+  stroke: var(--accent-warning);
+}
+.wn-core {
+  fill: var(--bg-main);
+  stroke: var(--border-subtle);
+  stroke-width: 1;
+  transition: stroke 0.2s ease;
+}
+.worker-node:hover .wn-core {
+  stroke: var(--accent-ai);
+}
+.wn-pct {
+  font-size: 9.5px;
+  font-weight: 600;
+  fill: var(--text-primary);
+  font-family: var(--font-mono);
+}
+.wn-id {
+  font-size: 9.5px;
+  fill: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.wn-dot {
+  fill: var(--text-tertiary);
+  stroke: var(--bg-main);
+  stroke-width: 1.4;
+}
+.core-ring {
+  fill: none;
+  stroke: var(--accent-ai);
+  stroke-width: 1.2;
+  stroke-dasharray: 10 14;
+  opacity: 0.55;
+}
+.core-ring2 {
+  fill: none;
+  stroke: var(--accent-ai);
+  stroke-width: 1;
+  stroke-dasharray: 3 9;
+  opacity: 0.4;
+}
+.spin-a {
+  animation: core-spin 26s linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.spin-b {
+  animation: core-spin 18s linear infinite reverse;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.core-sweep {
+  animation: core-spin 5s linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.core-center {
+  fill: var(--bg-main);
+  stroke: var(--accent-ai);
+  stroke-width: 1.8;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent-ai) 40%, transparent));
+}
+.core-center.halt {
+  stroke: var(--text-tertiary);
+  filter: none;
+}
+.core-ico {
+  font-size: 15px;
+}
+.core-status {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  fill: var(--accent-ai);
+  font-family: var(--font-mono);
+}
+.core-name {
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--text-primary);
+}
+.ripple-c {
+  fill: none;
+  stroke: var(--accent-success);
+  stroke-width: 2.5;
+  pointer-events: none;
+  animation: ripple-svg 1.1s ease-out forwards;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes core-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ripple-svg {
+  0% { transform: scale(0.6); opacity: 0.95; }
+  100% { transform: scale(4.2); opacity: 0; }
+}
+
+/* ── 补回动画关键帧 ── */
+@keyframes chip-flash {
+  0%, 100% { stroke: var(--border-subtle); }
+  50% { stroke: var(--accent-ai); stroke-width: 2.4; }
+}
+@keyframes halo-breathe {
+  0%, 100% { opacity: 0.14; }
+  50% { opacity: 0.28; }
+}
 </style>

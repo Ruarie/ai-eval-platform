@@ -162,4 +162,21 @@ void props
 .pc-lines {
   margin-top: 6px;
 }
+
+/* ── 自父视图补回的基础样式（拆分迁移时遗漏） ── */
+
+@media (max-width: 768px) {
+.dock-bottom-header .row {
+    display: none;
+  }
+}
+
+/* ── 补回动画关键帧 ── */
+@keyframes pin-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes bar-stripes {
+  to { background-position: 23px 0; }
+}
 </style>
