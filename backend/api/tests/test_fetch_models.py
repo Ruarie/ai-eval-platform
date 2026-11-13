@@ -19,7 +19,7 @@ def test_fetch_remote_models_openai_format():
     mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
     mock_resp.__enter__.return_value = mock_resp
 
-    with patch("app.adapters.urlopen", return_value=mock_resp):
+    with patch("app.adapters_models.urlopen", return_value=mock_resp):
         models = fetch_remote_models(
             protocol="openai_chat",
             base_url="https://api.openai.com/v1",
@@ -49,7 +49,7 @@ def test_fetch_remote_models_preserves_cursorapi_parameters():
     mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
     mock_resp.__enter__.return_value = mock_resp
 
-    with patch("app.adapters.urlopen", return_value=mock_resp):
+    with patch("app.adapters_models.urlopen", return_value=mock_resp):
         models = fetch_remote_models(
             protocol="openai_chat",
             base_url="https://cursorapi.example.com/v1",
@@ -81,7 +81,7 @@ def test_fetch_remote_models_ollama_format():
     mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
     mock_resp.__enter__.return_value = mock_resp
 
-    with patch("app.adapters.urlopen", return_value=mock_resp):
+    with patch("app.adapters_models.urlopen", return_value=mock_resp):
         models = fetch_remote_models(
             protocol="openai_chat",
             base_url="http://localhost:11434",
@@ -114,7 +114,7 @@ def test_fetch_remote_models_anthropic_format():
     mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
     mock_resp.__enter__.return_value = mock_resp
 
-    with patch("app.adapters.urlopen", return_value=mock_resp):
+    with patch("app.adapters_models.urlopen", return_value=mock_resp):
         models = fetch_remote_models(
             protocol="anthropic_messages",
             base_url="https://api.anthropic.com",
@@ -135,7 +135,7 @@ def test_fetch_remote_models_error_raising():
 
     from app.errors import AppError, ErrorCode
 
-    with patch("app.adapters.urlopen", side_effect=Exception("connection refused")):
+    with patch("app.adapters_models.urlopen", side_effect=Exception("connection refused")):
         with pytest.raises(AppError) as exc_info:
             fetch_remote_models(
                 protocol="anthropic_messages",
@@ -196,7 +196,7 @@ def test_fetch_remote_models_deepseek_anthropic_subpath_fallback():
         mock_resp.__enter__.return_value = mock_resp
         return mock_resp
 
-    with patch("app.adapters.urlopen", side_effect=fake_urlopen):
+    with patch("app.adapters_models.urlopen", side_effect=fake_urlopen):
         models = fetch_remote_models(
             protocol="anthropic_messages",
             base_url="https://api.deepseek.com/anthropic",
@@ -218,7 +218,7 @@ def test_fetch_remote_models_404_not_found():
     from app.errors import AppError, ErrorCode
 
     err = HTTPError(url="https://api.example.com/v1/models", code=404, msg="Not Found", hdrs={}, fp=None)
-    with patch("app.adapters.urlopen", side_effect=err):
+    with patch("app.adapters_models.urlopen", side_effect=err):
         with pytest.raises(AppError) as exc_info:
             fetch_remote_models(
                 protocol="openai_chat",
