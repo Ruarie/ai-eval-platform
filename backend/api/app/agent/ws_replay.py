@@ -23,7 +23,7 @@ if TYPE_CHECKING:  # 仅类型引用，避免运行时循环导入
 async def replay_events(
     db: Session,
     websocket: Any,
-    state: "_ConnectionState",
+    state: _ConnectionState,
     session_id: str,
     last_event_id: int,
 ) -> None:

@@ -25,50 +25,49 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..adapters import StreamAborted
+# 拆分后的 ws_* 模块（ws_turn / ws_connection / ws_replay / ...）统一经
+# ``ws_router.<name>`` 取用 ws 模块级依赖，以保留既有测试对 ``ws.<name>`` 的
+# 打桩点；因此下列导入在本模块内不直接使用，属于有意重导出（noqa: F401）。
+from ..adapters import StreamAborted  # noqa: F401
 from ..agent import LangGraphAgent
 from ..agent.attachments import normalize_attachment_refs
-from ..agent.graph import (
+from ..agent.graph import (  # noqa: F401
     enqueued_task_id_from_update,
     iter_pending_events,
     router_audit_from_update,
 )
 from ..agent.log import agent_trace
+from ..agent.pending_approvals import approval_overdue as _approval_overdue
+from ..agent.pending_approvals import clear_pending_confirm as _clear_pending_confirm
 from ..agent.pending_cards import card_meta, lock_idle_session, store_card
-from ..agent.ws_stop import handle_stop as _handle_stop
-from ..agent.ws_turn import run_turn as _run_turn
-from ..agent.ws_connection import handle_connection
-from ..agent.ws_session_assets import session_owned_file_ids as _session_owned_file_ids
-from ..agent.ws_turn_events import translate_event as _translate_event
-from ..agent.ws_replay import (
-    history_with_trim as _history_with_trim,
-    replay_events as _replay_events,
-    window_messages as _window_messages,
-)
-from ..agent.pending_approvals import (
-    approval_expiry_loop,
-    approval_overdue as _approval_overdue,
-    card_age_seconds as _card_age_seconds,
-    clear_pending_confirm as _clear_pending_confirm,
-    expire_overdue_approvals_once as _expire_overdue_approvals_once,
-)
 from ..agent.title import generate_title_text
-from ..agent_prompt_settings import get_agent_prompt_overlay
-from ..config import settings
+from ..agent.ws_connection import handle_connection
+from ..agent.ws_replay import history_with_trim as _history_with_trim  # noqa: F401
+from ..agent.ws_replay import replay_events as _replay_events  # noqa: F401
+from ..agent.ws_session_assets import (
+    session_owned_file_ids as _session_owned_file_ids,  # noqa: F401
+)
+from ..agent.ws_stop import handle_stop as _handle_stop  # noqa: F401
+from ..agent.ws_turn import run_turn as _run_turn
+from ..agent.ws_turn_events import translate_event as _translate_event  # noqa: F401
+from ..agent_prompt_settings import get_agent_prompt_overlay  # noqa: F401
 from ..db import SessionLocal
 from ..errors import AppError, ErrorCode
-from ..harness.context import skill_hint_lines
+from ..harness.context import skill_hint_lines  # noqa: F401
 from ..harness.execution.ask_user import validate_answers
-from ..harness.execution.context import ToolExecutionContext
-from ..harness.execution.task_tools import cancel_task_safe
-from ..harness.memory import get_default_checkpointer, to_serializable_request
+from ..harness.execution.context import ToolExecutionContext  # noqa: F401
+from ..harness.execution.task_tools import cancel_task_safe  # noqa: F401
+from ..harness.memory import (
+    get_default_checkpointer,
+    to_serializable_request,  # noqa: F401
+)
 from ..harness.orchestration import check_session_active_task
 from ..harness.orchestration.confirm import (
     _deep_merge,
     _validate_confirmed,
     drop_stale_asset_ids,
 )
-from ..harness.prompts import (
+from ..harness.prompts import (  # noqa: F401
     DEFAULT_PROJECT_INSTRUCTIONS,
     SystemVars,
     build_system_prompt,
@@ -79,14 +78,17 @@ from ..harness.security.auth import (
     assert_no_concurrent_confirm,
     lock_pending_confirm,
 )
-from ..llm import ModelConfig, ModelRequest
+from ..llm import (
+    ModelConfig,
+    ModelRequest,  # noqa: F401
+)
 from ..models import Message, ProtocolProfile, Setting, User, WsEvent
 from ..models import Session as AgentSession
 from ..security import TOKEN_TYPE_WS, decode_token
-from ..session_access import require_visible_session
+from ..session_access import require_visible_session  # noqa: F401
 from ..session_connections import SESSION_CONNECTION_HUB
 from ..time_utils import iso_utc
-from ..workspace_service import resolve_session_sandbox_db
+from ..workspace_service import resolve_session_sandbox_db  # noqa: F401
 from ..ws_tickets import consume_ws_jti, ttl_from_jwt_payload
 from .profiles import _profile_connection
 
@@ -1223,20 +1225,8 @@ def _confirm_author_payload(db: Session, user_id: str | None) -> dict[str, str] 
 # H5 tool_approval_ack）均不读 schema 数字分支，升版对既有路径零影响。
 _CONFIRM_SCHEMA_VERSION = 2
 
-# #3 审批终态：TTL 失效判定辅助（幂等，不依赖扫描进程存活性，API.md §4.3 V1.73）
-
-
-def _approval_overdue(card: Mapping[str, Any] | None) -> bool:
-    """审批卡是否已超 TTL 失效（TTL ≤ 0 表示不启用过期，config 可关）。
-
-    判龄以卡创建时间为锚，任何进程（扫描或 ack 路径）都可独立得出同一结论，
-    天然幂等；扫描缺席时 ack 路径仍拒绝过期卡，不会绕过失效语义恢复回合。
-    """
-    ttl = settings.agent_approval_ttl_seconds
-    if ttl <= 0:
-        return False
-    age = _card_age_seconds(card)
-    return age is not None and age > ttl
+# #3 审批终态：TTL 失效判定统一由 app.agent.pending_approvals.approval_overdue
+# 提供（幂等，不依赖扫描进程存活性，API.md §4.3 V1.73）。
 
 
 def _card_meta(

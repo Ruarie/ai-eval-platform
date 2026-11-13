@@ -10,10 +10,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.agent import pending_approvals
 from app.config import settings
 from app.errors import AppError, ErrorCode
 from app.routers import ws
-from app.agent import pending_approvals
 
 _EMIT = "_emit_persistent"
 
@@ -101,19 +101,19 @@ def test_approval_overdue_uses_card_created_at_idempotently(monkeypatch) -> None
     """幂等判龄：同一张卡在任何进程/时刻得出同一过期结论；无时间戳/TTL 关闭不判龄。"""
     monkeypatch.setattr(settings, "agent_approval_ttl_seconds", 3600)
     fresh = _card(created_at=_now())
-    assert ws._approval_overdue(fresh) is False
+    assert pending_approvals.approval_overdue(fresh) is False
     stale = _card(created_at=_now() - timedelta(seconds=3601))
-    assert ws._approval_overdue(stale) is True
+    assert pending_approvals.approval_overdue(stale) is True
     # 恰好未到 TTL 不算过期
     edge = _card(created_at=_now() - timedelta(seconds=3599))
-    assert ws._approval_overdue(edge) is False
+    assert pending_approvals.approval_overdue(edge) is False
     # 缺失 created_at（旧卡）不判龄（不误杀）
     no_ts = _card(created_at=_now())
     del no_ts["meta"]["created_at"]
-    assert ws._approval_overdue(no_ts) is False
+    assert pending_approvals.approval_overdue(no_ts) is False
     # TTL ≤ 0 表示不启用过期
     monkeypatch.setattr(settings, "agent_approval_ttl_seconds", 0)
-    assert ws._approval_overdue(stale) is False
+    assert pending_approvals.approval_overdue(stale) is False
 
 
 @pytest.mark.asyncio
@@ -255,7 +255,7 @@ async def test_expiry_scan_clears_only_overdue_and_is_idempotent(monkeypatch) ->
     # _expire 内锁内二次查询 first() 需返回对应行；_FakeDb.first 固定 rows[0]，
     # 故只验证 s-overdue 在 rows 首位时的单轮语义
     assert db.rows[0] is expired_row
-    expired_count = await ws._expire_overdue_approvals_once()
+    expired_count = await pending_approvals.expire_overdue_approvals_once()
     assert expired_count == 1
     assert expired_row.pending_confirm is None
     assert fresh_row.pending_confirm is not None
@@ -270,7 +270,7 @@ async def test_expiry_scan_clears_only_overdue_and_is_idempotent(monkeypatch) ->
     }
     # 幂等：再次扫描无过期卡，不重复广播
     db.committed = 0
-    again = await ws._expire_overdue_approvals_once()
+    again = await pending_approvals.expire_overdue_approvals_once()
     assert again == 0
     assert [e for e in emitted if e[0] == "approval_terminal"] == terminal
 

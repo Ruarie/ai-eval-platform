@@ -187,7 +187,7 @@ async def lifespan(app: FastAPI):
     _validate_agent_registry()
     # H5 批次 2：HITL 持久化门禁——混合引擎开启时检查点必须可跨进程恢复。
     _validate_hitl_checkpointer()
-    from .routers.ws import approval_expiry_loop
+    from .agent.pending_approvals import approval_expiry_loop
     from .runtime import checkpoint_ttl_loop
 
     cleanup_task = asyncio.create_task(checkpoint_ttl_loop())
