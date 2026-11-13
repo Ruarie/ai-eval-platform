@@ -581,7 +581,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import KindTag from '../components/common/KindTag.vue'
 import { api } from '../api/http'
-import { polarPoint, wedgePath as buildWedge, truncate, workerLane as workerLaneOf } from '../utils/dispatchLayout'
+import { truncate } from '../utils/dispatchLayout'
+import { buildTopo } from '../utils/dispatchTopo'
 import DispatchKpiBand from '../components/dispatch/DispatchKpiBand.vue'
 import type { DispatchOverview, DispatchWorker, Task, TaskKind, TaskStatus } from '../api/types'
 
@@ -796,21 +797,6 @@ const SKILL_DEFS = [
   { kind: 'testcase' as TaskKind, name: 'Testcase', fullName: '用例生成', icon: '🧩', color: 'var(--c-cases)', angle: 180, desc: 'PRD/OpenAPI · 6 大策略配比' },
 ]
 
-/** 星图极坐标：画布中心与半径由页面常量决定，换算逻辑在 utils/dispatchLayout。 */
-function polar(angleDeg: number, r: number): { x: number; y: number } {
-  return polarPoint(CX, CY, angleDeg, r)
-}
-
-/** 业务扇区底色楔块路径（跨度 ±spread）。 */
-function wedgePath(angle: number, spread: number, r: number): string {
-  return buildWedge(CX, CY, angle, spread, r)
-}
-
-/** Worker 归属业务扇区：取能力标签中首个匹配的技能域，无匹配进通用扇区。 */
-function workerLane(w: WorkerNode): TaskKind | 'general' {
-  return workerLaneOf(w.caps, SKILL_DEFS.map(l => l.kind as string)) as TaskKind | 'general'
-}
-
 /** 业务标识色（工单芯片左侧色条） */
 function kindColor(kind: TaskKind): string {
   const def = SKILL_DEFS.find(s => s.kind === kind)
@@ -823,93 +809,21 @@ function trunc(s: string, n: number): string {
 }
 
 // 星图布局：技能节点坐标 / Worker 扇区坐标 / 工单芯片坐标 / 执行链路路径，全部由数据驱动
-const topo = computed(() => {
-  // 1) 技能 Agent 节点：固定角度布点 + 实时活跃统计
-  const skills = SKILL_DEFS.map(d => {
-    const p = polar(d.angle, R_SKILL)
-    const tasks = taskNodes.value.filter(t => t.kind === d.kind)
-    return {
-      ...d, ...p,
-      activeCount: tasks.length,
-      runningCount: tasks.filter(t => t.status === 'running').length,
-    }
-  })
-  const skillByKind = new Map(skills.map(s => [s.kind as string, s]))
-
-  // 2) 扇区定义：四业务域 + 有未匹配节点时的通用扇区（压缩邻域跨度避免重叠）
-  const hasGeneral = workerPool.value.some(w => workerLane(w) === 'general')
-  const spread = hasGeneral ? 26 : 34
-  const sectorDefs = SKILL_DEFS.map(d => ({ kind: d.kind as string, angle: d.angle, spread, color: d.color }))
-  if (hasGeneral) sectorDefs.push({ kind: 'general', angle: 135, spread: 14, color: 'var(--text-tertiary)' })
-  const sectors = sectorDefs.map(s => ({ ...s, wedge: wedgePath(s.angle, s.spread + 8, R_WORKER + 46) }))
-
-  // 3) Worker 节点：按扇区角距均布，单环超过 5 个时外扩第二环
-  const workers: { w: WorkerNode; x: number; y: number; sx: number; sy: number; skillKind: string }[] = []
-  sectorDefs.forEach(sec => {
-    const list = workerPool.value.filter(w => workerLane(w) === sec.kind)
-    const skill = skillByKind.get(sec.kind)
-    list.forEach((w, i) => {
-      const ring = Math.floor(i / 5)
-      const idxInRing = i % 5
-      const inRing = Math.min(5, list.length - ring * 5)
-      const offset = inRing === 1 ? 0 : -sec.spread + (2 * sec.spread * idxInRing) / (inRing - 1)
-      const p = polar(sec.angle + offset, R_WORKER + ring * 58)
-      workers.push({ w, x: p.x, y: p.y, sx: skill?.x ?? CX, sy: skill?.y ?? CY, skillKind: sec.kind })
-    })
-  })
-  const workerById = new Map(workers.map(pw => [pw.w.id, pw]))
-
-  // 4) 工单芯片：queued 在内环轨道均布；running 飞至 技能→Worker 链路中段（同节点多任务垂直偏移堆叠）
-  const queued = taskNodes.value.filter(t => t.status !== 'running')
-  const running = taskNodes.value.filter(t => t.status === 'running')
-  const runStack = new Map<string, number>()
-  const tasks: { t: TaskNode; x: number; y: number }[] = []
-  const visibleAwaiting = liveMode ? queued.filter(t => t.status === 'awaiting_case_confirm').slice(0, 2) : []
-  const visibleQueued = liveMode
-    ? [...queued.filter(t => t.status === 'queued').slice(0, MAX_QUEUE_CHIPS - visibleAwaiting.length), ...visibleAwaiting]
-    : queued.slice(0, MAX_QUEUE_CHIPS)
-  visibleQueued.forEach((t, i) => {
-    const p = polar(105 + i * 30, R_QUEUE)
-    tasks.push({ t, x: p.x, y: p.y })
-  })
-  running.forEach(t => {
-    const skill = skillByKind.get(t.kind)
-    const pw = t.workerId ? workerById.get(t.workerId) : undefined
-    if (skill && pw) {
-      // 链路中段定位：技能节点 → Worker 55% 处，按堆叠序号垂直偏移
-      const mx = skill.x + (pw.x - skill.x) * 0.55
-      const my = skill.y + (pw.y - skill.y) * 0.55
-      const dx = pw.x - skill.x
-      const dy = pw.y - skill.y
-      const len = Math.max(Math.hypot(dx, dy), 1)
-      const stackIdx = runStack.get(pw.w.id) || 0
-      runStack.set(pw.w.id, stackIdx + 1)
-      tasks.push({ t, x: mx + (-dy / len) * 30 * stackIdx, y: my + (dx / len) * 30 * stackIdx })
-    } else if (skill) {
-      // 运行中但尚未解析到节点：悬停于技能节点内侧等待连线
-      const idx = running.indexOf(t)
-      const p = polar(skill.angle + 24 + idx * 14, R_SKILL - 58)
-      tasks.push({ t, x: p.x, y: p.y })
-    }
-  })
-
-  // 5) 执行链路：内核 → 技能 → Worker 折线，粒子沿路径流动
-  const liveWires = running
-    .filter(t => t.workerId && workerById.has(t.workerId) && skillByKind.has(t.kind))
-    .map(t => {
-      const s = skillByKind.get(t.kind)!
-      const pw = workerById.get(t.workerId!)!
-      return { key: `live-${t.id}`, skillKind: t.kind as string, d: `M ${CX} ${CY} L ${s.x} ${s.y} L ${pw.x} ${pw.y}` }
-    })
-
-  const visibleByStatus = (status: TaskStatus) => tasks.filter(p => p.t.status === status).length
-  return {
-    skills, sectors, workers, tasks, liveWires,
-    queueOverflow: Math.max(0, (liveMode ? queueDepth.value : queued.length) - visibleByStatus('queued')),
-    runningOverflow: liveMode ? Math.max(0, liveRunningTotal.value - visibleByStatus('running')) : 0,
-    awaitingOverflow: liveMode ? Math.max(0, liveAwaitingTotal.value - visibleByStatus('awaiting_case_confirm')) : 0,
-  }
-})
+const topo = computed(() => buildTopo<(typeof SKILL_DEFS)[number], WorkerNode, TaskNode>(
+  {
+    skills: SKILL_DEFS,
+    workers: workerPool.value,
+    tasks: taskNodes.value,
+    liveMode,
+    maxQueueChips: MAX_QUEUE_CHIPS,
+    geometry: { cx: CX, cy: CY, rSkill: R_SKILL, rWorker: R_WORKER, rQueue: R_QUEUE },
+  },
+  {
+    queue: queueDepth.value,
+    running: liveRunningTotal.value,
+    awaiting: liveAwaitingTotal.value,
+  },
+))
 
 const onlineCount = computed(() =>
   liveMode && overviewData.value
