@@ -226,6 +226,14 @@ import { api } from '../api/http'
 import { usePollingLoop } from '../composables/usePollingLoop'
 import { buildGanttRows, buildGanttTicks } from '../utils/dispatchGantt'
 import {
+  applyAssignLoad,
+  applyReleaseLoad,
+  computeProgress,
+  createMockTask,
+  isIdleLoad,
+  pickTemplate,
+} from '../utils/dispatchSimulation'
+import {
   buildLogEntry,
   eventCategory,
   mapWorkerRow,
@@ -931,8 +939,8 @@ function pickAgent(): WorkerNode | null {
 }
 
 function enqueueMockTask() {
-  const tpl = QUEUE_TPL[Math.floor(Math.random() * QUEUE_TPL.length)]
-  const q: QueueItem = { qid: 'q-' + enqueueSeq++, kind: tpl.kind, label: tpl.label, prio: tpl.prio, parentId: tpl.parentId || null }
+  const tpl = pickTemplate(QUEUE_TPL, Math.random())
+  const q: QueueItem = createMockTask(enqueueSeq++, tpl) as unknown as QueueItem
   queue.value.push(q)
   addLog('ENQUEUE', `<span class="la">${q.qid}</span> ${tpl.label} (${q.prio})`, q.qid)
   const t = window.setTimeout(() => {
@@ -961,7 +969,7 @@ function tryAssign() {
   q.progress = 0
   q.startedAt = Date.now()
   agent.state = 'busy'
-  agent.load = Math.min(96, agent.load + 24 + Math.round(Math.random() * 22))
+  agent.load = applyAssignLoad(agent.load, Math.random())
   agent.task = q.qid + ' · ' + q.label
   assignedToday.value++
   addLog('ASSIGN', `<span class="la">${q.qid}</span> → ${agent.id} · 策略=${strategy.value} · 耗时 ${cost}ms`, q.qid)
@@ -969,7 +977,7 @@ function tryAssign() {
   // 执行 4~8.5s：期间按节拍推进进度，完成后释放槽位、触发涟漪并沉淀甘特历史
   const duration = 4000 + Math.random() * 4500
   const progressTimer = window.setInterval(() => {
-    if (q.startedAt) q.progress = Math.min(99, ((Date.now() - q.startedAt) / duration) * 100)
+    if (q.startedAt) q.progress = computeProgress(q.startedAt, Date.now(), duration)
   }, 400)
   assignTimers.add(progressTimer)
   const doneTimer = window.setTimeout(() => {
@@ -977,8 +985,8 @@ function tryAssign() {
     window.clearInterval(progressTimer)
     assignTimers.delete(progressTimer)
     queue.value = queue.value.filter(x => x.qid !== q.qid)
-    agent.load = Math.max(4, agent.load - 32 - Math.round(Math.random() * 20))
-    if (agent.load < 30) {
+    agent.load = applyReleaseLoad(agent.load, Math.random())
+    if (isIdleLoad(agent.load)) {
       agent.state = 'idle'
       agent.task = null
     }
