@@ -102,38 +102,16 @@
           @update:collapsed="isBottomDockCollapsed = $event"
           @open-task="goToTaskDetail"
         />
-        <!-- 悬停详情 tooltip -->
-        <div v-if="tooltip" class="topo-tip" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
-          <div class="tt-title">{{ tooltip.title }}</div>
-          <div v-for="(ln, i) in tooltip.lines" :key="i" class="tt-line">
-            <span class="tertiary">{{ ln[0] }}</span><span class="tt-val">{{ ln[1] }}</span>
-          </div>
-        </div>
-
-        <!-- 工单锁定详情卡 -->
-        <div v-if="pinnedTask && pinnedPos" class="pin-card" :style="{ left: pinnedPos.x + 'px', top: pinnedPos.y + 'px' }">
-          <div class="pc-head">
-            <i class="pc-bar" :style="{ background: kindColor(pinnedTask.kind) }"></i>
-            <span class="mono pc-id">{{ pinnedTask.shortId }}</span>
-            <span class="badge" :class="`badge-${pinnedTask.status}`">{{ statusLabel(pinnedTask.status) }}</span>
-            <span class="grow"></span>
-            <button class="pc-close" title="解锁（Esc）" @click="unpinTask">×</button>
-          </div>
-          <div class="pc-label">{{ pinnedTask.label }}</div>
-          <div v-if="pinnedTask.status === 'running' && pinnedTask.progress != null" class="pc-progress">
-            <i :style="{ width: `${pinnedTask.progress}%` }"></i>
-          </div>
-          <div class="pc-lines">
-            <div class="tt-line"><span class="tertiary">执行节点</span><span class="tt-val mono">{{ pinnedTask.workerId || '排队待分发' }}</span></div>
-            <div v-if="pinnedTask.progress != null" class="tt-line"><span class="tertiary">进度</span><span class="tt-val mono">{{ pinnedTask.progress }}%</span></div>
-            <div v-if="pinnedTask.parentId" class="tt-line"><span class="tertiary">派生自</span><span class="tt-val mono">{{ pinnedTask.parentId.substring(0, 8) }}</span></div>
-          </div>
-          <div class="row" style="gap: 6px; margin-top: 8px">
-            <button class="btn btn-secondary btn-sm grow" @click="goToTaskDetail(pinnedTask.id)">在任务中心查看 ↗</button>
-            <button v-if="pinnedTask.status === 'succeeded'" class="btn btn-ai btn-sm" @click="goToReport(pinnedTask.id)">查看报告 📊</button>
-          </div>
-        </div>
-
+        <DispatchOverlays
+          :tooltip="tooltip"
+          :pinned-task="pinnedTask"
+          :pinned-pos="pinnedPos"
+          :kind-color="(k: string) => kindColor(k as TaskKind)"
+          :status-label="(v: string) => statusLabel(v)"
+          @unpin="unpinTask"
+          @open-task="goToTaskDetail"
+          @open-report="goToReport"
+        />
         <!-- 扫描线装饰 -->
         <div class="scanline" aria-hidden="true"></div>
       </div>
@@ -248,6 +226,7 @@ import { api } from '../api/http'
 import { truncate } from '../utils/dispatchLayout'
 import { buildTopo } from '../utils/dispatchTopo'
 import DispatchKpiBand from '../components/dispatch/DispatchKpiBand.vue'
+import DispatchOverlays from '../components/dispatch/DispatchOverlays.vue'
 import DispatchControlDock from '../components/dispatch/DispatchControlDock.vue'
 import DispatchAuditDock from '../components/dispatch/DispatchAuditDock.vue'
 import DispatchStarMap from '../components/dispatch/DispatchStarMap.vue'
@@ -1383,12 +1362,12 @@ onBeforeUnmount(() => {
 <style scoped>
 /* ═══ 沉浸式调度星图画布与悬浮控制坞 ═══ */
 .immersive-monitor-panel {
-  overflow: hidden;
+
   border-radius: 14px;
-}
+
 .immersive-topo-wrap {
   position: relative;
-  border: 1px solid var(--border-subtle);
+
   border-radius: 12px;
   overflow: hidden;
   height: calc(100vh - 270px);
@@ -1396,7 +1375,7 @@ onBeforeUnmount(() => {
   background:
     radial-gradient(60% 55% at 50% 48%, color-mix(in srgb, var(--accent-ai) 6%, transparent), transparent 70%),
     var(--bg-elevated);
-}
+
 
 
 
@@ -1404,24 +1383,24 @@ onBeforeUnmount(() => {
 
 /* 扫描线装饰 */
 .scanline {
-  position: absolute;
+
   left: 0;
   right: 0;
   top: 0;
   height: 140px;
-  pointer-events: none;
+
   background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--accent-ai) 5%, transparent), transparent);
   animation: scan-sweep 8s linear infinite;
-}
+
 @keyframes scan-sweep {
-  from { transform: translateY(-160px); }
-  to { transform: translateY(1100px); }
-}
+  from { transform: translateY(-160px); 
+  to { transform: translateY(1100px); 
+
 
 
 .sector-wedge.dim {
   opacity: 0.015;
-}
+
 
 
 
@@ -1433,7 +1412,7 @@ onBeforeUnmount(() => {
 .wire-member.dim,
 .wire-live.dim {
   opacity: 0.08;
-}
+
 
 
 
@@ -1457,27 +1436,27 @@ onBeforeUnmount(() => {
 .dock-left.collapsed {
   width: 44px;
   overflow: hidden;
-}
+
 .dock-left.collapsed .dock-header {
   padding: 8px 6px;
   justify-content: center;
-}
+
 
 
 .dock-right.collapsed {
   width: 44px;
   overflow: hidden;
-}
+
 .dock-right.collapsed .dock-header {
   padding: 8px 6px;
   justify-content: center;
-}
+
 
 
 .dock-bottom.collapsed {
   max-height: 38px;
   overflow: hidden;
-}
+
 
 
 
@@ -1491,7 +1470,7 @@ onBeforeUnmount(() => {
 
 .worker-rich-card.busy {
   border-color: color-mix(in srgb, var(--accent-ai) 40%, var(--border-subtle));
-}
+
 .worker-rich-card.offline {
   opacity: 0.55;
 }
@@ -1628,105 +1607,105 @@ onBeforeUnmount(() => {
 }
 
 /* 悬停 tooltip */
-.topo-tip {
-  position: absolute;
-  z-index: 25;
-  min-width: 180px;
-  max-width: 250px;
-  padding: 10px 12px;
-  border-radius: 10px;
+
+
+
+
+
+
+
   border: 1px solid var(--border-subtle);
-  background: var(--bg-main);
-  box-shadow: 0 8px 24px rgba(17, 24, 39, 0.14);
+
+
   pointer-events: none;
-  font-size: 11.5px;
+
 }
-.tt-title {
-  font-weight: 600;
-  font-size: 12px;
-  margin-bottom: 6px;
+
+
+
+
 }
-.tt-line {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  line-height: 1.8;
+
+
+
+
+
 }
-.tt-val {
-  text-align: right;
-  word-break: break-all;
+
+
+
 }
 
 /* 工单锁定详情卡 */
-.pin-card {
+
   position: absolute;
-  z-index: 25;
-  width: 228px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--accent-ai) 40%, var(--border-subtle));
-  background: var(--bg-main);
-  box-shadow: 0 10px 28px rgba(17, 24, 39, 0.18), 0 0 0 1px color-mix(in srgb, var(--accent-ai) 14%, transparent);
-  font-size: 11.5px;
-  animation: pin-in 0.18s ease;
+
+
+
+
+
+
+
+
+
 }
 @keyframes pin-in {
   from { opacity: 0; transform: translateY(4px) scale(0.97); }
   to { opacity: 1; transform: none; }
 }
-.pc-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+
+
+
+
 }
-.pc-bar {
-  width: 3.5px;
-  height: 14px;
-  border-radius: 2px;
-  flex: 0 0 3.5px;
+
+
+
+
+
 }
-.pc-id {
-  font-weight: 700;
-  font-size: 11.5px;
+
+
+
 }
-.pc-close {
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
+
+
+
+
+
+
+
+
+
 }
-.pc-close:hover {
-  background: var(--row-hover);
-  color: var(--text-primary);
+
+
+
 }
-.pc-label {
-  margin-top: 6px;
-  font-weight: 500;
-  line-height: 1.45;
-  word-break: break-all;
+
+
+
+
+
 }
-.pc-progress {
-  margin-top: 6px;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--bg-elevated);
+
+
+
+
+
   overflow: hidden;
 }
-.pc-progress > i {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: repeating-linear-gradient(45deg, var(--accent-ai) 0 8px, color-mix(in srgb, var(--accent-ai) 55%, #fff) 8px 16px);
-  background-size: 23px 100%;
-  animation: bar-stripes 0.9s linear infinite;
-  transition: width 0.4s ease;
+
+
+
+
+
+
+
+
 }
-.pc-lines {
-  margin-top: 6px;
+
+
 }
 
 
