@@ -1397,6 +1397,26 @@ onBeforeUnmount(() => {
     radial-gradient(60% 55% at 50% 48%, color-mix(in srgb, var(--accent-ai) 6%, transparent), transparent 70%),
     var(--bg-elevated);
 }
+.topo-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  user-select: none;
+  touch-action: none;
+  cursor: grab;
+}
+.topo-svg:active {
+  cursor: grabbing;
+}
+.topo-bg {
+  fill: url(#topo-grid);
+}
+.grid-line {
+  fill: none;
+  stroke: var(--text-tertiary);
+  stroke-width: 0.5;
+  opacity: 0.14;
+}
 
 /* 扫描线装饰 */
 .scanline {
@@ -1412,6 +1432,67 @@ onBeforeUnmount(() => {
 @keyframes scan-sweep {
   from { transform: translateY(-160px); }
   to { transform: translateY(1100px); }
+}
+
+/* 业务扇区底色楔块 */
+.sector-wedge {
+  opacity: 0.05;
+  transition: opacity 0.3s ease;
+}
+.sector-wedge.dim {
+  opacity: 0.015;
+}
+
+/* 轨道参考线 */
+.orbit-guide {
+  fill: none;
+  stroke: var(--text-tertiary);
+  stroke-width: 0.8;
+  stroke-dasharray: 2 7;
+  opacity: 0.28;
+}
+.orbit-guide.outer {
+  opacity: 0.18;
+}
+
+/* 常驻链路：内核 → 技能 */
+.wire-core {
+  fill: none;
+  stroke: var(--text-tertiary);
+  stroke-width: 1.4;
+  stroke-dasharray: 4 6;
+  opacity: 0.5;
+  animation: dash-flow 2.6s linear infinite;
+  transition: opacity 0.3s ease;
+}
+/* 归属链路：技能 → Worker */
+.wire-member {
+  fill: none;
+  stroke: var(--text-tertiary);
+  stroke-width: 0.9;
+  opacity: 0.3;
+  transition: opacity 0.3s ease;
+}
+/* 执行链路：高亮流动 */
+.wire-live {
+  fill: none;
+  stroke: var(--accent-ai);
+  stroke-width: 1.8;
+  stroke-dasharray: 6 5;
+  opacity: 0.85;
+  animation: dash-flow 0.9s linear infinite;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent-ai) 55%, transparent));
+  transition: opacity 0.3s ease;
+}
+.wire-core.dim,
+.wire-member.dim,
+.wire-live.dim {
+  opacity: 0.08;
+}
+/* 数据流粒子 */
+.particle {
+  fill: var(--accent-ai);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent-ai) 80%, transparent));
 }
 
 /* 悬浮控制坞通用体系 (Floating Glass Docks) */
@@ -1472,6 +1553,29 @@ onBeforeUnmount(() => {
   flex: 1;
   max-height: calc(100vh - 360px);
 }
+
+.dock-card {
+  background: var(--bg-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.dock-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+/* 左侧浮坞 (Dock Left) */
+.dock-left {
+  top: 14px;
+  left: 14px;
+  width: 290px;
+}
 .dock-left.collapsed {
   width: 44px;
   overflow: hidden;
@@ -1495,9 +1599,26 @@ onBeforeUnmount(() => {
   padding: 8px 6px;
   justify-content: center;
 }
+
+/* 底部甘特浮坞 (Dock Bottom) */
+.dock-bottom {
+  bottom: 14px;
+  left: 14px;
+  right: 14px;
+  max-height: 240px;
+}
 .dock-bottom.collapsed {
   max-height: 38px;
   overflow: hidden;
+}
+.dock-bottom-header {
+  cursor: pointer;
+  padding: 6px 12px;
+}
+.dock-bottom-content {
+  padding: 8px 12px;
+  overflow-y: auto;
+  max-height: 180px;
 }
 
 /* 调度内核核心指标快览 */
@@ -1509,6 +1630,19 @@ onBeforeUnmount(() => {
   padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid var(--border-subtle);
+}
+.k-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+}
+.k-label {
+  font-size: 9.5px;
+}
+.k-val {
+  font-size: 11.5px;
 }
 
 /* Worker 专精集群卡片列表 */
@@ -1535,6 +1669,12 @@ onBeforeUnmount(() => {
 .worker-rich-card.offline {
   opacity: 0.55;
 }
+.wrc-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 3px;
+}
 .wrc-dot {
   width: 5px;
   height: 5px;
@@ -1544,6 +1684,10 @@ onBeforeUnmount(() => {
 .wrc-dot.idle { background: var(--accent-success); }
 .wrc-dot.busy { background: var(--accent-ai); animation: dot-breathe 1.4s ease-in-out infinite; }
 .wrc-dot.draining { background: var(--accent-warning); }
+.wrc-name {
+  font-size: 11px;
+  color: var(--text-primary);
+}
 .wrc-state-tag {
   margin-left: auto;
   font-size: 9px;
@@ -1555,6 +1699,57 @@ onBeforeUnmount(() => {
 }
 .wrc-state-tag.idle { color: var(--accent-success); }
 .wrc-state-tag.busy { color: var(--accent-ai); }
+.wrc-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.wrc-caps {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.cap-tag {
+  font-size: 8.5px;
+  font-family: var(--font-mono);
+  background: var(--bg-main);
+  border: 1px solid var(--border-subtle);
+  padding: 0 3px;
+  border-radius: 2px;
+  color: var(--text-tertiary);
+}
+.wrc-load-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.wrc-load-text {
+  font-size: 9.5px;
+  color: var(--text-secondary);
+}
+.wrc-load-bar {
+  width: 32px;
+  height: 3.5px;
+  background: var(--bg-main);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.wrc-load-fill {
+  height: 100%;
+  transition: width 0.3s;
+}
+
+/* 结构化日志卡片 */
+.log-card-item {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 5px;
+  transition: background 0.15s ease;
+}
 .log-card-item.clickable {
   cursor: pointer;
 }
@@ -1562,19 +1757,284 @@ onBeforeUnmount(() => {
   border-color: var(--accent-ai);
   background: var(--row-hover);
 }
+.lci-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 2px;
+}
+.lci-time {
+  font-size: 9.5px;
+  color: var(--text-tertiary);
+}
+.lci-tag {
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 600;
+  background: var(--bg-main);
+  border: 1px solid var(--border-subtle);
+}
 .lci-tag.done { color: var(--accent-success); border-color: color-mix(in srgb, var(--accent-success) 30%, transparent); }
 .lci-tag.error { color: var(--accent-error); border-color: color-mix(in srgb, var(--accent-error) 30%, transparent); }
 .lci-tag.node { color: var(--text-secondary); }
+.lci-tid {
+  font-size: 9px;
+  color: var(--accent-ai);
+  margin-left: auto;
+}
+.lci-body {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+/* ─── 星图节点体系 ─── */
+.task-chip,
+.skill-node,
+.worker-node {
+  transition: opacity 0.3s ease;
+}
+.task-chip.dim,
+.skill-node.dim,
+.worker-node.dim {
+  opacity: 0.18;
+}
+
+.task-chip {
+  cursor: pointer;
+  transition:
+    transform 0.75s cubic-bezier(0.2, 0.9, 0.3, 1),
+    opacity 0.3s ease;
+}
+.tc-box {
+  fill: var(--bg-main);
+  stroke: var(--border-subtle);
+  stroke-width: 1;
+  filter: drop-shadow(0 2px 5px rgba(17, 24, 39, 0.10));
+  transition: stroke 0.2s ease;
+}
+.task-chip:hover .tc-box {
+  stroke: var(--accent-ai);
+}
+.task-chip.queued .tc-box {
+  stroke-dasharray: 4 3;
+}
+.task-chip.running .tc-box {
+  stroke: color-mix(in srgb, var(--accent-ai) 55%, var(--border-subtle));
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent-ai) 30%, transparent));
+}
+.task-chip.flash .tc-box {
+  animation: chip-flash 0.8s ease-in-out 2;
+}
 @keyframes chip-flash {
   0%, 100% { stroke: var(--border-subtle); }
   50% { stroke: var(--accent-ai); stroke-width: 2.4; }
+}
+.task-chip.pinned .tc-box {
+  stroke: var(--accent-ai);
+  stroke-width: 2;
+  stroke-dasharray: none;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent-ai) 45%, transparent));
+}
+.tc-dot {
+  fill: var(--text-tertiary);
+}
+.tc-dot.running {
+  fill: var(--accent-ai);
+  animation: dot-breathe 1.4s ease-in-out infinite;
+}
+.tc-dot.awaiting_case_confirm {
+  fill: var(--accent-warning);
+}
+.tc-id {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: var(--text-secondary);
+}
+.tc-status {
+  font-size: 9px;
+  fill: var(--text-tertiary);
+}
+.tc-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  fill: var(--text-primary);
+}
+.tc-progress-bg {
+  fill: var(--bg-elevated);
+}
+.tc-progress {
+  fill: var(--accent-ai);
+  transition: width 0.4s ease;
+}
+
+/* 技能 Agent 内环节点 */
+.skill-node {
+  cursor: pointer;
+}
+.sn-halo {
+  fill: var(--sk, var(--accent-ai));
+  opacity: 0.10;
+  transition: opacity 0.25s ease, r 0.25s ease;
+}
+.skill-node.on .sn-halo {
+  opacity: 0.22;
+  animation: halo-breathe 2.2s ease-in-out infinite;
 }
 @keyframes halo-breathe {
   0%, 100% { opacity: 0.14; }
   50% { opacity: 0.28; }
 }
+.sn-core {
+  fill: var(--bg-main);
+  stroke: var(--sk, var(--border-subtle));
+  stroke-width: 1.6;
+  filter: drop-shadow(0 2px 6px rgba(17, 24, 39, 0.10));
+  transition: stroke-width 0.2s ease;
+}
+.skill-node:hover .sn-core,
+.skill-node.on .sn-core {
+  stroke-width: 2.4;
+}
+.sn-ico {
+  font-size: 17px;
+}
+.sn-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  fill: var(--text-primary);
+}
+.sn-count {
+  font-size: 9.5px;
+  fill: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+/* Worker 外环节点 */
+.worker-node {
+  cursor: pointer;
+}
+.wn-ring-bg {
+  fill: none;
+  stroke: var(--border-subtle);
+  stroke-width: 3;
+  opacity: 0.6;
+}
+.wn-load {
+  fill: none;
+  stroke: var(--accent-ai);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.6s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.wn-load.hot {
+  stroke: var(--accent-warning);
+}
+.wn-core {
+  fill: var(--bg-main);
+  stroke: var(--border-subtle);
+  stroke-width: 1;
+  transition: stroke 0.2s ease;
+}
+.worker-node:hover .wn-core {
+  stroke: var(--accent-ai);
+}
+.worker-node.busy .wn-core {
+  stroke: color-mix(in srgb, var(--accent-ai) 55%, var(--border-subtle));
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent-ai) 35%, transparent));
+}
+.worker-node.offline {
+  opacity: 0.4;
+}
+.wn-pct {
+  font-size: 9.5px;
+  font-weight: 600;
+  fill: var(--text-primary);
+  font-family: var(--font-mono);
+}
+.wn-id {
+  font-size: 9.5px;
+  fill: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.wn-dot {
+  fill: var(--text-tertiary);
+  stroke: var(--bg-main);
+  stroke-width: 1.4;
+}
+.wn-dot.idle { fill: var(--accent-success); }
+.wn-dot.busy { fill: var(--accent-ai); animation: dot-breathe 1.4s ease-in-out infinite; }
+.wn-dot.draining { fill: var(--accent-warning); }
+
+/* 中心调度内核 */
+.core-ring {
+  fill: none;
+  stroke: var(--accent-ai);
+  stroke-width: 1.2;
+  stroke-dasharray: 10 14;
+  opacity: 0.55;
+}
+.core-ring2 {
+  fill: none;
+  stroke: var(--accent-ai);
+  stroke-width: 1;
+  stroke-dasharray: 3 9;
+  opacity: 0.4;
+}
+.spin-a {
+  animation: core-spin 26s linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.spin-b {
+  animation: core-spin 18s linear infinite reverse;
+  transform-box: fill-box;
+  transform-origin: center;
+}
 @keyframes core-spin {
   to { transform: rotate(360deg); }
+}
+.core-sweep {
+  animation: core-spin 5s linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.core-center {
+  fill: var(--bg-main);
+  stroke: var(--accent-ai);
+  stroke-width: 1.8;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent-ai) 40%, transparent));
+}
+.core-center.halt {
+  stroke: var(--text-tertiary);
+  filter: none;
+}
+.core-ico {
+  font-size: 15px;
+}
+.core-status {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  fill: var(--accent-ai);
+  font-family: var(--font-mono);
+}
+.core-name {
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--text-primary);
+}
+
+/* 完成涟漪 */
+.ripple-c {
+  fill: none;
+  stroke: var(--accent-success);
+  stroke-width: 2.5;
+  pointer-events: none;
+  animation: ripple-svg 1.1s ease-out forwards;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 @keyframes ripple-svg {
   0% { transform: scale(0.6); opacity: 0.95; }
@@ -1682,12 +2142,32 @@ onBeforeUnmount(() => {
 .pc-lines {
   margin-top: 6px;
 }
+
+/* 甘特图 */
+.gantt {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
 .gantt-axis {
   display: flex;
   justify-content: space-between;
   font-size: 9.5px;
   color: var(--text-tertiary);
   padding: 0 4px 2px 160px;
+}
+.gantt-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.gantt-row:hover {
+  background: var(--row-hover);
 }
 .gantt-row.child .gantt-name {
   padding-left: 10px;
@@ -1703,12 +2183,50 @@ onBeforeUnmount(() => {
 .gantt-tid {
   color: var(--text-secondary);
 }
+.gantt-track {
+  position: relative;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+.gantt-bar {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  padding-left: 5px;
+  transition: left 0.6s ease, width 0.6s ease;
+}
+.gantt-bar-text {
+  font-size: 8.5px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.gantt-bar.st-queued { background: #9ca3af; }
+.gantt-bar.st-running {
+  background: repeating-linear-gradient(45deg, var(--accent-ai) 0 8px, color-mix(in srgb, var(--accent-ai) 55%, #fff) 8px 16px);
+  background-size: 23px 100%;
+  animation: bar-stripes 0.9s linear infinite;
+}
 @keyframes bar-stripes {
   to { background-position: 23px 0; }
 }
 .gantt-bar.st-awaiting_case_confirm { background: var(--accent-warning); }
+.gantt-bar.st-succeeded { background: var(--accent-success); }
 .gantt-bar.st-failed,
 .gantt-bar.st-cancelled { background: var(--accent-error); opacity: 0.75; }
+.gantt-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
 
 /* 图例 */
 .legend-line {
@@ -1790,6 +2308,9 @@ onBeforeUnmount(() => {
     grid-template-columns: repeat(3, 1fr);
     gap: 10px;
   }
+  .dock-left {
+    width: 260px;
+  }
   .dock-right {
     width: 280px;
   }
@@ -1831,6 +2352,10 @@ onBeforeUnmount(() => {
     z-index: 40;
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
   }
+  .dock-left {
+    left: 12px;
+    top: 12px;
+  }
   .dock-right {
     right: 12px;
     top: 12px;
@@ -1838,8 +2363,23 @@ onBeforeUnmount(() => {
   .dock-scroll-content {
     max-height: 44vh;
   }
+  .dock-bottom {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    max-height: 220px;
+    z-index: 35;
+  }
+  .dock-bottom-header {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+  }
   .dock-bottom-header .row {
     display: none;
+  }
+  .gantt-row {
+    grid-template-columns: 100px 1fr;
   }
   .gantt-axis {
     padding-left: 100px;

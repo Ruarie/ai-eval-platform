@@ -90,6 +90,14 @@ void props
 </script>
 
 <style scoped>
+.sector-wedge.dim {
+  opacity: 0.015;
+}
+.wire-core.dim,
+.wire-member.dim,
+.wire-live.dim {
+  opacity: 0.08;
+}
 .floating-dock {
   position: absolute;
   z-index: 20;
@@ -171,6 +179,63 @@ void props
   overflow-y: auto;
   max-height: 180px;
 }
+.worker-rich-card.busy {
+  border-color: color-mix(in srgb, var(--accent-ai) 40%, var(--border-subtle));
+}
+.worker-rich-card.offline {
+  opacity: 0.55;
+}
+.wrc-dot.idle { background: var(--accent-success); }
+.wrc-dot.busy { background: var(--accent-ai); animation: dot-breathe 1.4s ease-in-out infinite; }
+.wrc-dot.draining { background: var(--accent-warning); }
+.wrc-state-tag.idle { color: var(--accent-success); }
+.wrc-state-tag.busy { color: var(--accent-ai); }
+.task-chip.dim,
+.skill-node.dim,
+.worker-node.dim {
+  opacity: 0.18;
+}
+.task-chip.queued .tc-box {
+  stroke-dasharray: 4 3;
+}
+.task-chip.running .tc-box {
+  stroke: color-mix(in srgb, var(--accent-ai) 55%, var(--border-subtle));
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent-ai) 30%, transparent));
+}
+.task-chip.flash .tc-box {
+  animation: chip-flash 0.8s ease-in-out 2;
+}
+.task-chip.pinned .tc-box {
+  stroke: var(--accent-ai);
+  stroke-width: 2;
+  stroke-dasharray: none;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent-ai) 45%, transparent));
+}
+.tc-dot.running {
+  fill: var(--accent-ai);
+  animation: dot-breathe 1.4s ease-in-out infinite;
+}
+.tc-dot.awaiting_case_confirm {
+  fill: var(--accent-warning);
+}
+.skill-node.on .sn-halo {
+  opacity: 0.22;
+  animation: halo-breathe 2.2s ease-in-out infinite;
+}
+.skill-node:hover .sn-core,
+.skill-node.on .sn-core {
+  stroke-width: 2.4;
+}
+.worker-node.busy .wn-core {
+  stroke: color-mix(in srgb, var(--accent-ai) 55%, var(--border-subtle));
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent-ai) 35%, transparent));
+}
+.worker-node.offline {
+  opacity: 0.4;
+}
+.wn-dot.idle { fill: var(--accent-success); }
+.wn-dot.busy { fill: var(--accent-ai); animation: dot-breathe 1.4s ease-in-out infinite; }
+.wn-dot.draining { fill: var(--accent-warning); }
 .gantt {
   display: flex;
   flex-direction: column;
@@ -251,31 +316,10 @@ void props
   height: 7px;
   border-radius: 2px;
 }
-.dock-bottom {
-    left: 10px;
-    right: 10px;
-    bottom: 10px;
-    max-height: 220px;
-    z-index: 35;
-  }
-.dock-bottom-header {
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 8px 10px;
-  }
-.dock-bottom-header .row {
-    display: none;
-  }
-.gantt-row {
-    grid-template-columns: 100px 1fr;
-  }
-.gantt-axis {
-    padding-left: 100px;
-  }
-.gantt-name {
-    font-size: 10px;
-  }
-.panel-title .small {
-    display: none;
-  }
+.tab-pill-btn.active {
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
 </style>
