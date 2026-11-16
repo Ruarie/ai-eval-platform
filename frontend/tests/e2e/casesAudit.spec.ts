@@ -459,11 +459,23 @@ test('真实六策略候选可筛选且保存规范名称，旧策略别名兼�
   expect(ctx.saves[2].cases[0].strategy).toBe('等价类')
 })
 
-test('用例生成允许等待服务端 280 秒预算、AI 补全保留 120 秒预算', async ({ page }) => {
+test('用例生成入队请求保持短超时，客户端仍等待 280 秒预算', async ({ page }) => {
   await setup(page)
-  const timeouts = await page.evaluate(async () => {
+  // 后注册的路由优先于 setup 里的通配，模拟 Worker 入队后再返回候选。
+  await page.route('**/api/case-sets/ai-generate', route => route.fulfill({
+    status: 202,
+    json: { job_id: 'job-1', status: 'queued' },
+  }))
+  await page.route('**/api/case-sets/ai-jobs/job-1', route => route.fulfill({
+    json: {
+      job_id: 'job-1',
+      status: 'succeeded',
+      result: { items: [{ name: '生成候选', strategy: '正向' }], checks: [], source_truncated: false, dropped: {} },
+    },
+  }))
+  const { timeouts, waitMs } = await page.evaluate(async () => {
     const modulePath = '/src/api/http.ts'
-    const { default: http, api } = await import(modulePath)
+    const { default: http, api, CASE_AI_WAIT_MS } = await import(modulePath)
     const requests: number[] = []
     const interceptor = http.interceptors.request.use((config: { timeout: number }) => {
       requests.push(config.timeout)
@@ -472,11 +484,12 @@ test('用例生成允许等待服务端 280 秒预算、AI 补全保留 120 秒�
     try {
       await api.cases.generateCases({ source_text: '测试需求', strategy_weights: { positive: 100 }, max_count: 1 })
       await api.cases.aiFillCases('a', { case_ids: ['row-a'] })
-      return requests
+      return { timeouts: requests, waitMs: CASE_AI_WAIT_MS }
     } finally { http.interceptors.request.eject(interceptor) }
   })
-  // 生成与 Worker 的 280 秒预算对齐（客户端 +10 秒），补全仍是单次短调用。
-  expect(timeouts).toEqual([290000, 130000])
+  // 入队本身只要 20 秒；随后轮询单次 15 秒，总等待仍覆盖 Worker 的 280 秒预算。补全仍是单次短调用。
+  expect(waitMs).toBe(290000)
+  expect(timeouts).toEqual([20000, 15000, 130000])
 })
 
 test('候选完整审核后原子保存为新草稿，步骤与功能点可在详细编辑中修改', async ({ page }) => {

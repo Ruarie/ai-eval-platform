@@ -265,6 +265,9 @@ async function reportsGet(id: string, fmt?: 'md'): Promise<Report | string> {
 /**
  * 统一 API 客户端对象
  */
+/** 入队后客户端继续等待的上限，对齐 Worker 280 秒生成预算并留 10 秒余量。 */
+export const CASE_AI_WAIT_MS = 290_000
+
 function isQueuedCaseAiJob(data: any): data is { job_id: string } {
   // 旧的同步响应和 e2e 桩直接带结果；只有入队响应才轮询。
   if (!data || !data.job_id) return false
@@ -1011,7 +1014,7 @@ export const api = {
       }
       // 入队后由 Worker 生成。客户端继续等到结果，但每次请求都很短。
       const posted = await http.post('/api/case-sets/ai-generate', payload, { timeout: 20000 })
-      const data = isQueuedCaseAiJob(posted.data) ? await waitCaseAiJob(posted.data.job_id, 290000) : posted.data
+      const data = isQueuedCaseAiJob(posted.data) ? await waitCaseAiJob(posted.data.job_id, CASE_AI_WAIT_MS) : posted.data
       const items: TestCase[] = Array.isArray(data) ? data : data.items || []
       return {
         items,
@@ -1063,7 +1066,7 @@ export const api = {
         }
       }
       const posted = await http.post('/api/case-sets/ai-compare', payload, { timeout: 20000 })
-      const data = isQueuedCaseAiJob(posted.data) ? await waitCaseAiJob(posted.data.job_id, 290000) : posted.data
+      const data = isQueuedCaseAiJob(posted.data) ? await waitCaseAiJob(posted.data.job_id, CASE_AI_WAIT_MS) : posted.data
       return {
         sourceTruncated: Boolean(data?.source_truncated),
         runs: Array.isArray(data?.runs) ? data.runs : [],
