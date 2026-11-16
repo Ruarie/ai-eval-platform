@@ -9,7 +9,7 @@
             <StatusBadge :status="task.status" />
           </div>
           <div class="td-meta mono">
-            ID: {{ task.id }} · 创建者: {{ task.creator }} · {{ formatDateTime(task.created_at) }}
+            ID: {{ task.id }} · 创建者: {{ creatorDisplayName(task) }} · {{ formatDateTime(task.created_at) }}
           </div>
           <div v-if="task.parent_task_id" class="td-parent mono">
             ↳ 继承自父任务: {{ task.parent_task_id }}
@@ -106,7 +106,7 @@ import type { Task, TaskEvent } from '../../api/types'
 import { api } from '../../api/http'
 import StatusBadge from '../common/StatusBadge.vue'
 import KindTag from '../common/KindTag.vue'
-import { formatDateTime } from '../../utils/format'
+import { creatorDisplayName, formatDateTime } from '../../utils/format'
 
 const props = defineProps<{
   show: boolean

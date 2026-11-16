@@ -59,17 +59,18 @@
             :key="d.doc_id"
             class="doc-item"
             :class="{ on: activeDocId === d.doc_id }"
+            :title="`${d.filename} · ${d.doc_id}`"
             @click="activeDocId = d.doc_id"
           >
-            <span class="grow" style="min-width: 0">
-              <span class="d-name" style="font-size: 13px; font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
-                {{ d.filename }}
+            <div class="doc-item-body">
+              <span class="d-name">{{ d.filename }}</span>
+              <span class="doc-meta">
+                <span class="mono">{{ d.size }}</span>
+                <span v-if="d.status === 'indexed'" class="badge badge-succeeded"><i class="bdot"></i>已索引</span>
+                <span v-else class="badge badge-running"><i class="bdot"></i>索引中</span>
               </span>
-              <span class="small tertiary mono">{{ d.size }} · {{ d.doc_id }}</span>
-            </span>
-            <span v-if="d.status === 'indexed'" class="badge badge-succeeded"><i class="bdot"></i>已索引</span>
-            <span v-else class="badge badge-running"><i class="bdot"></i>索引中</span>
-            <button class="link-btn danger" style="font-size: 11px" title="删除文档" @click.stop="handleDeleteDoc(d)">删除</button>
+            </div>
+            <button class="link-btn danger doc-del" title="删除文档" @click.stop="handleDeleteDoc(d)">删除</button>
           </div>
         </div>
 
@@ -900,7 +901,8 @@ watch(() => route.query.kb_id, (value) => {
 <style scoped>
 .kb-grid-3col {
   display: grid;
-  grid-template-columns: 280px 1fr 340px;
+  /* 左栏留 320px：保证文件名可用宽度 ≥240px，不再出现「6 个字就省略」 */
+  grid-template-columns: 320px 1fr 340px;
   gap: 16px;
 }
 .mode-context-panel {
@@ -949,6 +951,37 @@ watch(() => route.query.kb_id, (value) => {
 .doc-item.on {
   border-color: var(--c-kb);
   background: color-mix(in srgb, var(--t-kb) 30%, var(--bg-main));
+}
+/* 文档条目：文件名占满主体宽度单行省略；大小与索引状态下移到第二行，
+   文档 UUID 只留在 title 提示里，避免窄栏内逐字折行撑高卡片。 */
+.doc-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.doc-item .d-name {
+  display: block;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doc-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.doc-del {
+  flex: 0 0 auto;
+  font-size: 11px;
+  white-space: nowrap;
 }
 /* 快速填充 pill 悬停时染主色，对齐原型 quick-q-pill 交互。 */
 .quick-pill {

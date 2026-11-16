@@ -132,6 +132,15 @@ void props
   top: 14px;
   right: 14px;
   width: 320px;
+  /* 高度收敛到画布内并让出底部甘特坞，超出部分由内部滚动承载 */
+  max-height: calc(100% - 28px - var(--dock-bottom-reserve, 254px));
+  overflow: hidden;
+}
+/* 覆盖全局 .dock-scroll-content 的固定 max-height，改为随坞体弹性滚动 */
+.dock-scroll-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 .dock-right.collapsed {
   width: 44px;

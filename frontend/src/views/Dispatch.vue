@@ -1352,9 +1352,15 @@ onBeforeUnmount(() => {
   overflow: hidden;
   height: calc(100vh - 270px);
   min-height: 740px;
+  /* 底部甘特坞占位高度：左/右悬浮坞据此收边，避免被甘特面板覆盖 */
+  --dock-bottom-reserve: 254px;
   background:
     radial-gradient(60% 55% at 50% 48%, color-mix(in srgb, var(--accent-ai) 6%, transparent), transparent 70%),
     var(--bg-elevated);
+}
+/* 甘特坞收起时只占约 66px（38 高 + 14 底距），左右坞可多占一些高度 */
+.immersive-topo-wrap:has(.dock-bottom.collapsed) {
+  --dock-bottom-reserve: 66px;
 }
 .scanline {
   position: absolute;

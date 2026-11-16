@@ -27,13 +27,26 @@ ACTIVE_STATUSES = {"queued", "running", "awaiting_case_confirm"}
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 
 
-def _task_out(task: Task) -> dict:
+def _creator_name_map(db: Session, rows: list[Task]) -> dict[str, str]:
+    """批量解析任务创建者账号名：单次 IN 查询，列表页不做逐行回表。"""
+    ids = {row.created_by for row in rows if row.created_by}
+    if not ids:
+        return {}
+    users = db.query(User).filter(User.id.in_(ids)).all()
+    # 过滤空结果：测试桩或成员已删除时不应把 None 当作用户行
+    return {user.id: user.username for user in users if user is not None}
+
+
+def _task_out(task: Task, creator_names: dict[str, str] | None = None) -> dict:
     """将任务 ORM 对象统一转换为前端需要的公开字段。
 
     同步把 config 快照中的 dataset_id/kb_id 提升为顶层引用（API §3.10 列表
-    item 契约），列表页无需解包 config 即可展示数据集 / 知识库归属。
+    item 契约），列表页无需解包 config 即可展示数据集 / 知识库归属；
+    creator_name 由路由层传入的账号名映射回填，避免前端展示裸用户 ID。
     """
     payload = TaskOut.model_validate(task).model_dump(mode="json")
+    if creator_names is not None:
+        payload["creator_name"] = creator_names.get(task.created_by or "")
     config = task.config or {}
     if isinstance(config, dict):
         payload["dataset_id"] = config.get("dataset_id")
@@ -183,7 +196,7 @@ def create_task(
         db.rollback()
         raise AppError(ErrorCode.CONCURRENCY, "会话已有未完成任务") from None
     db.refresh(task)
-    return _task_out(task)
+    return _task_out(task, _creator_name_map(db, [task]))
 
 
 @router.get("")
@@ -204,7 +217,8 @@ def list_tasks(
     # 列表要返回 config/progress/result，但计数不该为了 count(*) 先把这些 JSON 读出来。
     total = query.with_entities(func.count(Task.id)).scalar() or 0
     rows = query.order_by(Task.created_at.desc()).offset(offset).limit(limit).all()
-    return {"items": [_task_out(row) for row in rows], "total": total}
+    creator_names = _creator_name_map(db, rows)
+    return {"items": [_task_out(row, creator_names) for row in rows], "total": total}
 
 
 @router.get("/summary")
@@ -233,7 +247,7 @@ def get_task(
         .order_by(TaskEvent.ts, TaskEvent.id)
         .all()
     )
-    payload = _task_out(task)
+    payload = _task_out(task, _creator_name_map(db, [task]))
     payload["events"] = [TaskEventOut.model_validate(event).model_dump(mode="json") for event in events]
     return payload
 
@@ -268,6 +282,7 @@ def cancel_task(
     )
     db.commit()
     db.refresh(task)
+    # 写操作响应保持原有关键字段即可，前端成功后会重新拉取列表（含 creator_name）
     return _task_out(task)
 
 
@@ -337,6 +352,7 @@ def rerun_task(
         db.rollback()
         raise AppError(ErrorCode.CONCURRENCY, "会话已有未完成任务") from None
     db.refresh(rerun)
+    # 同取消接口：重跑响应不回填账号名，列表刷新时由列表接口统一回填
     return _task_out(rerun)
 
 

@@ -201,7 +201,14 @@ const error = ref('')
 const stats = ref<CaseAssetStats | null>(null)
 const backfilling = ref(false)
 
-const filters = reactive({ q: '', module: '', strategy: '', priority: '', tag: '' })
+// 下拉筛选用 null 表示「未选择」：空字符串会被 NSelect 当成有效值而不显示 placeholder。
+const filters = reactive<{
+  q: string
+  module: string | null
+  strategy: string | null
+  priority: string | null
+  tag: string
+}>({ q: '', module: null, strategy: null, priority: null, tag: '' })
 
 const detailOpen = ref(false)
 const selected = ref<CaseAsset | null>(null)
@@ -232,9 +239,9 @@ async function load(): Promise<void> {
   try {
     const result = await api.caseAssets.list({
       q: filters.q.trim(),
-      module: filters.module,
-      strategy: filters.strategy,
-      priority: filters.priority,
+      module: filters.module || undefined,
+      strategy: filters.strategy || undefined,
+      priority: filters.priority || undefined,
       tag: filters.tag.trim(),
       offset: offset.value,
       limit,
@@ -258,9 +265,9 @@ function applyFilters(): void {
 
 function resetFilters(): void {
   filters.q = ''
-  filters.module = ''
-  filters.strategy = ''
-  filters.priority = ''
+  filters.module = null
+  filters.strategy = null
+  filters.priority = null
   filters.tag = ''
   offset.value = 0
   void load()

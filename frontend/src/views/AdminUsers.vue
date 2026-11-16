@@ -76,7 +76,7 @@
               <th style="width: 110px">账号状态</th>
               <th style="width: 130px">最近登录 (IP)</th>
               <th style="width: 120px">开户时间</th>
-              <th style="width: 150px; text-align: right">操作</th>
+              <th style="width: 176px; text-align: right">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -108,7 +108,7 @@
                 {{ formatDate(u.created_at) }}
               </td>
               <td style="text-align: right">
-                <div class="row" style="justify-content: flex-end; gap: 4px">
+                <div class="users-actions">
                   <button class="link-btn" @click="openResetPassword(u)">重置密码</button>
                   <button
                     class="link-btn"
@@ -471,6 +471,20 @@ onMounted(loadPage)
 .user-dname {
   font-size: 11px;
   color: var(--text-secondary);
+}
+/* 操作列：按钮不换行、不被压缩，避免「重置密码」被拆成单字堆叠 */
+.users-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.users-actions .link-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-width: 62px;
+  text-align: center;
 }
 /* 审计时间线 warn 类型节点色（base.css 仅定义 ok/err/info，此处补齐原型 warn 态） */
 .tl-item.warn::before {

@@ -1845,8 +1845,10 @@ onBeforeUnmount(() => {
 
 /* 左侧文件管理器 */
 .explorer-panel {
-  width: 280px;
-  min-width: 240px;
+  /* 300px 保证「文件资源管理器」标题与 5 个图标按钮同行不挤压 */
+  width: 300px;
+  min-width: 280px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   background: var(--bg-elevated, #f4f8f8);
@@ -1859,7 +1861,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: 10px 12px;
   background: var(--bg-main, #ffffff);
   border-bottom: 1px solid var(--border-subtle, #e5e7eb);
   user-select: none;
@@ -1869,9 +1872,17 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   font-size: 13.5px;
   font-weight: 600;
   color: var(--text-primary, #111827);
+  white-space: nowrap;
+}
+
+/* 标题单行显示，宽度不足时省略而不是折成「文件资源管理 / 器」 */
+.explorer-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .explorer-title svg {
@@ -1886,6 +1897,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 
 .icon-btn {
