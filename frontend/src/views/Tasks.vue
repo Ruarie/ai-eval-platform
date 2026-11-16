@@ -178,7 +178,9 @@
                 </span>
                 <span v-else>{{ t.id }}</span>
               </td>
-              <td class="small">{{ t.creator || t.created_by || 'admin' }}</td>
+              <td class="small task-creator" :title="t.creator_name || t.created_by || ''">
+                {{ creatorDisplayName(t) }}
+              </td>
               <td class="small tertiary mono">{{ formatRelativeTime(t.created_at) }}</td>
               <td style="text-align: right">
                 <div class="row-actions" style="justify-content: flex-end">
@@ -290,7 +292,7 @@
             </div>
 
             <div class="tmc-meta small tertiary mono">
-              <span>{{ t.creator || t.created_by || 'admin' }}</span>
+              <span>{{ creatorDisplayName(t) }}</span>
               <span>·</span>
               <span>{{ formatRelativeTime(t.created_at) }}</span>
             </div>
@@ -367,10 +369,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useMessage, useDialog, NInput, NSelect } from 'naive-ui'
 import { api } from '../api/http'
 import type { Task } from '../api/types'
+import { creatorDisplayName } from '../utils/format'
 import { useAuthStore } from '../stores/auth'
 import StatusBadge from '../components/common/StatusBadge.vue'
 import KindTag from '../components/common/KindTag.vue'
@@ -380,6 +383,7 @@ import TaskDetailDrawer from '../components/drawers/TaskDetailDrawer.vue'
 const message = useMessage()
 const dialog = useDialog()
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 
 const tasks = ref<Task[]>([])
@@ -437,7 +441,9 @@ const baseFilteredTasks = computed(() => {
     if (searchKw.value) {
       const kw = searchKw.value.toLowerCase()
       const matchId = t.id.toLowerCase().includes(kw)
-      const matchCreator = (t.creator || t.created_by || '').toLowerCase().includes(kw)
+      const matchCreator =
+        creatorDisplayName(t).toLowerCase().includes(kw) ||
+        (t.creator || t.created_by || '').toLowerCase().includes(kw)
       const matchDataset = (t.config?.dataset_id || '').toLowerCase().includes(kw)
       const matchKb = (t.config?.kb_id || '').toLowerCase().includes(kw)
       if (!matchId && !matchCreator && !matchDataset && !matchKb) return false
@@ -499,14 +505,43 @@ async function handleCancel(t: Task) {
   })
 }
 
+/**
+ * 复制为新任务：先做前置依赖校验 + 二次确认，再入队。
+ * 原实现点击即创建，未配置协议档/API Key 时会立刻产生一条「已失败」任务。
+ */
 async function handleRerun(t: Task) {
+  const shortId = t.id.length > 8 ? t.id.substring(0, 8) : t.id
+  // 前置依赖：至少存在一个已保存 API Key 的协议档，否则新任务必然秒失败
   try {
-    await api.tasks.rerun(t.id)
-    message.success('已成功复制任务并重新入队（queued）')
-    loadTasks()
-  } catch (err: any) {
-    message.error(err.message || '重跑失败')
+    const profiles = await api.profiles.list()
+    if (!profiles.some((p) => p.has_api_key)) {
+      dialog.warning({
+        title: '缺少可用的 Agent 协议档',
+        content: '当前没有已保存 API Key 的协议档，复制出的任务会立即失败。请先在「协议档」页配置模型与 API Key。',
+        positiveText: '去配置',
+        negativeText: '知道了',
+        onPositiveClick: () => router.push('/admin/profiles'),
+      })
+      return
+    }
+  } catch {
+    // 读取协议档失败时不阻断流程，仍由用户二次确认后尝试
   }
+  dialog.warning({
+    title: '复制为新任务',
+    content: `将按任务 ${shortId} 的配置创建一个新的用例生成任务并立即入队，确认继续？`,
+    positiveText: '确认复制',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await api.tasks.rerun(t.id)
+        message.success('已成功复制任务并重新入队（queued）')
+        loadTasks()
+      } catch (err: any) {
+        message.error(err.message || '重跑失败')
+      }
+    },
+  })
 }
 
 async function handleRefresh() {
@@ -811,6 +846,14 @@ onUnmounted(() => {
     padding-top: 8px;
     border-top: 1px dashed var(--border-subtle);
   }
+}
+
+/* 创建者列：账号名单行省略，超长也不再折成多行撑高表格 */
+.task-creator {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 超窄屏手机 (<= 420px) */

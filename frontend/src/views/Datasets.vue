@@ -1743,29 +1743,30 @@ onUnmounted(() => {
 <style scoped>
 /* ─── 数据集工作台核心布局 ─── */
 .datasets-workbench {
-  height: calc(100vh - var(--topbar-h) - 20px);
+  /* 由外层 .content（flex:1，含 24px 内边距）定高，避免再按视口计算导致底部被裁 28px */
+  height: 100%;
   min-height: 0;
-
+  display: flex;
   flex-direction: column;
-
+  outline: none;
   font-size: 13.5px;
-
-
+  color: var(--text-primary);
+}
 
 .mode-context-panel {
   max-width: 620px;
   margin: 64px auto;
   padding: 40px 36px;
   text-align: center;
-
+  display: flex;
   flex-direction: column;
-
+  align-items: center;
   gap: 16px;
-
-
-
+  background: var(--bg-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
-
+}
 .mode-icon-wrapper {
   width: 56px;
   height: 56px;
@@ -1774,91 +1775,93 @@ onUnmounted(() => {
   color: var(--c-kb);
   display: grid;
   place-items: center;
-
+}
 .mode-context-panel h2 {
   font-size: 18px;
-
-
-
+  font-weight: 600;
+  color: var(--text-primary);
+}
 .mode-context-panel p {
   font-size: 13.5px;
-
+  color: var(--text-secondary);
   line-height: 1.6;
-
+}
 
 /* ─── 布局骨架 ─── */
 .nordic-layout {
   display: grid;
   grid-template-columns: var(--tree-w, 280px) minmax(0, 1fr);
+  /* 行高必须约束，否则树面板内容会把行撑开、把编辑器推出视口（V2.19 同类问题） */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   min-width: 0;
-
+  background: var(--bg-main);
   border-radius: 12px;
   overflow: hidden;
-
-
+  border: 1px solid var(--border-subtle);
+}
 
 /* ─── 侧边栏 ─── */
 .nordic-main {
-
+  display: flex;
   flex-direction: column;
   height: 100%;
   min-width: 0;
   min-height: 0;
-
+  background: var(--bg-main);
   position: relative;
-
+}
 
 /* 顶栏 */
 .main-toolbar {
   padding: 10px 18px;
-
-
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-main);
   min-height: 56px;
-
-
-
+  display: flex;
+  align-items: center;
+}
 
 .toolbar-default {
-
-
+  display: flex;
+  align-items: center;
   width: 100%;
-
-
+  gap: 12px;
+}
 
 .toolbar-title-group {
   display: flex;
   flex-direction: column;
   gap: 2px;
-
+}
 .title-row {
   display: flex;
-
-
-
+  align-items: center;
+  gap: 8px;
+}
 .main-dataset-title {
   font-size: 16.5px;
-
-
-
+  font-weight: 600;
+  color: var(--text-primary);
+}
 .version-tag {
-
-
-
-  padding: 1px 7px;
-
-
-
-
-
-.asset-type-badge {
+  font-family: var(--font-mono);
   font-size: 11.5px;
-
+  font-weight: 500;
   padding: 1px 7px;
   border-radius: 4px;
-
-.type-dataset { background: var(--t-datasets); color: var(--c-datasets); 
-.type-gold { background: var(--t-profiles); color: var(--c-profiles); 
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+.asset-type-badge {
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 4px;
+}
+.type-dataset { background: var(--t-datasets); color: var(--c-datasets); }
+.type-gold { background: var(--t-profiles); color: var(--c-profiles); }
 
 .status-badge-amber {
   font-size: 11.5px;
@@ -1866,56 +1869,56 @@ onUnmounted(() => {
   border-radius: 4px;
   background: var(--t-profiles);
   color: var(--c-profiles);
-
+}
 
 .breadcrumb-row {
-
-
+  font-size: 12px;
+  color: var(--text-tertiary);
   display: flex;
-
-
-
+  align-items: center;
+  gap: 5px;
+}
 .breadcrumb-row .cur {
   color: var(--text-secondary);
-
+}
 
 /* 极速表内筛选框 */
 .table-search-box {
   position: relative;
   display: flex;
-
+  align-items: center;
   margin-left: 8px;
-
+}
 .table-search-icon {
   position: absolute;
   left: 8px;
-
+  color: var(--text-tertiary);
   pointer-events: none;
-
+}
 .table-search-input {
   width: 200px;
   height: 28px;
   padding-left: 26px;
   padding-right: 50px;
-
+  font-size: 12.5px;
   border-radius: 6px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-elevated);
-
+  color: var(--text-primary);
   outline: none;
   transition: all 0.15s ease;
-
+}
 .table-search-input:focus {
   width: 250px;
   background: var(--bg-main);
-
+  border-color: var(--accent-ai);
   box-shadow: var(--focus-ring);
-
+}
 .grid-search-count {
   position: absolute;
   right: 18px;
-
-
+  font-size: 11px;
+  color: var(--text-tertiary);
 }
 
 .toolbar-action-group {
@@ -1931,15 +1934,15 @@ onUnmounted(() => {
 
 /* 按钮通用 */
 .btn {
-
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-
+  gap: 6px;
   font-size: 13px;
-
+  font-weight: 500;
   border-radius: 6px;
-
-
+  cursor: pointer;
+  transition: all 0.12s ease;
   white-space: nowrap;
 }
 .btn-md {
@@ -1952,8 +1955,8 @@ onUnmounted(() => {
   font-size: 12.5px;
 }
 .btn-primary {
-
-
+  background: var(--accent-ai);
+  color: #FFFFFF;
   border: 1px solid var(--accent-ai);
 }
 .btn-primary:hover {
@@ -1979,7 +1982,7 @@ onUnmounted(() => {
 }
 .btn-danger {
   background: var(--accent-error);
-
+  color: #FFFFFF;
   border: 1px solid var(--accent-error);
 }
 .btn-danger:hover {
@@ -2001,9 +2004,9 @@ onUnmounted(() => {
   border: 1px solid var(--border-subtle);
 }
 .btn-save.dirty {
-
-
-
+  background: var(--accent-warning);
+  color: #FFFFFF;
+  border-color: var(--accent-warning);
 }
 .btn-save.saved {
   background: var(--accent-success) !important;
@@ -2015,7 +2018,7 @@ onUnmounted(() => {
 }
 .shortcut-key {
   font-size: 10px;
-
+  font-family: var(--font-mono);
   padding: 0 4px;
   border-radius: 2px;
   background: rgba(0, 0, 0, 0.08);
@@ -2028,123 +2031,8 @@ onUnmounted(() => {
 /* ─── 指标与胶囊筛选条 ─── */
 
 
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border-subtle);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 12.5px;
-}
-
-  display: flex;
-  align-items: center;
 
 
-}
-
-  color: var(--text-tertiary);
-}
-
-  color: var(--text-primary);
-  font-weight: 500;
-}
-
-
-
-
-}
-
-
-  display: flex;
-  align-items: center;
-
-}
-
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-
-
-  border-radius: 14px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-main);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-
-
-  color: var(--text-primary);
-}
-
-
-
-
-
-}
-
-
-
-  color: #FFFFFF;
-}
-
-  background: var(--accent-warning);
-  border-color: var(--accent-warning);
-  color: #FFFFFF;
-}
-
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-
-
-  font-weight: 500;
-}
-
-
-  font-weight: 500;
-}
-
-
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11.5px;
-  color: var(--text-tertiary);
-}
-
-  font-family: var(--font-mono);
-
-
-
-  background: var(--bg-main);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-subtle);
-}
-
-
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-  color: var(--text-tertiary);
-
-}
-
-
-  font-size: 12px;
-
-  border-radius: 4px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-main);
-  color: var(--text-primary);
-  outline: none;
-}
-
-
-}
 
 /* ─── 表格与固定列 ─── */
 .table-container {
@@ -2255,8 +2143,8 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--text-tertiary);
 }
-
-
+.step-badge.active {
+  color: var(--accent-ai);
   font-weight: 600;
 }
 .step-badge.done {
@@ -2273,7 +2161,7 @@ onUnmounted(() => {
   font-size: 11px;
   font-family: var(--font-mono);
 }
-
+.step-badge.active .step-idx {
   background: var(--accent-ai);
   color: #FFFFFF;
   border-color: var(--accent-ai);
@@ -2314,11 +2202,11 @@ onUnmounted(() => {
   cursor: pointer;
   transition: all 0.1s ease;
 }
-
+.tab-pill.active {
   background: var(--bg-main);
   color: var(--text-primary);
   font-weight: 600;
-
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .divider-title {
@@ -2395,9 +2283,6 @@ onUnmounted(() => {
   }
   .nordic-main {
     min-height: 600px;
-  }
-  .keyboard-flow-hint {
-    display: none;
   }
 }
 </style>

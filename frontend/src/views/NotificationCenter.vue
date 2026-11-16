@@ -41,7 +41,7 @@
             <span v-if="item.body" class="notif-body">{{ item.body }}</span>
             <span class="notif-time">{{ formatTime(item.created_at) }}</span>
           </span>
-          <span v-if="!item.read_at" class="notif-dot" aria-label="未读"></span>
+          <span v-if="!item.read_at" class="notif-unread-tag" aria-label="未读">未读</span>
         </button>
 
         <div class="notif-pager">
@@ -230,12 +230,14 @@ onMounted(load)
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 12px 2px;
+  padding: 12px 2px 12px 10px;
   border: none;
   border-bottom: 1px solid var(--border-subtle);
   background: transparent;
   text-align: left;
   cursor: pointer;
+  /* 预留左侧状态条，已读/未读切换时内容不位移 */
+  box-shadow: inset 3px 0 0 transparent;
 }
 
 .notif-row:hover {
@@ -243,7 +245,8 @@ onMounted(load)
 }
 
 .notif-row.unread {
-  background: color-mix(in srgb, var(--accent-ai) 4%, transparent);
+  background: color-mix(in srgb, var(--accent-ai) 7%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent-ai);
 }
 
 .notif-type {
@@ -285,17 +288,28 @@ onMounted(load)
 }
 
 .notif-time {
-  font-size: 10px;
-  color: var(--text-tertiary);
+  margin-top: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
 }
 
-.notif-dot {
+/* 已读条目整体降低强调，未读条目保持主文字色，扫描时一眼可分 */
+.notif-row:not(.unread) .notif-title {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.notif-unread-tag {
   flex-shrink: 0;
-  width: 7px;
-  height: 7px;
-  margin-top: 6px;
-  border-radius: 50%;
-  background: #dc2626;
+  margin-top: 1px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-ai);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .notif-pager {

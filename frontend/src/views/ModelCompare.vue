@@ -10,6 +10,29 @@
       </div>
     </div>
 
+    <!-- 空态引导：说明 ID 来源与三步流程，避免整页大面积留白 -->
+    <div v-if="!taskId" class="compare-guide">
+      <div class="cg-hero">
+        <div class="cg-ico">⇄</div>
+        <div>
+          <div class="cg-title">输入历史基准评测任务 ID 开始对比</div>
+          <p class="cg-desc">
+            模型对比只读历史 benchmark 任务的逐样本结果（该能力已停止新建），页面本身不创建任务。
+            任务 ID 可在「历史报告」列表或「任务中心」详情中复制。
+          </p>
+        </div>
+      </div>
+      <ol class="cg-steps">
+        <li><b>打开「历史报告」</b>，找到一条模型对比评测报告，复制它关联的任务 ID。</li>
+        <li><b>粘贴到上方输入框</b>，点「查询」；非 benchmark 任务会提示改去任务中心查看。</li>
+        <li><b>查看双模型对比</b>：准确率、平均延迟、token 用量与逐样本判定差异。</li>
+      </ol>
+      <div class="cg-actions">
+        <router-link class="btn btn-primary btn-sm" to="/reports">去历史报告找任务 ID</router-link>
+        <router-link class="btn btn-secondary btn-sm" to="/tasks">打开任务中心</router-link>
+      </div>
+    </div>
+
     <!-- ═══════════ 任务进行中 ═══════════ -->
     <div v-else-if="!report" class="panel glow" style="--glow-c: var(--c-reports)">
       <div class="panel-title">
@@ -494,6 +517,55 @@ onUnmounted(stopPolling)
 .compare-form {
   display: flex;
   flex-direction: column;
+}
+/* 空态引导：查询入口之外的说明区，填充整页留白并指向可复制的 ID 来源 */
+.compare-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 24px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+}
+.cg-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.cg-ico {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--t-reports, color-mix(in srgb, var(--c-reports) 14%, transparent));
+  color: var(--c-reports);
+  font-size: 18px;
+  font-weight: 700;
+}
+.cg-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.cg-desc {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+.cg-steps {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--text-secondary);
+}
+.cg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .form-grid {
   display: grid;

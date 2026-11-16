@@ -257,6 +257,8 @@ class TaskOut(OrmOut):
     # 契约字段名 creator_id 与既有前端字段 creator 并存输出，保证新旧消费端兼容
     creator: str = Field(validation_alias=AliasChoices("created_by", "creator"))
     creator_id: str | None = Field(default=None, validation_alias=AliasChoices("created_by", "creator_id"))
+    # 创建者账号名（由路由层按 users 表回填，前端不再直接展示裸 UUID）
+    creator_name: str | None = None
     created_at: Any
     updated_at: Any
 

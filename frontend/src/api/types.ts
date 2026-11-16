@@ -497,6 +497,8 @@ export interface Task {
   /** API 契约中的创建者用户 ID；任务写操作须与当前登录用户精确比对。 */
   creator_id?: string
   created_by?: string
+  /** 创建者账号名（列表与详情接口回填，前端优先展示该字段）。 */
+  creator_name?: string | null
   created_at: string
   updated_at?: string
   events?: TaskEvent[]

@@ -58,6 +58,30 @@ export function formatDate(value?: string | null, fallback = ''): string {
   return date.toLocaleDateString('zh-CN')
 }
 
+/** 判断字符串是否为标准 UUID（用户 ID 通常以此为形态，不能直接当展示名）。 */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * 统一「创建者」展示文案：优先接口返回的账号名，其次非 UUID 的旧字段，
+ * 最后回落占位。列表与详情共用，避免把用户 UUID 暴露并撑高行高。
+ *
+ * @param input 含 creator_name / creator / created_by / creator_id 的任务或资产对象
+ */
+export function creatorDisplayName(input: {
+  creator_name?: string | null
+  creator?: string | null
+  created_by?: string | null
+  creator_id?: string | null
+}): string {
+  const name = (input.creator_name || '').trim()
+  if (name) return name
+  for (const raw of [input.creator, input.created_by, input.creator_id]) {
+    const value = (raw || '').trim()
+    if (value && !UUID_PATTERN.test(value)) return value
+  }
+  return '未知成员'
+}
+
 /**
  * 紧凑文件大小（B/KB/MB/GB，≥10 取整，否则保留一位小数）。
  *

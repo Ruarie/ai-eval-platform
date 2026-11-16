@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.62 |
-| 本轮审查日期 | 2026-11-16（用例生成/对比/评审改异步入队；远程命令确认后轮询结果；SSH 白名单口径与符号链接拒绝） |
+| 文档版本 | V2.63 |
+| 本轮审查日期 | 2026-11-16（任务列表/详情新增可选 `creator_name`（创建者账号名），`creator_id` 仅用于权限比对；其余保持 V2.62 契约） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.68（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -1515,7 +1515,9 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 
 #### `GET /api/tasks?status=&kind=&offset=&limit=`
 
-全员。item：`id, kind, status, progress, dataset_id, kb_id, parent_task_id, creator_id, created_at, report_id?`
+全员。item：`id, kind, status, progress, dataset_id, kb_id, parent_task_id, creator_id, creator_name?, created_at, report_id?`
+
+`creator_name`：创建者账号名，由服务端按 `users` 表批量回填；详情接口同样返回。前端展示创建者时必须优先使用该字段，`creator_id` 仅用于权限比对，禁止直接展示裸用户 UUID。
 
 `progress`：`{ percent?, done, total, message }`
 
