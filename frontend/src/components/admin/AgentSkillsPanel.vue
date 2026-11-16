@@ -546,31 +546,10 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 12px;
 }
-.panel-title-area {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-.panel-title-text {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary, #111827);
-  letter-spacing: -0.01em;
-}
-.panel-actions-area {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.view-mode-toggle {
-  display: inline-flex;
-  background: var(--bg-elevated, #f3f4f6);
-  padding: 3px;
-  border-radius: 8px;
-  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
-}
+
+
+
+
 .toggle-btn {
   border: none;
   background: transparent;
@@ -588,19 +567,12 @@ onMounted(() => {
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
-.profile-table-scroll {
-  overflow-x: auto;
-  width: 100%;
-  -webkit-overflow-scrolling: touch;
-}
+
 .profile-table-scroll table {
   min-width: 900px;
   width: 100%;
 }
-.filter-search-wrap {
-  flex: 0 1 200px;
-  min-width: 140px;
-}
+
 .status-dot {
   width: 6px;
   height: 6px;
@@ -612,8 +584,5 @@ onMounted(() => {
 .status-dot.is-disabled {
   background: var(--text-tertiary, #9ca3af);
 }
-.empty-state-wrap {
-  grid-column: 1 / -1;
-  width: 100%;
-}
+
 </style>

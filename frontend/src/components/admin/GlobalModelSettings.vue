@@ -367,18 +367,8 @@ onMounted(loadRagModels)
   flex-wrap: wrap;
   gap: 12px;
 }
-.panel-title-area {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-.panel-title-text {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary, #111827);
-  letter-spacing: -0.01em;
-}
+
+
 .rag-models-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));

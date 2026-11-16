@@ -795,10 +795,7 @@ onMounted(handleRefreshMcpTools)
 .filter-dropdown-wrap {
   width: 130px;
 }
-.filter-search-wrap {
-  flex: 0 1 200px;
-  min-width: 140px;
-}
+
 
 /* MCP 卡片网格 */
 .mcp-cards-grid {
@@ -1083,24 +1080,9 @@ onMounted(handleRefreshMcpTools)
   flex-wrap: wrap;
   gap: 12px;
 }
-.panel-title-area {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-.panel-title-text {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary, #111827);
-  letter-spacing: -0.01em;
-}
-.panel-actions-area {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
+
+
+
 /* 视图切换按钮 */
 .view-mode-toggle {
   display: inline-flex;
@@ -1136,12 +1118,7 @@ onMounted(handleRefreshMcpTools)
   min-width: 900px;
   width: 100%;
 }
-.panel-section-title {
-  font-size: 14.5px;
-  font-weight: 700;
-  color: var(--text-primary, #111827);
-  margin-bottom: 4px;
-}
+
 /* ═══════════════════════════════════════════════════════════════
    通用辅助类
    ═══════════════════════════════════════════════════════════════ */
@@ -1156,10 +1133,7 @@ onMounted(handleRefreshMcpTools)
 .status-dot.is-disabled {
   background: var(--text-tertiary, #9ca3af);
 }
-.empty-state-wrap {
-  grid-column: 1 / -1;
-  width: 100%;
-}
+
 .btn-xs {
   font-size: 11.5px;
   padding: 3px 8px;

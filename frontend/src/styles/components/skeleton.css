@@ -1,0 +1,72 @@
+/* 组件骨架样式（admin 面板 / dispatch 坞块共用）
+
+来源：这些类在多个拆分组件里各复制了一份（scoped 样式不跨组件）。
+收敛到全局，避免「改一处、忘三处」，也避免复制时把注释/媒体查询带坏。
+命名空间前缀（panel-/dock-/view-mode-/profile-table-/empty-state-/filter-search-）
+均只被 admin、dispatch、datasets 的拆分组件使用，无其它页面占用。
+*/
+
+.panel-title-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.panel-title-text {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary, #111827);
+  letter-spacing: -0.01em;
+}
+.filter-search-wrap {
+  flex: 0 1 200px;
+  min-width: 140px;
+}
+.panel-actions-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.panel-section-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text-primary, #111827);
+  margin-bottom: 4px;
+}
+.empty-state-wrap {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+.view-mode-toggle {
+  display: inline-flex;
+  background: var(--bg-elevated, #f3f4f6);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
+}
+.profile-table-scroll {
+  overflow-x: auto;
+  width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+.dock-toggle-btn {
+  border: none;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.dock-toggle-btn:hover {
+  background: var(--accent-ai);
+  color: #fff;
+}
+.dock-scroll-content {
+  padding: 10px;
+  overflow-y: auto;
+  flex: 1;
+  max-height: calc(100vh - 360px);
+}

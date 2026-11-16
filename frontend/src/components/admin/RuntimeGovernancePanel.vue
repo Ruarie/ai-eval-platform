@@ -129,12 +129,7 @@ onMounted(loadRuntimeSettings)
   display: flex;
   flex-direction: column;
 }
-.panel-section-title {
-  font-size: 14.5px;
-  font-weight: 700;
-  color: var(--text-primary, #111827);
-  margin-bottom: 4px;
-}
+
 .runtime-section {
   display: flex;
   flex-direction: column;
@@ -188,10 +183,7 @@ onMounted(loadRuntimeSettings)
 .status-dot.is-disabled {
   background: var(--text-tertiary, #9ca3af);
 }
-.empty-state-wrap {
-  grid-column: 1 / -1;
-  width: 100%;
-}
+
 .btn-xs {
   font-size: 11.5px;
   padding: 3px 8px;

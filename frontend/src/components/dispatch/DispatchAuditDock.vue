@@ -117,26 +117,9 @@ void props
 .dock-ico {
   font-size: 14px;
 }
-.dock-toggle-btn {
-  border: none;
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.dock-toggle-btn:hover {
-  background: var(--accent-ai);
-  color: #fff;
-}
-.dock-scroll-content {
-  padding: 10px;
-  overflow-y: auto;
-  flex: 1;
-  max-height: calc(100vh - 360px);
-}
+
+
+
 .dock-left.collapsed {
   width: 44px;
   overflow: hidden;
