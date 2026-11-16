@@ -42,6 +42,14 @@ MAX_GRAPH_NODES = 2000
 GRAPH_DESCRIPTION_LIMIT = 400
 
 
+def api_key_accepted(expected: str | None, provided: str | None) -> bool:
+    """业务接口必须带上已配置的内部口令。空口令不再等于放行。"""
+    secret = str(expected or "")
+    if not secret:
+        return False
+    return provided == secret
+
+
 def sanitize_filename(filename: str) -> str:
     """把上传文件名收敛成单段安全名称（去掉路径分隔符与控制字符）。"""
     name = _UNSAFE_NAME.sub("_", (filename or "").strip())

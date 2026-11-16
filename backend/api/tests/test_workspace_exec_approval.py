@@ -9,9 +9,11 @@ from app import workspace_exec_approval as approval
 
 @pytest.fixture(autouse=True)
 def _clean_queue():
+    previous = approval.testing_use_memory(True)
     approval.clear()
     yield
     approval.clear()
+    approval.testing_use_memory(previous)
 
 
 def _create(**overrides):
@@ -58,6 +60,21 @@ def test_expired_item_is_not_returned(monkeypatch):
     item.created_at = time.monotonic() - approval.APPROVAL_TTL_S - 1
 
     assert approval.get(item.approval_id, workspace_id="ws-1", user_id="u-1") is None
+
+
+def test_run_result_is_scoped_to_the_same_user(monkeypatch):
+    """确认后的执行结果只给申请人自己看。"""
+    approval.begin_run("ap-1", workspace_id="ws-1", user_id="u-1", timeout_s=30)
+    assert approval.read_run("ap-1", workspace_id="ws-1", user_id="u-1")["status"] == "running"
+    approval.finish_run(
+        "ap-1",
+        workspace_id="ws-1",
+        user_id="u-1",
+        payload={"status": "succeeded", "exit_code": 0, "stdout": "ok", "stderr": "", "truncated": False},
+    )
+    done = approval.read_run("ap-1", workspace_id="ws-1", user_id="u-1")
+    assert done["exit_code"] == 0
+    assert approval.read_run("ap-1", workspace_id="ws-1", user_id="u-2") is None
 
 
 def test_queue_evicts_oldest_when_full(monkeypatch):

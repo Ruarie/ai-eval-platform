@@ -1,14 +1,11 @@
 name: Deploy
 
+# 自动部署只在 CI 成功之后开始。文档变更不会跑 CI，因此也不会部署。
+# workflow_dispatch 仍可用，但要求该提交已经有一次成功的 CI。
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - '**/README.md'
-      - '.gitignore'
-      - 'Web-Prototype/**'
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   workflow_dispatch:
 
 # 部署只需读取仓库与历史工作流；SSH 凭据仍由仓库 Secrets 注入。
@@ -25,7 +22,9 @@ concurrency:
 jobs:
   plan:
     name: Plan changed services
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     outputs:
       base_sha: ${{ steps.base.outputs.sha }}
@@ -36,7 +35,26 @@ jobs:
       - name: Checkout full history
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
+
+      - name: Require successful CI for manual deploy
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci.yml',
+              head_sha: context.sha,
+              status: 'completed',
+              per_page: 5,
+            })
+            const ok = runs.data.workflow_runs.some((run) => run.conclusion === 'success')
+            if (!ok) {
+              core.setFailed('该提交还没有成功的 CI，不部署')
+            }
 
       - name: Resolve last successful deploy
         id: base
@@ -59,7 +77,7 @@ jobs:
         id: services
         env:
           BASE_SHA: ${{ steps.base.outputs.sha }}
-          TARGET_SHA: ${{ github.sha }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: python3 deploy/plan_services.py --format github
 
   build:
@@ -73,6 +91,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Prepare image name
         shell: bash
@@ -99,11 +119,11 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+          tags: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.event.workflow_run.head_sha || github.sha }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
           build-args: |
-            BUILD_VERSION=${{ github.sha }}
+            BUILD_VERSION=${{ github.event.workflow_run.head_sha || github.sha }}
             BUILD_TIME=${{ env.BUILD_TIME_REAL }}
 
   deploy:
@@ -117,6 +137,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Check deploy secrets
         id: check
@@ -136,12 +158,12 @@ jobs:
         # 直接使用 runner 自带的 ssh：appleboy/ssh-action 每次运行都要从
         # GitHub Releases 下载 drone-ssh，网络抖动时 504 直接失败（run 42572630521）。
         env:
-          DEPLOY_COMMIT: ${{ github.sha }}
+          DEPLOY_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
           DEPLOY_BASE_COMMIT: ${{ needs.plan.outputs.base_sha }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_ACTOR: ${{ github.actor }}
           IMAGE_PREFIX: ghcr.io/${{ github.repository }}
-          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
           SSH_USER: ${{ secrets.SSH_USER || 'deploy' }}

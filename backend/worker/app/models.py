@@ -7,7 +7,9 @@ Worker 不执行 DDL，表结构由 api 侧 Alembic 迁移维护。
 
 from shared.models import (  # noqa: F401
     Base,
+    CaseAiJob,
     CaseItem,
+    CaseReviewRun,
     CaseSet,
     Dataset,
     DatasetCatalogEntry,

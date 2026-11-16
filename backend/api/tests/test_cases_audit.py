@@ -21,6 +21,7 @@ from app.errors import AppError, ErrorCode
 from app.harness.execution.task_tools import cancel_task_safe
 from app.models import (
     AuditLog,
+    CaseAiJob,
     CaseFolder,
     CaseItem,
     CaseSet,
@@ -53,7 +54,7 @@ def cases_db():
     """仅在内存库复制相关 DDL；保留 ORM 行为与事务，适配 JSONB 和自增主键。"""
     metadata = MetaData()
     pending = [model.__table__ for model in (
-        User, CaseFolder, CaseSet, CaseItem, Task, TaskEvent, Dataset, DatasetRow, StoredFile, AuditLog,
+        User, CaseFolder, CaseSet, CaseItem, CaseAiJob, Task, TaskEvent, Dataset, DatasetRow, StoredFile, AuditLog,
     )]
     while pending:
         table = pending.pop()
@@ -117,6 +118,20 @@ def _waiting_task(db, *, expired=False):
     return task
 
 
+def test_generate_enqueues_without_calling_the_model(cases_db, monkeypatch):
+    """页面生成只入队。模型调用发生在 Worker，不在这条请求里。"""
+    monkeypatch.setattr(routes, "call_agent_model", lambda *a, **k: pytest.fail("不能调用模型"))
+    result = routes.ai_generate_cases(
+        CaseAiGenerateIn(source_text="登录需求", max_count=10), cases_db, _actor(),
+    )
+    assert result["status"] == "queued"
+    job = cases_db.get(CaseAiJob, result["job_id"])
+    assert job.kind == "generate"
+    assert job.user_id == "owner"
+    assert job.payload["max_count"] == 10
+    assert "登录需求" in job.payload["source_text"]
+
+
 def test_generate_rejects_foreign_file_before_model_call(cases_db, monkeypatch):
     """知道私有附件 ID 不能代替来源授权，拒绝时不读取磁盘也不调用模型。"""
     cases_db.add(StoredFile(
@@ -151,7 +166,7 @@ def test_generate_applies_requested_weights_and_drops_model_identity(cases_db, m
     output = [{"name": str(index), "strategy": "正向", "id": "forged"} for index in range(20)]
     output.append({"name": "多余反向", "strategy": "反向"})
     monkeypatch.setattr(routes, "call_agent_model", lambda *a, **k: SimpleNamespace(text=json.dumps(output)))
-    result = routes.ai_generate_cases(
+    result = routes.execute_generate_cases(
         CaseAiGenerateIn(source_text="需求", max_count=20, strategy_weights={"positive": 100}),
         cases_db, _actor(),
     )
@@ -173,7 +188,7 @@ def test_generate_uses_shared_output_budget(cases_db, monkeypatch, max_count, bu
         return SimpleNamespace(text='[{"name":"登录","strategy":"正向","priority":"HX"}]')
 
     monkeypatch.setattr(routes, "call_agent_model", fake_model)
-    routes.ai_generate_cases(CaseAiGenerateIn(source_text="登录需求", max_count=max_count), cases_db, _actor())
+    routes.execute_generate_cases(CaseAiGenerateIn(source_text="登录需求", max_count=max_count), cases_db, _actor())
     assert calls[0]["max_tokens"] == budget
 
 
@@ -182,7 +197,7 @@ def test_generate_rejects_when_selected_strategy_has_no_cases(cases_db, monkeypa
     output = [{"name": "反向", "strategy": "反向"}, {"name": "未知", "strategy": "其他"}]
     monkeypatch.setattr(routes, "call_agent_model", lambda *a, **k: SimpleNamespace(text=json.dumps(output)))
     with pytest.raises(AppError) as error:
-        routes.ai_generate_cases(
+        routes.execute_generate_cases(
             CaseAiGenerateIn(source_text="需求", strategy_weights={"positive": 100}),
             cases_db, _actor(),
         )
@@ -687,7 +702,7 @@ def test_generate_dedupes_duplicate_names_before_quota(cases_db, monkeypatch):
         {"name": "密码错误", "strategy": "反向", "priority": "YC"},
     ]
     monkeypatch.setattr(routes, "call_agent_model", lambda *a, **k: SimpleNamespace(text=json.dumps(output)))
-    result = routes.ai_generate_cases(
+    result = routes.execute_generate_cases(
         CaseAiGenerateIn(source_text="登录需求", max_count=10,
                          strategy_weights={"positive": 50, "negative": 50}),
         cases_db, _actor(),
@@ -735,7 +750,7 @@ def test_generate_flags_pending_items_and_reports_missing_name(cases_db, monkeyp
         {"name": "缺预期", "strategy": "正向", "priority": "HX", "steps": "1. 点击登录"},
     ]
     monkeypatch.setattr(routes, "call_agent_model", lambda *a, **k: SimpleNamespace(text=json.dumps(output)))
-    result = routes.ai_generate_cases(
+    result = routes.execute_generate_cases(
         CaseAiGenerateIn(source_text="登录需求", strategy_weights={"positive": 100}),
         cases_db, _actor(),
     )
@@ -774,7 +789,7 @@ def test_compare_returns_both_sides_when_one_model_fails(cases_db, monkeypatch):
         )
 
     monkeypatch.setattr(routes, "call_profile_model", fake)
-    result = routes.ai_compare_cases(
+    result = routes.execute_compare_cases(
         CaseAiCompareIn(
             source_text="登录需要验证码",
             profile_ids=["left", "right"],

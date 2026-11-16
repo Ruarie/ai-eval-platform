@@ -89,7 +89,7 @@ echo "==> [5/6] 生成 .env"
 if [ ! -f "$APP_DIR/.env" ]; then
     SECRET_KEY=$(openssl rand -hex 32)
     POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 20)
-    # LightRAG 适配服务的内部口令：9621 会发布到宿主机，必须默认不为空。
+    # LightRAG 适配服务的内部口令：业务接口在口令为空时拒绝，生产必须是随机值。
     LIGHTRAG_API_KEY=$(openssl rand -hex 16)
     KEY_ENCRYPTION_KEY=""
     if command -v python3 >/dev/null 2>&1; then
@@ -117,8 +117,8 @@ EOF
     echo "已生成 $APP_DIR/.env（请修改 BOOTSTRAP_ADMIN_PASSWORD）"
 else
     echo ".env 已存在，跳过生成"
-    # 存量部署补齐 LightRAG 内部口令：9621 发布到宿主机，空口令等于无鉴权，
-    # 任何人可直接删除索引。仅在缺省或为空时补写，不覆盖已有值。
+    # 存量部署补齐 LightRAG 内部口令：空口令时索引、删除和检索会被适配层拒绝。
+    # 仅在缺省或为空时补写，不覆盖已有值。
     if ! grep -q '^LIGHTRAG_API_KEY=.\+' "$APP_DIR/.env"; then
         LIGHTRAG_API_KEY=$(openssl rand -hex 16)
         if grep -q '^LIGHTRAG_API_KEY=' "$APP_DIR/.env"; then

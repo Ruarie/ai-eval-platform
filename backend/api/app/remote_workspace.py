@@ -34,6 +34,7 @@ import paramiko
 from .config import settings
 
 logger = logging.getLogger("ai-eval.remote_workspace")
+_open_allowlist_warned = False
 
 MAX_TEXT_BYTES = 2 * 1024 * 1024
 MAX_TREE_ENTRIES = 2000
@@ -86,8 +87,14 @@ def target_for(workspace: Any) -> SshTarget:
     if auth_type == "key_file" and not key_name:
         raise RemoteWorkspaceError("私钥认证需要指定私钥文件名")
     # 白名单非空才收紧；为空表示"凭据决定边界"，任意目标主机都会尝试连接。
+    # 这与 PRD、compose 注释一致。API 字段表里「留空即停用」是过期描述。
     allowed = _allowed_hosts()
-    if allowed and host.lower() not in allowed:
+    if not allowed:
+        global _open_allowlist_warned
+        if not _open_allowlist_warned:
+            _open_allowlist_warned = True
+            logger.warning("WORKSPACE_SSH_ALLOWED_HOSTS 为空，远程工作区会尝试连接任意主机")
+    elif host.lower() not in allowed:
         raise RemoteWorkspaceError(f"主机不在白名单内：{host}")
     if not root.startswith("/"):
         raise RemoteWorkspaceError("remote_root 必须是绝对路径")
@@ -173,6 +180,58 @@ def _normalize(workspace: Any, path: str) -> str:
     return resolved
 
 
+def _lstat_or_missing(sftp: paramiko.SFTPClient, path: str):
+    """读取不跟随链接的属性；路径不存在时返回 None。"""
+    try:
+        return sftp.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        errno = getattr(exc, "errno", None)
+        text = str(exc).lower()
+        if errno == 2 or "no such file" in text or "not found" in text:
+            return None
+        raise RemoteWorkspaceError("远程路径状态读取失败") from exc
+
+
+def reject_symlink_escape(sftp: paramiko.SFTPClient, root: str, remote: str) -> None:
+    """从 remote_root 走到目标，已存在的任一组件是符号链接就拒绝。
+
+    paramiko 的 ``stat`` / ``open`` 会跟随链接。只做字符串规范化时，
+    根目录里的链接可以指到根外，路径字符串却仍然通过校验。
+    叶子还不存在（新建文件）时只检查已经存在的父级。
+    """
+    root = posixpath.normpath(root or "/")
+    remote = posixpath.normpath(remote or root)
+    if root != "/" and remote != root and not remote.startswith(root + "/"):
+        raise RemotePathError(f"路径越界：{remote}")
+    if root != "/":
+        root_attrs = _lstat_or_missing(sftp, root)
+        if root_attrs is None:
+            raise RemotePathError("远程根目录不存在")
+        if stat_module.S_ISLNK(root_attrs.st_mode or 0):
+            raise RemotePathError("拒绝符号链接")
+        relative = remote[len(root):].lstrip("/")
+        current = root
+    else:
+        relative = remote.lstrip("/")
+        current = "/"
+    for part in [item for item in relative.split("/") if item]:
+        current = part if current == "/" else posixpath.join(current, part)
+        if current != "/" and not current.startswith("/"):
+            current = "/" + current
+        attrs = _lstat_or_missing(sftp, current)
+        if attrs is None:
+            return
+        if stat_module.S_ISLNK(attrs.st_mode or 0):
+            raise RemotePathError("拒绝符号链接")
+
+
+def _guard(sftp: paramiko.SFTPClient, workspace: Any, remote: str) -> None:
+    """文件操作前拒绝符号链接逃逸。"""
+    reject_symlink_escape(sftp, posixpath.normpath(target_for(workspace).root), remote)
+
+
 def _entry_type(mode: int) -> str:
     if stat_module.S_ISDIR(mode):
         return "dir"
@@ -216,6 +275,7 @@ def list_dir(workspace: Any, path: str, password: str = "") -> list[dict]:
     """列出一层目录内容；字段与本地实现同构（name/kind/size/updated_at）。"""
     remote = _normalize(workspace, path)
     with _sftp(workspace, password) as sftp:
+        _guard(sftp, workspace, remote)
         return _list_entries(sftp, remote)
 
 
@@ -284,10 +344,12 @@ def tree(workspace: Any, max_depth: int = 2, password: str = "") -> list[dict]:
             if len(nodes) >= MAX_TREE_ENTRIES:
                 truncated = True
                 return
+            # 链接只展示、不进入。listdir_attr 本身不跟随链接。
             if item["kind"] == "dir" and depth < depth_limit:
                 walk(sftp, node["path"], depth + 1, node["children"])
 
     with _sftp(workspace, password) as sftp:
+        _guard(sftp, workspace, root)
         walk(sftp, root, 1, nodes)
     if truncated:
         nodes.append(
@@ -300,7 +362,8 @@ def read_file(workspace: Any, path: str, password: str = "") -> dict:
     """读取单文件文本；返回结构与本地 ``read_workspace_file`` 一致。"""
     remote = _normalize(workspace, path)
     with _sftp(workspace, password) as sftp:
-        attrs = sftp.stat(remote)
+        _guard(sftp, workspace, remote)
+        attrs = sftp.lstat(remote)
         if stat_module.S_ISDIR(attrs.st_mode or 0):
             raise RemotePathError("目标是目录，不能按文本读取")
         size = int(attrs.st_size or 0)
@@ -355,6 +418,7 @@ def write_text(workspace: Any, path: str, content: str, password: str = "") -> d
     if len(payload) > MAX_TEXT_BYTES:
         raise RemotePathError("内容超过 2MB，请改用上传")
     with _sftp(workspace, password) as sftp:
+        _guard(sftp, workspace, remote)
         _ensure_parent(sftp, remote)
         with sftp.open(remote, "wb") as handle:
             handle.write(payload)
@@ -364,6 +428,7 @@ def write_text(workspace: Any, path: str, content: str, password: str = "") -> d
 def create_entry(workspace: Any, path: str, is_dir: bool, password: str = "") -> None:
     remote = _normalize(workspace, path)
     with _sftp(workspace, password) as sftp:
+        _guard(sftp, workspace, remote)
         if is_dir:
             sftp.mkdir(remote)
         else:
@@ -376,6 +441,8 @@ def rename(workspace: Any, source: str, target: str, password: str = "") -> None
     src = _normalize(workspace, source)
     dst = _normalize(workspace, target)
     with _sftp(workspace, password) as sftp:
+        _guard(sftp, workspace, src)
+        _guard(sftp, workspace, dst)
         sftp.rename(src, dst)
 
 
@@ -385,7 +452,8 @@ def delete(workspace: Any, path: str, password: str = "") -> None:
     if remote == posixpath.normpath(target.root):
         raise RemotePathError("不能删除工作区根目录")
     with _sftp(workspace, password) as sftp:
-        attrs = sftp.stat(remote)
+        _guard(sftp, workspace, remote)
+        attrs = sftp.lstat(remote)
         if stat_module.S_ISDIR(attrs.st_mode or 0):
             _remove_tree(sftp, remote)
         else:
@@ -398,6 +466,7 @@ def upload(workspace: Any, path: str, filename: str, stream, size: int | None = 
     remote = posixpath.join(remote_dir, filename)
     _normalize(workspace, remote)
     with _sftp(workspace, password) as sftp:
+        _guard(sftp, workspace, remote)
         _ensure_parent(sftp, remote)
         sftp.putfo(stream, remote, file_size=size)
         attrs = sftp.stat(remote)

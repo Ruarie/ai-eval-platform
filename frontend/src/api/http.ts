@@ -265,6 +265,27 @@ async function reportsGet(id: string, fmt?: 'md'): Promise<Report | string> {
 /**
  * 统一 API 客户端对象
  */
+function isQueuedCaseAiJob(data: any): data is { job_id: string } {
+  // 旧的同步响应和 e2e 桩直接带结果；只有入队响应才轮询。
+  if (!data || !data.job_id) return false
+  if (data.status !== 'queued' && data.status !== 'running') return false
+  return data.items == null && data.runs == null && data.verdict == null && data.result == null
+}
+
+async function waitCaseAiJob(jobId: string, timeoutMs: number): Promise<any> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const { data } = await http.get(`/api/case-sets/ai-jobs/${jobId}`, { timeout: 15000 })
+    if (data?.status === 'succeeded') return data.result
+    if (data?.status === 'failed') {
+      const code = (data.error?.code || ErrorCode.UPSTREAM) as ErrorCode
+      throw new ApiError(data.error?.message || 'AI 任务失败', code, 502)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  throw new ApiError('AI 任务仍在执行，请稍后重试', ErrorCode.TIMEOUT, 504)
+}
+
 export const api = {
   getDataMode,
   isMock: () => getDataMode() === 'mock',
@@ -988,8 +1009,9 @@ export const api = {
           dropped: { dropped_unknown_strategy: 0, dropped_over_quota: 0 },
         }
       }
-      // 服务端模型调用预算与 Worker 对齐（280 秒），客户端另留 10 秒传输与解析余量。
-      const { data } = await http.post('/api/case-sets/ai-generate', payload, { timeout: 290000 })
+      // 入队后由 Worker 生成。客户端继续等到结果，但每次请求都很短。
+      const posted = await http.post('/api/case-sets/ai-generate', payload, { timeout: 20000 })
+      const data = isQueuedCaseAiJob(posted.data) ? await waitCaseAiJob(posted.data.job_id, 290000) : posted.data
       const items: TestCase[] = Array.isArray(data) ? data : data.items || []
       return {
         items,
@@ -1040,7 +1062,8 @@ export const api = {
           },
         }
       }
-      const { data } = await http.post('/api/case-sets/ai-compare', payload, { timeout: 290000 })
+      const posted = await http.post('/api/case-sets/ai-compare', payload, { timeout: 20000 })
+      const data = isQueuedCaseAiJob(posted.data) ? await waitCaseAiJob(posted.data.job_id, 290000) : posted.data
       return {
         sourceTruncated: Boolean(data?.source_truncated),
         runs: Array.isArray(data?.runs) ? data.runs : [],
@@ -1080,7 +1103,8 @@ export const api = {
           source_truncated: false,
         }
       }
-      const { data } = await http.post(`/api/case-sets/${id}/ai-review`, payload || {}, { timeout: 180000 })
+      const posted = await http.post(`/api/case-sets/${id}/ai-review`, payload || {}, { timeout: 20000 })
+      const data = isQueuedCaseAiJob(posted.data) ? await waitCaseAiJob(posted.data.job_id, 180000) : posted.data
       return data
     },
     // 契约 POST /api/case-sets/ai-coverage：需求覆盖自检，独立请求，不改变候选内容。
@@ -1911,8 +1935,19 @@ export const api = {
       root: string
       timeout?: boolean
     }> {
-      const { data } = await http.post(`/api/workspaces/${id}/exec/${approvalId}/confirm`)
-      return data
+      const posted = await http.post(`/api/workspaces/${id}/exec/${approvalId}/confirm`, null, { timeout: 20000 })
+      if (typeof posted.data?.exit_code === 'number') return posted.data
+      const timeoutMs = (Number(posted.data?.timeout_s) || 60) * 1000 + 15000
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        const polled = await http.get(`/api/workspaces/${id}/exec/${approvalId}`, { timeout: 15000 })
+        if (typeof polled.data?.exit_code === 'number' || polled.data?.status === 'succeeded') return polled.data
+        if (polled.data?.status === 'failed') {
+          throw new ApiError(polled.data.error?.message || '远程命令失败', ErrorCode.UPSTREAM, 502)
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
+      throw new ApiError('远程命令仍在执行，请稍后查看', ErrorCode.TIMEOUT, 504)
     },
     /** 远程命令：拒绝执行。 */
     async rejectRemoteExec(

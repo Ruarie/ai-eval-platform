@@ -30,6 +30,7 @@ from adapter import (
     ensure_data_dir,
     load_config,
 )
+from adapter.contract import api_key_accepted
 from fastapi import FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
@@ -140,9 +141,8 @@ app = FastAPI(title="LightRAG Adapter", version="1.0.0", lifespan=lifespan)
 
 
 def _authorize(x_api_key: str | None) -> None:
-    """内网鉴权：配置了口令就必须匹配，未配置则仅依赖 Compose 内网隔离。"""
-    expected = _CONFIG.api_key
-    if expected and x_api_key != expected:
+    """业务接口鉴权。健康检查不走这里，空口令也拒绝索引、删除和检索。"""
+    if not api_key_accepted(_CONFIG.api_key, x_api_key):
         raise HTTPException(status_code=401, detail="unauthorized")
 
 

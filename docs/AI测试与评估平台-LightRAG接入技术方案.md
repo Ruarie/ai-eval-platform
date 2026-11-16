@@ -2,8 +2,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.0 |
-| 审查日期 | 2026-11-02 |
+| 文档版本 | V1.1 |
+| 审查日期 | 2026-11-16（9621 不再映射到宿主机；业务接口在内部口令为空时拒绝） |
 | 对应 PRD | V1.55（F-RAG-01 / F-RAG-05） |
 | 对应 API 契约 | V2.46 §3.9 |
 | 上游依赖 | [HKUDS/LightRAG](https://github.com/HKUDS/LightRAG) `lightrag-hku==1.5.7`（MIT，锁 tag） |
@@ -135,7 +135,7 @@ LightRAG 的 query 不支持按文档过滤，单实例多知识库共享同一�
 | `LIGHTRAG_EMBEDDING_BASE_URL` / `_API_KEY` | 复用 LLM | 独立向量网关时才填 |
 | `LIGHTRAG_EMBEDDING_MODEL` / `LIGHTRAG_EMBEDDING_DIM` | `BAAI/bge-m3` / `1024` | **维度必须与模型一致**，否则写入向量报维度不匹配 |
 | `LIGHTRAG_CHUNK_TOKEN_SIZE` / `_OVERLAP_TOKENS` | `1200` / `100` | 切块粒度与抽取成本 |
-| `LIGHTRAG_API_KEY` | 空 | 平台 ↔ 适配服务内部口令（9621 发布到宿主机，对外可达时必须设置） |
+| `LIGHTRAG_API_KEY` | Compose 本地默认口令 | 平台 ↔ 适配服务内部口令。9621 只在容器网络内；口令为空时索引、删除、检索返回 401。健康检查不鉴权 |
 | `LIGHTRAG_QUERY_TIMEOUT_SECONDS` | `60` | 平台侧检索超时（hybrid 等模式先做关键词抽取）；旧名 `LIGHTRAG_TIMEOUT_SECONDS` 仅作检索回退 |
 | `LIGHTRAG_INDEX_TIMEOUT_SECONDS` | `15` | 建索引受理超时（只入队，返回很快） |
 | `LIGHTRAG_STATUS_TIMEOUT_SECONDS` | `15` | 文档状态回读超时；不应长时间阻塞列表 |
@@ -171,7 +171,7 @@ cd backend/lightrag && python -m pytest tests
 cd backend/api && pytest tests/test_kb_lightrag.py
 
 # 真实引擎冒烟（需可用的 OpenAI 兼容网关）
-curl -s localhost:9621/health | python -m json.tool
+docker compose exec lightrag python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:9621/health', timeout=5).read().decode())"
 ```
 
 覆盖范围：

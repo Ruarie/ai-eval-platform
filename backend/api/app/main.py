@@ -179,6 +179,9 @@ def _resolve_instance_id() -> str:
 async def lifespan(app: FastAPI):
     # 表结构由 Alembic 管理（启动前执行 alembic upgrade head），此处只做引导数据
     # 首次启动只补齐缺失的运行时技能文件，已有管理员修改绝不覆盖。
+    from .workspace_exec_approval import try_enable_redis
+
+    try_enable_redis(settings.redis_url)
     ensure_skill_files()
     _bootstrap_admin()
     _bootstrap_preview()

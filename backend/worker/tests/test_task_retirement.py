@@ -130,7 +130,10 @@ def test_worker_only_claims_testcase_even_before_legacy_cleanup(worker_db_factor
     executed = []
     monkeypatch.setattr(main, "task_lease_heartbeat", active_lease)
     monkeypatch.setattr(main, "_run_task", executed.append)
-    monkeypatch.setattr(main.time, "sleep", lambda _seconds: (_ for _ in ()).throw(StopIteration))
+    def _stop_loop(_seconds: float) -> None:
+        raise StopIteration
+
+    monkeypatch.setattr(main.time, "sleep", _stop_loop)
     with pytest.raises(StopIteration):
         main.loop()
     assert executed == ["testcase-second"]

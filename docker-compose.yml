@@ -105,7 +105,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       # LightRAG 适配服务地址与内部口令；引擎不可用时共享检索层回退本地关键词并标注降级。
       LIGHTRAG_BASE_URL: ${LIGHTRAG_BASE_URL:-http://lightrag:9621}
-      LIGHTRAG_API_KEY: ${LIGHTRAG_API_KEY:-}
+      LIGHTRAG_API_KEY: ${LIGHTRAG_API_KEY:-dev-lightrag-internal}
       # 检索/受理/状态/删除四类超时独立配置：检索需容忍关键词抽取，删除需容忍
       # 图谱摘要重建，单一变量会把删除窗口缩短。
       LIGHTRAG_QUERY_TIMEOUT_SECONDS: ${LIGHTRAG_QUERY_TIMEOUT_SECONDS:-60}
@@ -250,7 +250,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       # RAG 评测检索的 LightRAG 适配服务地址与内部口令（超时与 api 保持一致）。
       LIGHTRAG_BASE_URL: ${LIGHTRAG_BASE_URL:-http://lightrag:9621}
-      LIGHTRAG_API_KEY: ${LIGHTRAG_API_KEY:-}
+      LIGHTRAG_API_KEY: ${LIGHTRAG_API_KEY:-dev-lightrag-internal}
       LIGHTRAG_QUERY_TIMEOUT_SECONDS: ${LIGHTRAG_QUERY_TIMEOUT_SECONDS:-60}
       LIGHTRAG_INDEX_TIMEOUT_SECONDS: ${LIGHTRAG_INDEX_TIMEOUT_SECONDS:-15}
       LIGHTRAG_STATUS_TIMEOUT_SECONDS: ${LIGHTRAG_STATUS_TIMEOUT_SECONDS:-15}
@@ -327,15 +327,16 @@ services:
       # 引擎数据目录（图 + 向量 + doc_status），随 ./data 持久化。
       LIGHTRAG_DATA_DIR: /data/lightrag
       # 平台 → 适配服务的内部口令；api/worker 侧同名注入，仅走容器内网。
-      LIGHTRAG_API_KEY: ${LIGHTRAG_API_KEY:-}
+      LIGHTRAG_API_KEY: ${LIGHTRAG_API_KEY:-dev-lightrag-internal}
       # 待索引队列上限：排队文档的正文驻留内存，超限返回 429 由平台落 failed。
       LIGHTRAG_MAX_QUEUE_DOCUMENTS: ${LIGHTRAG_MAX_QUEUE_DOCUMENTS:-64}
       # 单文档索引并发：1=串行最稳；批量导入时调到 3 可显著提速（内存随之上涨）。
       LIGHTRAG_MAX_PARALLEL_INSERT: ${LIGHTRAG_MAX_PARALLEL_INSERT:-1}
       # 停机宽限期：给在建索引任务收尾时间，避免 doc_status 停在 processing。
       LIGHTRAG_SHUTDOWN_GRACE_SECONDS: ${LIGHTRAG_SHUTDOWN_GRACE_SECONDS:-30}
-    ports:
-      - "${LIGHTRAG_PORT:-9621}:9621"
+    # 不把 9621 映射到宿主机。平台经容器网络访问；空口令时业务接口也会拒绝。
+    expose:
+      - "9621"
     volumes:
       - ./data/lightrag:/data/lightrag
     healthcheck:
@@ -351,8 +352,9 @@ services:
     mem_limit: 128m
     build: ./backend/stress
     restart: unless-stopped
-    ports:
-      - "${STRESS_PORT:-19090}:19090"
+    # 压测引擎只给 worker 用，不再映射到宿主机。
+    expose:
+      - "19090"
 
 volumes:
   pgdata:

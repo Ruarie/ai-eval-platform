@@ -12,10 +12,13 @@
 from __future__ import annotations
 
 import base64
+import logging
 import mimetypes
 import os
 import shutil
+import threading
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, UploadFile
@@ -27,11 +30,11 @@ from sqlalchemy.orm import Session
 
 from .. import remote_workspace, workspace_exec_approval
 from ..config import settings
-from ..db import get_db
+from ..db import SessionLocal, get_db
 from ..deps import get_current_user
 from ..errors import AppError, ErrorCode
+from ..models import AuditLog, User, Workspace
 from ..models import Session as AgentSession
-from ..models import User, Workspace
 from ..workspace_service import (
     create_child_dir,
     create_workspace_file,
@@ -48,7 +51,9 @@ from ..workspace_service import (
     workspace_dir_for,
     write_workspace_file,
 )
-from ._common import write_audit
+from ._common import client_ip, write_audit
+
+logger = logging.getLogger("ai-eval.workspaces")
 
 router = APIRouter(prefix="/api/workspaces", tags=["user-workspaces"])
 
@@ -844,7 +849,24 @@ def request_remote_exec(
     }
 
 
-@router.post("/{workspace_id}/exec/{approval_id}/confirm")
+@router.get("/{workspace_id}/exec/{approval_id}")
+def read_remote_exec(
+    workspace_id: str,
+    approval_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """查询已确认命令的执行状态。确认接口立即返回，结果在这里取。"""
+    _owned_workspace(db, user, workspace_id)
+    record = workspace_exec_approval.read_run(
+        approval_id, workspace_id=workspace_id, user_id=user.id,
+    )
+    if record is None:
+        raise AppError(ErrorCode.NOT_FOUND, "远程命令结果不存在或已过期")
+    return record
+
+
+@router.post("/{workspace_id}/exec/{approval_id}/confirm", status_code=202)
 def confirm_remote_exec(
     workspace_id: str,
     approval_id: str,
@@ -862,23 +884,85 @@ def confirm_remote_exec(
     row = _owned_workspace(db, user, workspace_id)
     if not _is_ssh(row):
         raise AppError(ErrorCode.VALIDATION, "仅远程工作区支持命令执行")
-    result = _remote_call(
-        remote_workspace.exec_command,
-        row, pending.command, pending.timeout_s, _ssh_password(ssh_password),
+    password = _ssh_password(ssh_password)
+    ip = client_ip(request)
+    # 请求结束后会话会关闭，后台线程只拿这份已读出的连接参数。
+    target_row = SimpleNamespace(
+        kind=row.kind,
+        ssh_host=row.ssh_host,
+        ssh_port=row.ssh_port,
+        ssh_user=row.ssh_user,
+        ssh_key_name=row.ssh_key_name,
+        remote_root=row.remote_root,
+        auth_type=getattr(row, "auth_type", "key_file"),
+    )
+    user_id = user.id
+    command = pending.command
+    timeout_s = pending.timeout_s
+    workspace_exec_approval.begin_run(
+        approval_id, workspace_id=workspace_id, user_id=user_id, timeout_s=timeout_s,
     )
     write_audit(
         db, request, user,
-        action="workspace_remote_exec",
+        action="workspace_remote_exec_accepted",
         target_type="workspace", target_id=workspace_id,
-        detail={
-            "approval_id": approval_id,
-            "command": pending.command[:200],
-            "exit_code": result["exit_code"],
-            "host": result["host"],
-        },
+        detail={"approval_id": approval_id, "command": command[:200], "host": pending.host},
     )
     db.commit()
-    return {"approval_id": approval_id, "workspace_id": workspace_id, **result}
+
+    def _run() -> None:
+        """在请求线程之外执行。密码只留在这个闭包里，不写 Redis。"""
+        session = SessionLocal()
+        try:
+            result = remote_workspace.exec_command(target_row, command, timeout_s, password)
+            workspace_exec_approval.finish_run(
+                approval_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                payload={"status": "succeeded", **result},
+            )
+            session.add(AuditLog(
+                user_id=user_id,
+                action="workspace_remote_exec",
+                target_type="workspace",
+                target_id=workspace_id,
+                detail={
+                    "approval_id": approval_id,
+                    "command": command[:200],
+                    "exit_code": result.get("exit_code"),
+                    "host": result.get("host"),
+                },
+                ip=ip,
+            ))
+            session.commit()
+        except Exception as exc:
+            session.rollback()
+            message = exc.message if isinstance(exc, AppError) else "远程命令执行失败"
+            code = exc.code.value if isinstance(exc, AppError) else ErrorCode.UPSTREAM.value
+            if isinstance(exc, remote_workspace.RemotePathError):
+                message = str(exc)
+                code = ErrorCode.VALIDATION.value
+            elif isinstance(exc, remote_workspace.RemoteWorkspaceError):
+                mapped = _remote_app_error(exc)
+                message = mapped.message
+                code = mapped.code.value
+            logger.warning("远程命令失败 type=%s", type(exc).__name__)
+            workspace_exec_approval.finish_run(
+                approval_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                payload={"status": "failed", "error": {"code": code, "message": message}},
+            )
+        finally:
+            session.close()
+
+    threading.Thread(target=_run, name=f"ws-exec-{approval_id[:8]}", daemon=True).start()
+    return {
+        "approval_id": approval_id,
+        "workspace_id": workspace_id,
+        "status": "running",
+        "timeout_s": timeout_s,
+    }
 
 
 @router.post("/{workspace_id}/exec/{approval_id}/reject")

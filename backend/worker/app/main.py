@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from .benchmark import run_benchmark
+from .case_ai import claim_next_case_ai_job, recover_expired_case_ai_jobs, run_case_ai_job
 from .dispatch_presence import Presence
 from .dataset_import import (
     claim_next_dataset_import,
@@ -22,7 +23,7 @@ from .dataset_import import (
 )
 from .db import SessionLocal
 from .events import push_ws
-from .models import CaseSet, Setting, Task, TaskEvent
+from .models import CaseAiJob, CaseSet, Setting, Task, TaskEvent
 from .rag import run_rag
 from .stress import run_stress
 from .task_state import (
@@ -277,6 +278,7 @@ def loop() -> None:
     while True:
         db = SessionLocal()
         task_id: str | None = None
+        case_ai_job_id: str | None = None
         import_claim: tuple[str, str] | None = None
         backoff_s = 0.0
         try:
@@ -286,6 +288,7 @@ def loop() -> None:
                 cancel_non_testcase_tasks(db)
                 last_retire_scan = now
             if now - last_reclaim_scan >= RECLAIM_SCAN_INTERVAL_S:
+                recover_expired_case_ai_jobs(db)
                 recover_expired_task_leases(db)
                 # 导入租约独立于 Task：回收异常退出的领取。
                 recover_expired_dataset_import_leases(db)
@@ -305,7 +308,11 @@ def loop() -> None:
             # 部分唯一索引 uq_tasks_active_session 在创建侧保证。
             if claimable and not import_claim:
                 running = db.query(Task).filter(Task.status == "running").count()
+                running += db.query(CaseAiJob).filter(CaseAiJob.status == "running").count()
                 if running < max_running:
+                    # 页面上的生成、对比、评审在等结果，先于批量用例任务领取。
+                    case_ai_job_id = claim_next_case_ai_job(db)
+                if running < max_running and not case_ai_job_id:
                     task = (
                         db.query(Task)
                         .filter(Task.status == "queued", Task.kind == "testcase")
@@ -339,6 +346,14 @@ def loop() -> None:
             except Exception:
                 # 数据库故障等异常不得带崩主循环；租约到期后由回收逻辑兜底。
                 logger.exception("dataset import %s crashed", import_id)
+            finally:
+                presence.set_activity(busy=False, task_id=None)
+        elif case_ai_job_id:
+            presence.set_activity(busy=True, task_id=case_ai_job_id)
+            try:
+                run_case_ai_job(case_ai_job_id)
+            except Exception:
+                logger.exception("case ai job %s crashed outside executor", case_ai_job_id)
             finally:
                 presence.set_activity(busy=False, task_id=None)
         elif task_id:

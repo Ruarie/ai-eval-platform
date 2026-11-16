@@ -14,8 +14,18 @@ from adapter.contract import (
     map_graph,
     parse_doc_ids,
     parse_file_source,
+    api_key_accepted,
     sanitize_filename,
 )
+
+
+def test_api_key_rejected_when_unset_or_mismatched():
+    """空口令不再放行；健康检查不使用这个判定。"""
+    assert api_key_accepted("", None) is False
+    assert api_key_accepted("", "anything") is False
+    assert api_key_accepted("secret", None) is False
+    assert api_key_accepted("secret", "other") is False
+    assert api_key_accepted("secret", "secret") is True
 
 
 def test_file_source_roundtrip():

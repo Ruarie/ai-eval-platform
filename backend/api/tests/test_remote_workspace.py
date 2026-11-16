@@ -3,6 +3,7 @@
 不做真实 SSH 连接：只覆盖"不连网也必须成立"的判定，连接层由部署环境验证。
 """
 
+import stat
 from types import SimpleNamespace
 
 import pytest
@@ -94,6 +95,58 @@ def test_key_dir_missing_is_reported(monkeypatch):
 
     with pytest.raises(rw.RemoteWorkspaceError, match="WORKSPACE_SSH_KEY_DIR"):
         rw._load_private_key("id_ed25519")
+
+
+class _Attrs:
+    def __init__(self, mode: int) -> None:
+        self.st_mode = mode
+
+
+class _FakeSftp:
+    """只实现 lstat，用来验证符号链接判定不依赖真实 SSH。"""
+
+    def __init__(self, nodes: dict[str, int]) -> None:
+        self.nodes = nodes
+
+    def lstat(self, path: str) -> _Attrs:
+        if path not in self.nodes:
+            raise FileNotFoundError(path)
+        return _Attrs(self.nodes[path])
+
+
+def test_symlink_component_is_rejected():
+    """根目录内的链接不能靠字符串路径指到根外。"""
+    sftp = _FakeSftp({
+        "/srv/workspace": stat.S_IFDIR,
+        "/srv/workspace/link": stat.S_IFLNK,
+    })
+
+    with pytest.raises(rw.RemotePathError, match="符号链接"):
+        rw.reject_symlink_escape(sftp, "/srv/workspace", "/srv/workspace/link/secret")
+
+
+def test_missing_leaf_is_allowed_when_parents_are_real():
+    """新建文件时叶子可以不存在，已存在的父级不能是链接。"""
+    sftp = _FakeSftp({
+        "/srv/workspace": stat.S_IFDIR,
+        "/srv/workspace/src": stat.S_IFDIR,
+    })
+
+    rw.reject_symlink_escape(sftp, "/srv/workspace", "/srv/workspace/src/new.txt")
+
+
+def test_symlink_root_is_rejected():
+    sftp = _FakeSftp({"/srv/workspace": stat.S_IFLNK})
+
+    with pytest.raises(rw.RemotePathError, match="符号链接"):
+        rw.reject_symlink_escape(sftp, "/srv/workspace", "/srv/workspace/src")
+
+
+def test_absolute_root_rejects_link_component():
+    sftp = _FakeSftp({"/etc": stat.S_IFLNK})
+
+    with pytest.raises(rw.RemotePathError, match="符号链接"):
+        rw.reject_symlink_escape(sftp, "/", "/etc/passwd")
 
 
 def test_local_workspace_is_not_treated_as_ssh():

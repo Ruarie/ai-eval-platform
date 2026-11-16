@@ -1201,6 +1201,36 @@ class CaseReviewRun(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class CaseAiJob(Base):
+    """页面上的用例生成、对比和评审。由 Worker 领取，API 只负责入队和查询。"""
+
+    __tablename__ = "case_ai_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('generate', 'compare', 'review')",
+            name="ck_case_ai_jobs_kind",
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            name="ck_case_ai_jobs_status",
+        ),
+        Index("ix_case_ai_jobs_queue", "status", "created_at"),
+    )
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    kind = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="queued")
+    payload = Column(JSONB, nullable=False, default=dict)
+    result = Column(JSONB, nullable=False, default=dict)
+    error_code = Column(String, nullable=True)
+    error_message = Column(Text, nullable=True)
+    claim_expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class CaseSetVersion(Base):
     """用例集不可变版本快照；回滚只新建草稿，不修改历史。"""
 

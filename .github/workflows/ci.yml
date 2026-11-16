@@ -119,6 +119,22 @@ jobs:
     defaults:
       run:
         working-directory: backend/worker
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aieval
+          POSTGRES_PASSWORD: aieval
+          POSTGRES_DB: worker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aieval -d worker"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      WORKER_TEST_DATABASE_URL: postgresql+psycopg2://aieval:aieval@localhost:5432/worker
     steps:
       - name: Checkout
         uses: actions/checkout@v4

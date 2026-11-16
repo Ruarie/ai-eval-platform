@@ -14,10 +14,7 @@ awaiting_case_confirm 时写入（+72h），本域不主动维护。
 import io
 import json
 import logging
-import time
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import UTC
 from typing import Any
 from urllib.parse import quote
@@ -25,22 +22,12 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from fastapi import Request as FastApiRequest
 from pydantic import ValidationError
-from shared.case_compare import compare_case_runs
+from shared.case_preview import PreviewError, generate_candidates, run_compare
 from shared.casegen import (
-    MAX_COUNT,
     STRATEGY_WEIGHTS,
     build_coverage_prompt,
-    build_prompts,
-    build_review_prompt,
     clip_source,
-    dedupe_cases,
-    generation_token_budget,
-    mark_pending_complete,
-    parse_cases_with_stats,
     parse_coverage,
-    parse_review,
-    rebalance_with_stats,
-    selfcheck,
 )
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -60,13 +47,12 @@ from ..llm_client import (
     call_agent_model,
     call_profile_model,
     extract_json_array,
-    resolve_agent_profile,
 )
 from ..models import (
     AuditLog,
+    CaseAiJob,
     CaseFolder,
     CaseItem,
-    CaseReviewRun,
     CaseSet,
     ProtocolProfile,
     Task,
@@ -122,18 +108,13 @@ _STRATEGY_NAMES = {
     "state": "状态迁移",
     "scenario": "场景",
 }
-# 候选生成的模型调用超时：与 Worker 用例生成预算（280s）对齐，
-# 否则同为 80 条 / 16384 tokens 的请求在向导路径更容易被 120s 默认值掐断。
 # 未传分页时的返回上限：列表页按需全量拉取，行数无界增长会拖慢首屏并放大内存。
 MAX_LIST_ROWS = 500
 
-GENERATION_TIMEOUT_S = 280.0
-# 需求覆盖复审是独立轻量请求（输入是清单而非全量需求生成），预算单独一档。
+# 需求覆盖复审仍在请求内完成：输入是清单，预算单独一档。
+# 生成、对比和评审已改由 Worker 执行，超时在 shared.case_preview 与 worker.case_ai。
 COVERAGE_TIMEOUT_S = 120.0
 COVERAGE_MAX_TOKENS = 2048
-# 评审要读整份用例（60+ 条的步骤与预期），预算与超时都比覆盖检查大一档。
-REVIEW_TIMEOUT_S = 150.0
-REVIEW_MAX_TOKENS = 4096
 
 _DEFAULT_STRATEGY_WEIGHTS = {
     "positive": 40,
@@ -363,52 +344,95 @@ def create_case_set(
     return case_set
 
 
-# 固定路径 /ai-generate 必须声明在 /{set_id} 之前，避免被路径参数吞掉
-@router.post("/ai-generate")
-def ai_generate_cases(
-    body: CaseAiGenerateIn,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """按 Agent 协议档生成候选用例（新八字段格式 + 新优先级）；候选不落库。
-
-    响应同时返回自检结果与裁剪统计，前端可在采纳前就提示缺项，
-    不必等到保存后才发现「缺核心正向」。
-    """
+def _load_generation_request(
+    body: CaseAiGenerateIn, db: Session, user: User
+) -> tuple[str, bool, dict[str, int], int]:
+    """读来源并裁剪。越权在入队前拒绝，不把文档正文交给队列。"""
     source_text = body.source_text or ""
     if body.source_doc_id:
         source_text = _read_stored_file_text(db, body.source_doc_id, user.id)
     if not source_text.strip():
         raise AppError(ErrorCode.VALIDATION, "需要提供需求文档内容 source_text 或来源文档 source_doc_id")
     source_text, source_truncated = clip_source(source_text)
-
-    weights = body.strategy_weights or STRATEGY_WEIGHTS
-    max_count = body.max_count
-    system, user_prompt = build_prompts(source_text, max_count, weights=weights)
-    # 与 Worker 同一预算口径（280s）：80 条十六字段的中文 JSON 在 120s 内经常跑不完。
-    result = call_agent_model(db, system, user_prompt, temperature=0.3,
-                              max_tokens=generation_token_budget(max_count),
-                              timeout_s=GENERATION_TIMEOUT_S)
-    cases, dropped = _materialize_cases(result.text, max_count, weights)
-    if not cases:
-        raise AppError(ErrorCode.UPSTREAM, "模型未返回符合所选策略的有效用例")
-    return {
-        "items": [mark_pending_complete(case) for case in cases],
-        "checks": selfcheck(cases, weights=weights),
-        "source_truncated": source_truncated,
-        "dropped": dropped,
-    }
+    weights = dict(body.strategy_weights or STRATEGY_WEIGHTS)
+    return source_text, source_truncated, weights, body.max_count
 
 
-def _materialize_cases(text: str, max_count: int, weights: dict[str, int]) -> tuple[list[dict], dict[str, int]]:
-    """解析、去重再按策略裁剪。两条生成路径共用，避免对比和单模型结果口径分叉。"""
+def _preview_error(exc: PreviewError) -> AppError:
+    code = {
+        "UPSTREAM": ErrorCode.UPSTREAM,
+        "VALIDATION": ErrorCode.VALIDATION,
+        "BUDGET_EXCEEDED": ErrorCode.BUDGET_EXCEEDED,
+        "TIMEOUT": ErrorCode.TIMEOUT,
+        "INTERNAL": ErrorCode.INTERNAL,
+    }.get(exc.code, ErrorCode.INTERNAL)
+    return AppError(code, exc.message)
+
+
+def _enqueue_case_ai(db: Session, user: User, kind: str, payload: dict[str, Any]) -> dict[str, str]:
+    """写入 Worker 队列。请求本身不等模型。"""
+    job = CaseAiJob(user_id=user.id, kind=kind, status="queued", payload=payload, result={})
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return {"job_id": job.id, "status": job.status}
+
+
+def execute_generate_cases(
+    body: CaseAiGenerateIn,
+    db: Session,
+    user: User,
+) -> dict[str, Any]:
+    """同步生成候选。单测直接调用；线上请求改走 ``ai_generate_cases`` 入队。"""
+    source_text, source_truncated, weights, max_count = _load_generation_request(body, db, user)
+
+    def call_model(system: str, user_prompt: str, **kwargs: Any) -> Any:
+        return call_agent_model(db, system, user_prompt, **kwargs)
+
     try:
-        cases, parse_stats = parse_cases_with_stats(text)
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise AppError(ErrorCode.UPSTREAM, "模型输出无法解析为用例") from exc
-    cases, dropped_duplicate = dedupe_cases(cases)
-    cases, dropped = rebalance_with_stats(cases, max_count, weights=weights)
-    return cases, {**dropped, "dropped_duplicate": dropped_duplicate, **parse_stats}
+        result = generate_candidates(source_text, max_count, weights, call_model)
+    except PreviewError as exc:
+        raise _preview_error(exc) from exc
+    result["source_truncated"] = source_truncated
+    return result
+
+
+# 固定路径必须声明在 /{set_id} 之前，避免被路径参数吞掉
+@router.post("/ai-generate", status_code=202)
+def ai_generate_cases(
+    body: CaseAiGenerateIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """把候选用例生成放进 Worker 队列。结果用 GET /ai-jobs/{job_id} 取回。"""
+    source_text, source_truncated, weights, max_count = _load_generation_request(body, db, user)
+    return _enqueue_case_ai(db, user, "generate", {
+        "source_text": source_text,
+        "source_truncated": source_truncated,
+        "strategy_weights": weights,
+        "max_count": max_count,
+    })
+
+
+@router.get("/ai-jobs/{job_id}")
+def get_case_ai_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """查询当前成员的用例 AI 任务。成功时 result 与原先同步响应相同。"""
+    job = db.get(CaseAiJob, job_id)
+    if job is None or job.user_id != user.id:
+        raise AppError(ErrorCode.NOT_FOUND, "AI 任务不存在")
+    body: dict[str, Any] = {"job_id": job.id, "kind": job.kind, "status": job.status}
+    if job.status == "succeeded":
+        body["result"] = job.result or {}
+    if job.status == "failed":
+        body["error"] = {
+            "code": job.error_code or ErrorCode.INTERNAL.value,
+            "message": job.error_message or "AI 任务失败",
+        }
+    return body
 
 
 def _load_compare_profiles(db: Session, profile_ids: list[str]) -> list[ProtocolProfile]:
@@ -444,131 +468,46 @@ def _profile_snapshot(profile: ProtocolProfile) -> Any:
     )
 
 
-def _failed_run(profile: Any, code: str, message: str, elapsed_ms: int) -> dict[str, Any]:
-    return {
-        "profile_id": profile.id,
-        "profile_name": profile.name,
-        "model": profile.model,
-        "ok": False,
-        "error": {"code": code, "message": message},
-        "elapsed_ms": elapsed_ms,
-        "items": [],
-        "checks": [],
-        "dropped": {},
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    }
+def _prepare_compare(
+    body: CaseAiCompareIn, db: Session, user: User
+) -> tuple[str, bool, list[Any], dict[str, int], int]:
+    """校验来源和两个协议档。线程启动前先复制 ORM 字段。"""
+    source_text, source_truncated, weights, max_count = _load_generation_request(body, db, user)
+    profiles = _load_compare_profiles(db, body.profile_ids)
+    return source_text, source_truncated, [_profile_snapshot(profile) for profile in profiles], weights, max_count
 
 
-def _generate_with_profile(
-    profile: Any,
-    system: str,
-    user_prompt: str,
-    max_count: int,
-    weights: dict[str, int],
+def execute_compare_cases(
+    body: CaseAiCompareIn,
+    db: Session,
+    user: User,
 ) -> dict[str, Any]:
-    """跑一侧模型。失败留在该侧结果里，不让另一侧的成功被整单错误盖掉。"""
-    started = time.perf_counter()
-    payload: dict[str, Any] = {
-        "profile_id": profile.id,
-        "profile_name": profile.name,
-        "model": profile.model,
-        "ok": False,
-        "error": None,
-        "elapsed_ms": 0,
-        "items": [],
-        "checks": [],
-        "dropped": {
-            "dropped_unknown_strategy": 0,
-            "dropped_over_quota": 0,
-            "dropped_duplicate": 0,
-            "dropped_missing_name": 0,
-            "dropped_non_object": 0,
-        },
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    }
-    try:
-        result = call_profile_model(
-            profile, system, user_prompt, temperature=0.3,
-            max_tokens=generation_token_budget(max_count),
-            timeout_s=GENERATION_TIMEOUT_S,
-        )
-        cases, dropped = _materialize_cases(result.text, max_count, weights)
-        if not cases:
-            raise AppError(ErrorCode.UPSTREAM, "模型未返回符合所选策略的有效用例")
-        payload.update({
-            "ok": True,
-            "model": profile.model,
-            "items": [mark_pending_complete(case) for case in cases],
-            "checks": selfcheck(cases, weights=weights),
-            "dropped": dropped,
-            "usage": {
-                "prompt_tokens": int((result.usage or {}).get("prompt_tokens") or 0),
-                "completion_tokens": int((result.usage or {}).get("completion_tokens") or 0),
-                "total_tokens": int((result.usage or {}).get("total_tokens") or 0),
-            },
-        })
-    except AppError as exc:
-        payload["error"] = {"code": exc.code.value, "message": exc.message}
-    except Exception as exc:
-        logger.warning("模型对比单侧失败 type=%s", type(exc).__name__)
-        payload["error"] = {"code": ErrorCode.INTERNAL.value, "message": "AI 生成调用失败，请稍后重试"}
-    payload["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
-    return payload
+    """同步双模型对比。单测直接调用；线上请求入队后由 Worker 执行。"""
+    source_text, source_truncated, snapshots, weights, max_count = _prepare_compare(body, db, user)
+
+    def call_profile(profile: Any, system: str, user_prompt: str, **kwargs: Any) -> Any:
+        return call_profile_model(profile, system, user_prompt, **kwargs)
+
+    result = run_compare(snapshots, source_text, max_count, weights, call_profile)
+    result["source_truncated"] = source_truncated
+    return result
 
 
-@router.post("/ai-compare")
+@router.post("/ai-compare", status_code=202)
 def ai_compare_cases(
     body: CaseAiCompareIn,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """同一需求并行交给两个协议档生成候选，并返回本轮结构对比。
-
-    候选不落库。两侧同时发起，墙钟时间接近较慢的一侧，而不是两次相加。
-    一侧失败时仍返回另一侧结果，方便看出是模型差异还是调用失败。
-    """
-    source_text = body.source_text or ""
-    if body.source_doc_id:
-        source_text = _read_stored_file_text(db, body.source_doc_id, user.id)
-    if not source_text.strip():
-        raise AppError(ErrorCode.VALIDATION, "需要提供需求文档内容 source_text 或来源文档 source_doc_id")
-    source_text, source_truncated = clip_source(source_text)
-    profiles = _load_compare_profiles(db, body.profile_ids)
-    weights = body.strategy_weights or STRATEGY_WEIGHTS
-    max_count = body.max_count
-    system, user_prompt = build_prompts(source_text, max_count, weights=weights)
-    # 先读完 ORM 字段再进线程。线程里只拿这份快照，避免复用请求上的数据库会话。
-    snapshots = [_profile_snapshot(profile) for profile in profiles]
-    pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="case-compare")
-    try:
-        futures = [
-            pool.submit(_generate_with_profile, profile, system, user_prompt, max_count, weights)
-            for profile in snapshots
-        ]
-        runs: list[dict[str, Any]] = []
-        for profile, future in zip(snapshots, futures, strict=True):
-            try:
-                runs.append(future.result(timeout=GENERATION_TIMEOUT_S + 5))
-            except FutureTimeout:
-                runs.append(_failed_run(
-                    profile,
-                    ErrorCode.TIMEOUT.value,
-                    "模型对比超时，请减少生成条数后重试",
-                    int(GENERATION_TIMEOUT_S * 1000),
-                ))
-    finally:
-        # 不等待卡住的工作线程，避免单侧超时把整次请求留在反向代理读超时之外。
-        pool.shutdown(wait=False, cancel_futures=True)
-    comparison = compare_case_runs(
-        runs[0]["items"] if runs[0]["ok"] else [],
-        runs[1]["items"] if runs[1]["ok"] else [],
-        weights,
-        left_name=runs[0]["profile_name"] or "模型 A",
-        right_name=runs[1]["profile_name"] or "模型 B",
-        left_ok=bool(runs[0]["ok"]),
-        right_ok=bool(runs[1]["ok"]),
-    )
-    return {"source_truncated": source_truncated, "runs": runs, "comparison": comparison}
+    """登记双模型对比。两侧仍并行，但是在 Worker 里，不再占住这条请求。"""
+    source_text, source_truncated, snapshots, weights, max_count = _prepare_compare(body, db, user)
+    return _enqueue_case_ai(db, user, "compare", {
+        "source_text": source_text,
+        "source_truncated": source_truncated,
+        "strategy_weights": weights,
+        "max_count": max_count,
+        "profile_ids": [profile.id for profile in snapshots],
+    })
 
 
 @router.post("/ai-coverage")
@@ -836,28 +775,21 @@ def save_cases(
             "checks": case_set.checks, "revision": case_set.revision}
 
 
-@router.post("/{set_id}/ai-review")
+@router.post("/{set_id}/ai-review", status_code=202)
 def ai_review_case_set(
     set_id: str,
     body: CaseAiReviewIn,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """对已落库的用例集做 AI 评审：覆盖/可执行/重复/分布四维打分 + 问题清单。
-
-    结果写入 ``case_sets.checks``（``kind="ai_review"``，覆盖旧评审、保留自检红字），
-    不改变用例内容与状态；confirmed 用例集是版本快照，仍允许评审（只读）。
-    """
+    """登记 AI 评审。打分和历史写入由 Worker 完成，本请求只做来源与空集校验。"""
     case_set = db.query(CaseSet).filter(CaseSet.id == set_id).first()
     if not case_set:
         raise AppError(ErrorCode.NOT_FOUND, "用例集不存在")
-    items = (
-        db.query(CaseItem)
-        .filter(CaseItem.case_set_id == set_id)
-        .order_by(CaseItem.sort_order)
-        .all()
+    has_items = (
+        db.query(CaseItem.id).filter(CaseItem.case_set_id == set_id).first() is not None
     )
-    if not items:
+    if not has_items:
         raise AppError(ErrorCode.VALIDATION, "用例集为空，没有可评审的内容")
 
     source_text = (body.source_text or "").strip()
@@ -870,63 +802,15 @@ def ai_review_case_set(
             source_text = _read_stored_file_text(db, doc_id, user.id)
         except Exception:  # noqa: BLE001 - 来源不可读时退化为纯用例评审
             logger.warning("AI 评审读取来源文档失败 doc_id=%s", doc_id)
+            source_text = ""
     source_truncated = False
     if source_text.strip():
         source_text, source_truncated = clip_source(source_text)
-    else:
-        source_text = "（未提供需求文档：只评审用例自身的可执行性、重复与策略分布）"
-
-    cases = [
-        {
-            "module": item.module,
-            "name": item.name,
-            "strategy": item.strategy,
-            "steps": item.steps,
-            "expected": item.expected,
-        }
-        for item in items[:MAX_COUNT]
-    ]
-    system, user_prompt = build_review_prompt(source_text, cases)
-    profile = resolve_agent_profile(db)
-    result = call_agent_model(
-        db, system, user_prompt, temperature=0.1,
-        max_tokens=REVIEW_MAX_TOKENS, timeout_s=REVIEW_TIMEOUT_S,
-    )
-    try:
-        review = parse_review(result.text)
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise AppError(ErrorCode.UPSTREAM, "评审输出无法解析，请重试") from exc
-
-    review.update(
-        {
-            "reviewed_at": utcnow().isoformat(),
-            "case_count": len(cases),
-            "source_truncated": source_truncated,
-        }
-    )
-    checks = [
-        check for check in (case_set.checks or [])
-        if not (isinstance(check, dict) and check.get("kind") == "ai_review")
-    ]
-    checks.append({"kind": "ai_review", **review})
-    case_set.checks = checks
-    # N-02：AI 评审改为追加历史；checks 保留最新一份供旧页面兼容。
-    db.add(
-        CaseReviewRun(
-            case_set_id=case_set.id,
-            score=int(review.get("score") or 0),
-            verdict=str(review.get("verdict") or ""),
-            summary=str(review.get("summary") or ""),
-            dimensions=review.get("dimensions") or {},
-            issues=review.get("issues") or [],
-            case_count=len(cases),
-            source_truncated=bool(source_truncated),
-            profile_id=profile.id,
-            created_by=user.id,
-        )
-    )
-    db.commit()
-    return review
+    return _enqueue_case_ai(db, user, "review", {
+        "case_set_id": set_id,
+        "source_text": source_text,
+        "source_truncated": source_truncated,
+    })
 
 
 @router.post("/{set_id}/confirm", response_model=CaseSetOut)
