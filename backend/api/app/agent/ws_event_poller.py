@@ -20,6 +20,9 @@ from ..config import settings
 from ..db import SessionLocal
 from ..errors import ErrorCode
 from ..models import WsEvent
+
+# 单向依赖（poller → ws）：ws 不反向导入本模块，由 main.lifespan 在 ws 就绪后启动，
+# 因此允许模块级导入；如需改动启动顺序，请先确认 ws 已完成模块初始化。
 from ..routers import ws as ws_router
 from ..session_connections import SESSION_CONNECTION_HUB
 

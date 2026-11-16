@@ -17,6 +17,9 @@ logger = logging.getLogger("ai-eval.ws")
 
 async def handle_connection(websocket: Any) -> None:
     """建立短票认证的 WS 会话，并保持 receive 循环不等待模型整轮完成。"""
+    # 延迟导入 ws 路由（**有意为之，勿上移到模块级**）：a) 避免与 routers.ws 形成
+    # 模块级循环依赖；b) 保证既有测试对 ws.<name> 的 monkeypatch 继续生效
+    # （这些符号的归属迁移成本见 tests/test_ws_lazy_imports.py 的说明）。
     from ..routers import ws as ws_router
 
     db = ws_router.SessionLocal()

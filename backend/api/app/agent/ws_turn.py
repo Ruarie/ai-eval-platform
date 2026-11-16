@@ -27,6 +27,9 @@ async def run_turn(
     resume: object | None = None,
     resume_thread_id: str | None = None,
 ) -> None:
+    # 延迟导入 ws 路由（**有意为之，勿上移到模块级**）：a) 避免与 routers.ws 形成
+    # 模块级循环依赖；b) 保证既有测试对 ws.<name> 的 monkeypatch 继续生效
+    # （这些符号的归属迁移成本见 tests/test_ws_lazy_imports.py 的说明）。
     from ..routers import ws as ws_router
 
     """后台执行一轮 LangGraph Agent，并把图输出统一投影为 WS 事件。

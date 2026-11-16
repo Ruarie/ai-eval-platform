@@ -40,6 +40,9 @@ async def translate_event(
     翻译 + 日志告警（图内事件与 ws.py 同版本部署，仅作漂移哨兵）；kind 不在
     注册表（PERSISTENT_KINDS）→ fail-closed：告警并跳过，绝不静默落库广播。
     """
+    # 延迟导入 ws 路由（**有意为之，勿上移到模块级**）：a) 避免与 routers.ws 形成
+    # 模块级循环依赖；b) 保证既有测试对 ws.<name> 的 monkeypatch 继续生效
+    # （这些符号的归属迁移成本见 tests/test_ws_lazy_imports.py 的说明）。
     from ..routers import ws as ws_router
 
     kind = event["kind"]

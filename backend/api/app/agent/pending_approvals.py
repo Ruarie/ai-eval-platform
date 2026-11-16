@@ -79,7 +79,9 @@ async def expire_overdue_approvals_once() -> int:
     与 ack/stop 并发竞争时后到者行锁读空自然跳过，幂等不重复广播。
     返回本轮过期清卡数。
     """
-    # 广播依赖 ws 模块的帧构造与连接态；延迟导入避免循环依赖。
+    # 延迟导入 ws 路由（**有意为之，勿上移到模块级**）：a) 避免与 routers.ws 形成
+    # 模块级循环依赖；b) 保证既有测试对 ws.<name> 的 monkeypatch 继续生效
+    # （这些符号的归属迁移成本见 tests/test_ws_lazy_imports.py 的说明）。
     from ..routers import ws as ws_router
 
     expired: list[tuple[str, str]] = []

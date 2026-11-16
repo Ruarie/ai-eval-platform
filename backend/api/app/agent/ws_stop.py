@@ -27,6 +27,9 @@ async def handle_stop(
     骨架版无人工中断（澄清/危险工具确认），/stop 仅取消活跃图回合；活跃
     回合由后台任务统一发送唯一 ``response.completed``，避免 stop 与任务竞态重复收尾。
     """
+    # 延迟导入 ws 路由（**有意为之，勿上移到模块级**）：a) 避免与 routers.ws 形成
+    # 模块级循环依赖；b) 保证既有测试对 ws.<name> 的 monkeypatch 继续生效
+    # （这些符号的归属迁移成本见 tests/test_ws_lazy_imports.py 的说明）。
     from ..routers import ws as ws_router
 
     with ws_router._TURN_LOCK:

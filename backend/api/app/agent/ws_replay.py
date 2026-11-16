@@ -28,7 +28,9 @@ async def replay_events(
     last_event_id: int,
 ) -> None:
     """按 last_event_id 补发持久化事件，并先推进游标避免 Worker 旧事件重发。"""
-    # 延迟导入：帧构造与发送节流都在 ws 模块，避免模块级循环依赖。
+    # 延迟导入 ws 路由（**有意为之，勿上移到模块级**）：a) 避免与 routers.ws 形成
+    # 模块级循环依赖；b) 保证既有测试对 ws.<name> 的 monkeypatch 继续生效
+    # （这些符号的归属迁移成本见 tests/test_ws_lazy_imports.py 的说明）。
     from ..routers import ws as ws_router
 
     # 即使没有待补发事件，也必须承接客户端游标；否则转发会从 0 重扫。
