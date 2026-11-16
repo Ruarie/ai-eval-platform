@@ -92,6 +92,20 @@ def test_row_in_accepts_extension_keys():
     assert row.c is None
 
 
+def test_row_in_write_contract_uses_short_names_only():
+    """行写入契约是 q/r/c；传 question/reference 会落 extras 而不是正文。
+
+    读接口返回 question/reference（见 _row_to_item），写入却只认短名 —— 这是
+    历史契约的不对称点。前端 toApiRow 同时发两套字段所以没问题，但脚本或第三方
+    只传长名会“保存成功但正文为空”（实测复现过一次）。此用例固定该行为，
+    避免有人误以为长名可用于写入。
+    """
+    row = DatasetRowIn(row_no=1, question="问", reference="答")
+    assert row.q is None and row.r is None
+    assert (row.model_extra or {}).get("question") == "问"
+    assert (row.model_extra or {}).get("reference") == "答"
+
+
 def test_rows_payload_rejects_duplicate_and_missing_row_no():
     with pytest.raises(ValidationError):
         RowsPayload(rows=[{"row_no": 1}, {"row_no": 1, "q": "x"}])
