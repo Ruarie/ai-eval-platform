@@ -436,7 +436,7 @@ class WsV2Connection:
                 return
             cursor = after_cursor
             replay = True
-            # 空闲退避：没有新事实时逐次拉长间隔（上限 10×），有事实立即回到基频。
+            # 空闲退避：没有新事实时逐次拉长间隔（100ms → 3s，30×），有事实立即回到基频。
             # 每连接固定 100ms 轮询在几十条并发会话下就是几百 QPS 的无谓读。
             interval = self.poll_interval
             while True:
@@ -490,7 +490,7 @@ class WsV2Connection:
                 interval = (
                     self.poll_interval
                     if activity
-                    else min(self.poll_interval * 10, interval * 1.5)
+                    else min(self.poll_interval * 30, interval * 1.5)
                 )
                 await asyncio.sleep(interval)
         except asyncio.CancelledError:
