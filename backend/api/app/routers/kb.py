@@ -631,10 +631,16 @@ def get_kb_graph(
 
     图谱是引擎独有的产物，引擎不可用时返回 UPSTREAM 而不是空图：空图会被
     用户理解成「库里没有实体」，属于误导。外部 Chat 库没有本地图谱，直接拒绝。
+
+    例外：平台侧确认该库**一条文档都没有**时，空图是事实而非误导，直接返回空图。
+    否则新建的空库会因为引擎侧无命名空间而报「图谱读取失败」，把空库误报成故障。
     """
     kb = _get_kb_or_404(db, kb_id)
     if kb.kind != "lightrag":
         raise AppError(ErrorCode.VALIDATION, "外部 Chat 知识库不提供知识图谱")
+    has_document = db.query(KbDocument.id).filter(KbDocument.kb_id == kb.id).first() is not None
+    if not has_document:
+        return KbGraphOut(kb_id=kb.id, nodes=[], edges=[], truncated=False, engine="lightrag")
     data = fetch_graph(kb_id, limit)
     if data is None:
         raise AppError(ErrorCode.UPSTREAM, "LightRAG 图谱读取失败，请稍后重试")

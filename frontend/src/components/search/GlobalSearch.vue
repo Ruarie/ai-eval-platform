@@ -243,13 +243,20 @@ function go(url: string): void {
   router.push(url)
 }
 
-/** 全局快捷键：Ctrl/Cmd+K 打开；只在未处于输入态时拦截，避免影响表单输入。 */
+/** 全局快捷键：Ctrl/Cmd+K 打开；面板打开时 Esc 在任何焦点位置都能关闭。 */
 function handleGlobalKeydown(event: KeyboardEvent): void {
   const isSearchShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k'
-  if (!isSearchShortcut) return
-  event.preventDefault()
-  if (visible.value) close()
-  else open()
+  if (isSearchShortcut) {
+    event.preventDefault()
+    if (visible.value) close()
+    else open()
+    return
+  }
+  // 焦点可能在分组标题或结果项上，此时输入框的 @keydown 收不到事件。
+  if (visible.value && event.key === 'Escape') {
+    event.preventDefault()
+    close()
+  }
 }
 
 onMounted(() => window.addEventListener('keydown', handleGlobalKeydown))

@@ -276,20 +276,31 @@
             </div>
 
             <div class="quick-create-strip">
-              <button class="btn btn-sm" :disabled="!currentWorkspace || currentWorkspace.deleted" @click="quickCreateCode">
+              <button
+                class="btn btn-sm"
+                :disabled="!currentWorkspace || currentWorkspace.deleted"
+                :title="!currentWorkspace ? '请先新建或选择工作区' : currentWorkspace.deleted ? '工作区已注销，无法新建文件' : '新建 Python 脚本'"
+                @click="quickCreateCode"
+              >
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="12" y1="5" x2="12" y2="19" />
                   <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
                 <span>新建 Python 脚本</span>
               </button>
-              <button class="btn btn-sm" :disabled="!currentWorkspace || currentWorkspace.deleted" @click="quickCreateMarkdown">
+              <button
+                class="btn btn-sm"
+                :disabled="!currentWorkspace || currentWorkspace.deleted"
+                :title="!currentWorkspace ? '请先新建或选择工作区' : currentWorkspace.deleted ? '工作区已注销，无法新建文件' : '新建 Markdown 报告'"
+                @click="quickCreateMarkdown"
+              >
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="12" y1="5" x2="12" y2="19" />
                   <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
                 <span>新建 Markdown 报告</span>
               </button>
+              <span v-if="!currentWorkspace" class="quick-create-hint">先新建工作区后即可创建文件</span>
             </div>
           </div>
         </div>
@@ -668,6 +679,7 @@
             v-model="renameWsValue"
             class="input modal-input"
             autofocus
+            @focus="selectAllText"
             @keyup.enter="submitRenameWorkspace"
           />
         </div>
@@ -692,6 +704,7 @@
             class="input modal-input"
             :placeholder="createItemType === 'file' ? 'main.py / README.md' : 'assets / docs'"
             autofocus
+            @focus="selectAllText"
             @keyup.enter="submitCreateItem"
           />
         </div>
@@ -714,6 +727,7 @@
             v-model="renamePathValue"
             class="input modal-input"
             autofocus
+            @focus="selectAllText"
             @keyup.enter="submitRenamePath"
           />
         </div>
@@ -1302,6 +1316,37 @@ function handleGlobalKeydown(e: KeyboardEvent): void {
   }
 }
 
+/** 聚焦即全选：预填名（如 report.md）时直接键入是替换而不是拼接。 */
+function selectAllText(e: FocusEvent): void {
+  const el = e.target as HTMLInputElement | null
+  el?.select()
+}
+
+/**
+ * 当前打开的自研弹窗关闭函数（后开的优先）。
+ * 自研 modal-backdrop 不走 Naive UI，需要显式支持 Esc 关闭。
+ */
+const openModalCloser = computed<(() => void) | null>(() => {
+  if (showExecModal.value) return closeExecModal
+  if (showBrowseModal.value) return () => { showBrowseModal.value = false }
+  if (showSshPwdModal.value) return () => { showSshPwdModal.value = false }
+  if (showRenamePathModal.value) return () => { showRenamePathModal.value = false }
+  if (showCreateItemModal.value) return () => { showCreateItemModal.value = false }
+  if (showRenameWsModal.value) return () => { showRenameWsModal.value = false }
+  if (showCreateWsModal.value) return () => { showCreateWsModal.value = false }
+  return null
+})
+
+/** Esc 关闭当前弹窗：与平台其它弹窗保持一致的退出方式。 */
+function handleModalEscape(e: KeyboardEvent): void {
+  if (e.key !== 'Escape') return
+  const closer = openModalCloser.value
+  if (!closer) return
+  e.preventDefault()
+  e.stopPropagation()
+  closer()
+}
+
 // 文件上传
 function triggerUpload(): void {
   if (fileUploadInputRef.value) {
@@ -1616,10 +1661,13 @@ async function refreshAll(): Promise<void> {
 
 onMounted(() => {
   void loadWorkspaces()
+  // 捕获阶段监听，避免弹窗内输入框先消费 Esc。
+  window.addEventListener('keydown', handleModalEscape, true)
 })
 
 onBeforeUnmount(() => {
   ++treeRequestId
+  window.removeEventListener('keydown', handleModalEscape, true)
   closeActiveFile(true)
 })
 </script>
@@ -2200,6 +2248,12 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 12px;
   margin-top: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.quick-create-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 
 /* 激活文件视图 */

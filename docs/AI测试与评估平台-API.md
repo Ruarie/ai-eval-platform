@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.63 |
-| 本轮审查日期 | 2026-11-16（任务列表/详情新增可选 `creator_name`（创建者账号名），`creator_id` 仅用于权限比对；其余保持 V2.62 契约） |
+| 文档版本 | V2.64 |
+| 本轮审查日期 | 2026-11-17（`GET /api/kb/{id}/graph` 空库短路：库内 0 篇文档时直接返回空图 200，不再触达引擎；字段与错误码不变） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.68（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -18,6 +18,8 @@
 | 本轮修订 | 2026-09-26：V2.28 个人长期记忆的主动保存、查看、更正、撤回与私有主会话召回；复用既有 PostgreSQL 记忆表，暂不接向量或自动抽取。 |
 | 最近修订 | 2026-09-03：V1.67 混合引擎执行落地（H2 Workflow DAG / H3 Agent TAOR）：恢复持久事件 `tool_call` / `tool_result`（payload 见 §4.3，ToolCard 只渲染脱敏摘要，观察全文不进任何事件）；`response.completed` 的 `engine` 从「分流结论」升级为「真实执行引擎」——`workflow`（H2，W0–W7 硬编码 DAG）与 `agent`（H3，plan→discover→orchestrator⇄tools 单图内 TAOR）均已真实执行，`agent_id` 审计随 Worker 目录（§3.6.3）供归属核验；`thought` / `tool_progress` / `tool_output_delta` / `confirm` / `clarify` 仍不产生。历史 `ws_events` 中的旧工具事件仍不重放。 |2026-09-03：V1.66 混合引擎 H1 Router 审计契约：`response.completed` payload 新增可选 `engine` / `router_confidence` / `router_reason`（仅 `hybrid_engine_enabled=true` 时出现，旧客户端忽略未知字段即可）；新增 `GET /api/agents` Worker 只读目录（§3.6.3）。本版不新增 WS 事件名、不恢复 `thought` / `tool_*`；`workflow` / `agent` 引擎在 H1 阶段降级按 `chat` 执行，`engine` 如实记录分流结论并经 `router_reason` 标注降级。2026-09-02：V1.65 工具契约加固（T1–T3）：JSON Schema 子集新增 `minItems`/`maxItems` 并为 8 处数组参数补上限；`output_schema` 从装饰字段升级为强制契约（注册期拒绝未声明，运行期按声明比对展示投影）；`platform.tasks` 三工具补全 `output_schema`；移除 `/api/mcp/tools/{name}/code` 端点与 `code_snippet` 字段。2026-08-28：V1.53 `web_fetch` 直抓路径接入 trafilatura 正文提取：可读性算法识别文章主体，保留标题层级/链接/图片/表格，未安装或提取失败降级回内置 `_TextExtractor`；提取真实产出 Markdown 时才声明 `format=markdown`（§4.3.1）。V1.52 优化 `web_fetch` 长文完整性与卡片预览：模型正文预算 8,000→60,000 字符，卡片预览与 `read` 同源对齐 `TOOL_PREVIEW_MAX_CHARS` 并随 `web.preview_limit_chars` 下发，直接抓取字节窗口 256KB→1MB（§4.3.1）。2026-08-27：V1.51 新增持久事件 `session_title`（§4.3）与会话标题 AI 生成契约（§4.3.2）：默认标题会话首条消息后由 Agent 协议档弱结构化生成标题并落库广播，修复标题不持久化问题。V1.50 统一 Agent 文本附件 staging 与 `read` 的 20MB 边界；`read` 模型窗口为 2,000 行 / 600,000 字符。V1.49 协议档新增 `max_output_tokens`（256–131072，默认 8192），创建/更新/列表/详情均支持；Agent 模型调用从协议档读取输出上限，长文档总结/导出类任务可调大避免回答被截断。2026-08-26：V1.48 同轮多调用默认串行，灰度开启后仅 `read`/`web_search`/`web_fetch` 可并行，回填按原始 `call_id`。V1.47 新增 `GET /api/agent/metrics`，不含正文/参数，不新增 WS 事件。V1.46 明确 native 一次 ToolCall 结束当前上游响应，结果回填后再请求，不新增事件名。V1.45 思考链只下发可展示摘要，隐藏 CoT（`Here's a thinking process` / `Analyze User Input`）由服务端替换，不原样推给前端。V1.44 ToolCall 在执行前持久化，新增瞬态 `tool_progress` / `tool_output_delta`，并冻结原生工具的输出 Schema、权限边界和失败恢复字段。V1.43 思考增量允许合并下发；有思考链时 `think_final` 在 `response.completed` 之前。V1.42 Direct `/help`、未知斜杠与图内防御提示在业务事件后必须再发 `response.completed`（成功 `stop`，校验/防御 `error`），结束整轮生成态。V1.41 确认卡预填与 `confirm_ack` 入队前丢掉已删除的协议档/数据集/知识库 ID，避免 Worker 再报「协议档不存在或已删除」。V1.40 `/cancel` 与 `/stress` 按 §4.4 解禁（仍走 `user_message`）：`/cancel` 取消本会话非终态任务，`/stress` 发出质量任务确认卡且 `with_stress=true`，禁止 `kind=stress`。V1.39 原生工具卡片收起态副标题统一为 `ToolCall`，不在卡片摘要区回显文件路径、命令或写入内容；详细参数仍在展开区展示。V1.38 明确原生基础 ToolCall 卡片使用英文工具名，展开区统一显示 `ToolCall` 与 `输出`，文件、命令和代码/文档结果使用行号展示；MCP/平台短工具仍按下方中文名映射。2026-08-24：V1.24 修复 Agent 附件上下文链路：服务端校验文件归属并在模型窗口解析文本、PDF、DOCX、XLSX，图片按三协议图文内容块发送；历史消息附件补齐安全元数据，前端可在刷新后继续预览。同步调整输入框内附件按钮与用户消息附件位序。V1.23 扩展 Agent 附件契约，支持图片、Word 文档与多附件拖拽上传；保留 `POST /api/files` 后再以既有 `file_id` 引用的消息链路，补充图片缩略图、PDF/文本预览与 Office 文件打开/下载说明。V1.22 修复 V1.21 遗留：§4.4 标题「仅此三条」改「仅此四条」、§9 禁止清单「第四种」改「第五种」并补四类上行事件枚举、§4.3 `tool_result.source` 语义对齐 M7 `Observation.source`（溯源标识字符串，非 short\|long 枚举）、§4.3 共享流规则补 clarify/plan/confirm 持久化广播说明、§4.4 clarify 多副本限制注明、§9 Ask/Plan 补注非 Harness plan 事件；V1.20 及更早版本沿用历史修订记录。 |
 | 适用范围 | V1.0：浏览器 `web/` ↔ `api`；全域 REST + WS 接口规范 |
+
+> V2.64（2026-11-17）：`GET /api/kb/{id}/graph` 增加**空库短路**（§3.9）。库内 0 篇文档时直接返回 `200` + 空 `nodes` / `edges`，不调用 LightRAG；库内有文档但引擎不可用时仍为 `UPSTREAM`(502)。字段、`limit` 与错误码均不变，仅避免把「还没上传文档」误报成引擎故障。
 
 > V2.62（2026-11-16）：`POST /api/case-sets/ai-generate`、`/ai-compare`、`/{id}/ai-review` 改为 `202`，响应 `{job_id, status:"queued"}`。结果用 `GET /api/case-sets/ai-jobs/{job_id}` 取回：`succeeded` 时 `result` 为原先的同步响应体，`failed` 时带 `error.code/message`。Worker 领取执行，候选仍不落库；评审仍写入 `checks` 与 `case_review_runs`。`POST /api/workspaces/{id}/exec/{approval_id}/confirm` 改为 `202 {status:"running", timeout_s}`，执行在请求线程之外；`GET /api/workspaces/{id}/exec/{approval_id}` 取回 `exit_code/stdout/stderr` 或 `failed`。审批单在配置了 Redis 时跨副本共享，否则仍是进程内存。`ssh_host` 白名单口径与 V2.48 一致：留空不限制主机，非空才收紧。远程文件路径上的符号链接直接 `VALIDATION`。
 
@@ -1468,7 +1470,8 @@ JSON body 必须传读取时的整数 `expected_revision`，可附 `reason`。�
 - **只读**：不提供实体/关系的编辑、合并、删除接口；
 - `truncated=true` 表示节点数量超过 `limit`，前端须显式提示已截断；
 - `nodes` / `edges` 为空数组表示该库尚未抽出实体（未索引完成或文档过短），**不得**用示例数据填充；
-- `kind=external_chat` 的知识库返回 `VALIDATION`(400)；引擎不可用或读取失败返回 `UPSTREAM`(502)。
+- **空库短路（V2.64）**：平台侧确认该库一篇文档都没有时直接返回 `200` + 空 `nodes` / `edges`，不调用引擎；引擎侧此时通常还没有该库的命名空间，若照常读取会把「还没上传文档」误报成 `UPSTREAM`(502)；
+- `kind=external_chat` 的知识库返回 `VALIDATION`(400)；库内有文档但引擎不可用或读取失败返回 `UPSTREAM`(502)。
 
 #### `POST /api/kb/{id}/gold-qa/ai-generate`
 
