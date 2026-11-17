@@ -276,11 +276,19 @@
 
           <div class="grow"></div>
 
-          <!-- 键盘流提示 (可悬停查看) -->
-          <div class="keyboard-flow-hint" title="支持键盘方向键与快捷键无障碍操作">
+          <!-- 键盘流提示 (可悬停查看)：仅在草稿可编辑态展示 -->
+          <div v-if="canEditCases" class="keyboard-flow-hint" title="支持键盘方向键与快捷键无障碍操作">
             <span class="kbd-hint"><kbd>↑↓←→</kbd> 移动</span>
             <span class="kbd-hint"><kbd>Enter</kbd> 编辑</span>
             <span class="kbd-hint"><kbd>Space</kbd> 勾选</span>
+          </div>
+          <!-- 已入库用例集为只读：给出明确说明，避免用户反复点击无响应的单元格 -->
+          <div v-else class="readonly-hint" title="已确认入库的用例集为只读；如需修改请重新生成或导入草稿">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="11" width="18" height="11" rx="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            已入库只读
           </div>
         </div>
 
@@ -507,23 +515,21 @@
                   </div>
                 </td>
               </tr>
-
-              <!-- 空列表提示 -->
-              <tr v-if="!displayedCases.length">
-                <td :colspan="12 + customCols.length" class="empty-cell">
-                  <div class="empty-message">
-                    <template v-if="gridSearch.trim() || filterStrategy">
-                      <p style="margin-bottom: 8px;">未找到符合条件的测试用例（当前检索：{{ gridSearch.trim() ? `「${gridSearch.trim()}」` : '' }}{{ filterStrategy ? ` [${filterStrategy}策略]` : '' }}）。</p>
-                      <button class="btn btn-secondary btn-sm" @click="clearAllFilters">
-                        清空搜索与筛选条件
-                      </button>
-                    </template>
-                    <span v-else>当前用例集暂无用例，点击上方「新增用例」或「PRD 推导向导」开始录入。</span>
-                  </div>
-                </td>
-              </tr>
             </tbody>
           </table>
+
+          <!-- 空列表提示：表格横向可滚动，空态放在表格外，避免被 1700px 表格宽度裁切 -->
+          <div v-if="!displayedCases.length" class="cases-empty">
+            <div class="empty-message">
+              <template v-if="gridSearch.trim() || filterStrategy">
+                <p style="margin-bottom: 8px;">未找到符合条件的测试用例（当前检索：{{ gridSearch.trim() ? `「${gridSearch.trim()}」` : '' }}{{ filterStrategy ? ` [${filterStrategy}策略]` : '' }}）。</p>
+                <button class="btn btn-secondary btn-sm" @click="clearAllFilters">
+                  清空搜索与筛选条件
+                </button>
+              </template>
+              <span v-else>当前用例集暂无用例，点击上方「新增用例」或「PRD 推导向导」开始录入。</span>
+            </div>
+          </div>
         </div>
 
         <!-- 4. 底部固定分页工具栏 (Table Pagination Bar) -->
@@ -1186,6 +1192,8 @@ function isCellCursor(c: ExtendedTestCase, field: string): boolean {
 }
 
 function setCellCursor(c: ExtendedTestCase, field: string) {
+  // 已入库用例集为只读：不再点亮单元格光标，避免暗示「可以编辑」。
+  if (!canEditCases.value) return
   const idx = getDisplayedIndex(c)
   focusedCell.value = { rowIdx: idx, field }
 }
@@ -1212,6 +1220,9 @@ function onWorkbenchKeydown(e: KeyboardEvent) {
     input?.select()
     return
   }
+
+  // 只读（已入库）用例集不参与网格键盘流，保留 ⌘F 搜索能力。
+  if (!canEditCases.value) return
 
   if (!focusedCell.value) {
     if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key) && displayedCases.value.length) {

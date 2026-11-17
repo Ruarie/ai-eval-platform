@@ -280,22 +280,36 @@
   align-items: center;
   width: 100%;
   gap: 12px;
+  /* 工具项多时整行折行，避免 flex 把标题列压到几十像素宽后逐字换行。 */
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 
 .toolbar-title-group {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* 标题列不参与收缩：宁可让右侧操作组折到下一行，也不把标题挤成竖排。 */
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 .title-row {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
+  min-width: 0;
 }
 .main-dataset-title {
   font-size: 16.5px;
   font-weight: 600;
   color: var(--text-primary);
+  /* 超长用例集名以省略号收尾，不换行、不参与压缩。 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .status-badge {
   font-size: 11.5px;
@@ -321,10 +335,15 @@
   color: var(--text-tertiary);
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
 }
 .breadcrumb-row .cur {
   color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 极速表内筛选框 */
@@ -333,6 +352,9 @@
   display: flex;
   align-items: center;
   margin-left: 8px;
+  /* 搜索框可收缩但不独占整行，折行时随标题留在首行。 */
+  flex: 0 1 200px;
+  min-width: 150px;
 }
 .table-search-icon {
   position: absolute;
@@ -370,11 +392,18 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  /* 折行时右对齐，且自身可折行：按钮宁可换行也不溢出到视口之外。 */
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 6px;
 }
 .action-btn-group {
   display: flex;
   align-items: center;
   gap: 5px;
+  flex-wrap: wrap;
+  row-gap: 5px;
 }
 
 /* 按钮通用 */
@@ -486,12 +515,18 @@
   align-items: center;
   gap: 12px;
   font-size: 12.5px;
+  /* 筛选胶囊与右侧快捷键提示可分两行，不再互相挤压。 */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 .strip-left {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  row-gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .strip-label {
   color: var(--text-tertiary);
@@ -520,6 +555,7 @@
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.12s ease;
+  white-space: nowrap;
 }
 .strategy-pill:hover {
   border-color: var(--accent-ai);
@@ -546,10 +582,12 @@
 .status-indicator-warning {
   color: var(--accent-warning);
   font-weight: 500;
+  white-space: nowrap;
 }
 .status-indicator-success {
   color: var(--accent-success);
   font-weight: 500;
+  white-space: nowrap;
 }
 
 /* 候选阶段提示：截断、裁剪与自检红字 */
@@ -617,6 +655,16 @@
   gap: 8px;
   font-size: 11.5px;
   color: var(--text-tertiary);
+  /* 提示整体不收缩、不换行，避免被挤成「移 / 动」两行单字；折行时仍靠右。 */
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  margin-left: auto;
+}
+.kbd-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }
 .kbd-hint kbd {
   font-family: var(--font-mono);
@@ -626,6 +674,22 @@
   background: var(--bg-main);
   color: var(--text-secondary);
   border: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+/* 只读提示：已入库用例集不可编辑时的替代说明 */
+.readonly-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 3px 8px;
 }
 
 /* ─── 表格与固定列 ─── */
@@ -889,6 +953,14 @@
 }
 .empty-message {
   font-size: 14px;
+}
+/* 用例表空态：脱离 1700px 宽表格，按容器宽度居中，横向滚动不会把它切掉 */
+.cases-empty {
+  display: grid;
+  place-items: center;
+  padding: 56px 20px;
+  color: var(--text-tertiary);
+  text-align: center;
 }
 
 /* ─── 空态 ─── */

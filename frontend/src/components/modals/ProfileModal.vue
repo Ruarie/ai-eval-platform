@@ -210,7 +210,7 @@ import { findPresetVendor, getVendorProtocolPreset, PROFILE_VENDORS } from '../.
 import { getModelLogoKey } from '../../utils/providerLogo'
 import ProviderLogo from '../ProviderLogo.vue'
 
-import { ref, computed, watch } from 'vue'
+import { onBeforeUnmount, ref, computed, watch } from 'vue'
 import {
   useMessage,
   NRadioGroup,
@@ -270,6 +270,27 @@ const reasoningTemplates = ref<ReasoningTemplate[]>([])
 const loadingTemplates = ref(false)
 
 const isEdit = computed(() => !!props.profile?.id)
+
+/**
+ * Esc 关闭协议档弹窗。
+ * n-modal 关闭了 trap-focus/auto-focus，焦点通常不在弹窗内，Naive UI 的默认
+ * Esc 监听收不到事件；这里补一个文档级监听，保证和平台其它弹窗行为一致。
+ */
+function handleEsc(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || saving.value) return
+  event.preventDefault()
+  emit('update:show', false)
+}
+
+watch(
+  () => props.show,
+  (visible) => {
+    if (visible) document.addEventListener('keydown', handleEsc, true)
+    else document.removeEventListener('keydown', handleEsc, true)
+  },
+)
+
+onBeforeUnmount(() => document.removeEventListener('keydown', handleEsc, true))
 
 const form = ref<{
   name: string
