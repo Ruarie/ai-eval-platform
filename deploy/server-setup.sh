@@ -91,6 +91,9 @@ if [ ! -f "$APP_DIR/.env" ]; then
     POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 20)
     # LightRAG 适配服务的内部口令：业务接口在口令为空时拒绝，生产必须是随机值。
     LIGHTRAG_API_KEY=$(openssl rand -hex 16)
+    # API ↔ Runner 共用的内部令牌：Runner 所有可执行端点都要求它，
+    # 留空即 fail-closed（bash 沙箱不可用），首次部署必须生成随机值。
+    RUNNER_INTERNAL_TOKEN=$(openssl rand -hex 24)
     KEY_ENCRYPTION_KEY=""
     if command -v python3 >/dev/null 2>&1; then
         KEY_ENCRYPTION_KEY=$(python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
@@ -103,6 +106,8 @@ SECRET_KEY=$SECRET_KEY
 BOOTSTRAP_ADMIN_USERNAME=admin
 BOOTSTRAP_ADMIN_PASSWORD=admin123
 KEY_ENCRYPTION_KEY=$KEY_ENCRYPTION_KEY
+# Runner 内部令牌：缺失时 bash 沙箱端点一律 503（fail-closed）。
+RUNNER_INTERNAL_TOKEN=$RUNNER_INTERNAL_TOKEN
 ACCESS_TOKEN_EXPIRE_MINUTES=720
 WS_TICKET_EXPIRE_MINUTES=5
 WEB_PORT=80
@@ -130,6 +135,19 @@ else
         chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR/.env"
         chmod 600 "$APP_DIR/.env"
         echo "已为存量 .env 补写 LIGHTRAG_API_KEY（重新 up -d 后生效）"
+    fi
+    # 存量部署补齐 Runner 内部令牌：缺失时 api 执行 bash 会被 runner 503 拒绝。
+    if ! grep -q '^RUNNER_INTERNAL_TOKEN=.\+' "$APP_DIR/.env"; then
+        RUNNER_INTERNAL_TOKEN=$(openssl rand -hex 24)
+        if grep -q '^RUNNER_INTERNAL_TOKEN=' "$APP_DIR/.env"; then
+            sed -i "s|^RUNNER_INTERNAL_TOKEN=.*|RUNNER_INTERNAL_TOKEN=$RUNNER_INTERNAL_TOKEN|" "$APP_DIR/.env"
+        else
+            printf '\n# API ↔ Runner 内部令牌（升级补写）\nRUNNER_INTERNAL_TOKEN=%s\n' \
+                "$RUNNER_INTERNAL_TOKEN" >> "$APP_DIR/.env"
+        fi
+        chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR/.env"
+        chmod 600 "$APP_DIR/.env"
+        echo "已为存量 .env 补写 RUNNER_INTERNAL_TOKEN（重新 up -d 后生效）"
     fi
 fi
 

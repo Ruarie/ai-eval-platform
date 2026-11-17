@@ -28,6 +28,7 @@ class ErrorCode(StrEnum):
     TIMEOUT = "TIMEOUT"
     INTERNAL = "INTERNAL"
     DENIED = "DENIED"  # F5/G6：bash 只读档拒写（升档审批触发源，§6.4）
+    RATE_LIMITED = "RATE_LIMITED"  # 登录失败次数超限（账号 + IP 维度滑动窗口）
 
 
 # code -> 默认 HTTP 状态码（API V1.0 §1.3）
@@ -43,6 +44,7 @@ _CODE_STATUS: dict[ErrorCode, int] = {
     ErrorCode.TIMEOUT: 504,
     ErrorCode.INTERNAL: 500,
     ErrorCode.DENIED: 403,  # F5/G6：只读拒写（HTTP 403 授权语义）
+    ErrorCode.RATE_LIMITED: 429,  # 登录失败限流（429 + 重试提示）
 }
 
 

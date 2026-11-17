@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from .config import settings
 from .db import SessionLocal
@@ -284,3 +286,34 @@ def health():
         "build_time": BUILD_TIME,
         "instance_id": _resolve_instance_id(),
     }
+
+
+@app.get("/api/ready")
+def ready() -> JSONResponse:
+    """就绪探针：数据库不可用时返回 503，供编排层决定是否承接流量。
+
+    与 ``/api/health``（存活探针，永不做 IO）分工不同：本端点每次真实执行
+    ``SELECT 1``。Redis 属可降级依赖（短票与审批单有内存回退），只作为
+    附加字段报告，不参与就绪判定，避免缓存抖动导致容器被反复重启。
+    """
+    database_ok = True
+    try:
+        with SessionLocal() as session:
+            session.execute(text("SELECT 1"))
+    except Exception:
+        # 不输出异常详情：连接串可能携带口令
+        database_ok = False
+        logger.warning("就绪探针：数据库不可用")
+    try:
+        from .workspace_exec_approval import redis_ready
+
+        redis_state = redis_ready()
+    except Exception:
+        redis_state = None
+    payload = {
+        "status": "ok" if database_ok else "unavailable",
+        "database": "ok" if database_ok else "unavailable",
+        "redis": "ok" if redis_state else ("unavailable" if redis_state is False else "disabled"),
+        "version": app.version,
+    }
+    return JSONResponse(payload, status_code=200 if database_ok else 503)

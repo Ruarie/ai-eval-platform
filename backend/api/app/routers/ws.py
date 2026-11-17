@@ -1534,7 +1534,6 @@ async def _handle_user_message(
 
 
 @router.websocket("/ws/agent")
-@router.websocket("/ws/agent")
 async def agent_websocket(websocket: WebSocket) -> None:
     """旧版（legacy）会话的 WS 入口：实现见 agent/ws_connection。"""
     await handle_connection(websocket)

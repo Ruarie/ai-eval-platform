@@ -196,7 +196,7 @@
 - WS：先 `POST /api/auth/ws-ticket` 得 5 分钟短票，再升级。  
 - 除注明外，REST 均需已登录 Cookie。  
 - 分享报告：`GET /api/reports/{id}?share={token}` **免登录**，只读。  
-- `GET /api/health` 免登录。  
+- `GET /api/health`、`GET /api/ready` 免登录（前者存活探针、后者就绪探针）。  
 - 角色：单一角色 `member`（全员同权）。未登录 401，body `code=UNAUTHORIZED`。敏感操作（如停用账号、删除基线）记录审计日志。
 
 刷新页面后前端必须能恢复身份 → `GET /api/auth/me`（PRD 2.1 / F-CM-03 补全，5.9 未列）。
@@ -228,6 +228,7 @@
 | 504 | `TIMEOUT` | 超时 |
 | 500 | `INTERNAL` | 内部错误，请重试或联系平台维护者 |
 | 403 | `DENIED` | bash 只读档拒写（V1.77/F5，V1.78 口径收敛；升档审批触发源，一般不直达 REST） |
+| 429 | `RATE_LIMITED` | 登录失败次数过多，请 5 分钟后再试（账号 + 来源 IP 维度；成功登录后计数清零） |
 
 确认卡 / 表单校验失败：`VALIDATION`，`fields` 给前端卡内红字，**不要**只靠 Toast。  
 错误 body **不得** 含 Key、Cookie、stack。  
@@ -278,11 +279,20 @@ WS `error` 事件 payload 与上表同一套 `code` + `message`（可带 `fields
 ### 3.1 健康检查
 
 `GET /api/health`  
-免登录。
+免登录。存活探针：只返回进程身份，**不做任何 IO**，供编排层判断容器是否需要重启。
 
 ```json
 { "status": "ok", "version": "0.0.0" }
 ```
+
+`GET /api/ready`  
+免登录。就绪探针：每次真实执行 `SELECT 1`，数据库不可用时返回 **503**，供编排层决定是否承接流量（`docker-compose` 的 api healthcheck 使用本端点）。
+
+```json
+{ "status": "ok", "database": "ok", "redis": "ok", "version": "0.0.0" }
+```
+
+`redis` 取值 `ok` / `unavailable` / `disabled`：Redis 属可降级依赖（WS 短票与审批单有进程内回退），**不参与**就绪判定，仅作运维观察。
 
 ---
 
@@ -297,6 +307,7 @@ WS `error` 事件 payload 与上表同一套 `code` + `message`（可带 `fields
 成功 200，Set-Cookie `aieval_session`，body 与 `GET /api/auth/me` 相同。  
 失败 401，**不**区分用户不存在 / 密码错误；写 `audit_logs`。  
 V1.84 起不再强制首次改密：登录成功直接进入系统，改密走右上角「修改密码」。
+失败限流：同账号 + 同来源 IP 在 5 分钟内累计 5 次失败后，锁定期内的登录请求一律返回 **429 `RATE_LIMITED`**（即使密码正确）；成功登录清零计数。内存实现只约束单副本，多副本需换 Redis 计数器。
 
 #### `POST /api/auth/logout`
 

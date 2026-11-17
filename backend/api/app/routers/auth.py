@@ -1,6 +1,8 @@
 """Cookie 鉴权、改密和 WebSocket 短票接口。"""
 
 import re
+import threading
+import time
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -24,6 +26,58 @@ from ._common import client_ip
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 COOKIE_NAME = "aieval_session"
+
+# 登录失败限流：账号 + 来源 IP 维度滑动窗口。内存实现只能约束单副本，
+# 多副本部署需换成 Redis 计数器（键结构保持不变即可平滑迁移）。
+LOGIN_FAILURE_WINDOW_S = 300
+LOGIN_MAX_FAILURES = 5
+_MAX_TRACKED_IDENTITIES = 1000
+_login_failures: dict[str, list[float]] = {}
+_login_failures_lock = threading.Lock()
+
+
+def _login_identity(username: str, ip: str) -> str:
+    """限流键：账号 + 来源 IP，避免单账号被多 IP 撞库或单 IP 遍历账号。"""
+    return f"{(username or '').strip().lower()}|{ip}"
+
+
+def _prune_login_failures(now: float) -> None:
+    """窗口外记录在读取时清理，避免长期运行累积内存。"""
+    expired = [key for key, stamps in _login_failures.items() if not stamps or now - stamps[-1] > LOGIN_FAILURE_WINDOW_S]
+    for key in expired:
+        _login_failures.pop(key, None)
+
+
+def _recent_login_failures(key: str) -> list[float]:
+    now = time.monotonic()
+    with _login_failures_lock:
+        if len(_login_failures) > _MAX_TRACKED_IDENTITIES:
+            _prune_login_failures(now)
+        stamps = [stamp for stamp in _login_failures.get(key, []) if now - stamp < LOGIN_FAILURE_WINDOW_S]
+        if stamps:
+            _login_failures[key] = stamps
+        else:
+            _login_failures.pop(key, None)
+        return stamps
+
+
+def _record_login_failure(key: str) -> None:
+    now = time.monotonic()
+    with _login_failures_lock:
+        stamps = [stamp for stamp in _login_failures.get(key, []) if now - stamp < LOGIN_FAILURE_WINDOW_S]
+        stamps.append(now)
+        _login_failures[key] = stamps
+
+
+def _clear_login_failures(key: str) -> None:
+    with _login_failures_lock:
+        _login_failures.pop(key, None)
+
+
+def _reset_login_rate_limits() -> None:
+    """清空限流状态（单测隔离用，不对外暴露）。"""
+    with _login_failures_lock:
+        _login_failures.clear()
 
 
 def _validate_password(password: str) -> None:
@@ -59,20 +113,27 @@ def login(
     db: Session = Depends(get_db),
 ):
     """验证账号后写入登录审计，并返回受 Cookie 保护的成员信息。"""
+    ip = client_ip(request)
+    identity = _login_identity(body.username, ip)
+    # 锁定先于校验：命中阈值后即使密码正确也拒绝，避免限流被成功分支绕过。
+    if len(_recent_login_failures(identity)) >= LOGIN_MAX_FAILURES:
+        raise AppError(ErrorCode.RATE_LIMITED, "登录失败次数过多，请 5 分钟后再试")
     user = db.query(User).filter(User.username == body.username).first()
     if not user or user.disabled or not verify_password(body.password, user.password_hash):
+        _record_login_failure(identity)
         db.add(
             AuditLog(
                 action="login_failed",
                 detail={"username": body.username},
-                ip=client_ip(request),
+                ip=ip,
             )
         )
         db.commit()
         raise AppError(ErrorCode.UNAUTHORIZED, "用户名或密码错误", status_code=401)
 
+    _clear_login_failures(identity)
     user.last_login_at = datetime.now(UTC)
-    user.last_login_ip = client_ip(request)
+    user.last_login_ip = ip
     db.add(
         AuditLog(
             user_id=user.id,

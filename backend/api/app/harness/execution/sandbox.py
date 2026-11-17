@@ -106,10 +106,15 @@ def run_sandboxed(
         }
         # 记录脱敏摘要（命令长度与目录，不打印命令原文/密钥）
         logger.info("bash 沙箱执行 len=%d dir=%s timeout=%s", len(cmd), sandbox_dir, timeout_s)
+        headers = {"Content-Type": "application/json"}
+        # Runner 对所有可执行端点要求内部 Bearer 令牌；未配置时由 runner 侧
+        # fail-closed 返回 503，api 侧不降级为本地 subprocess。
+        if settings.runner_internal_token:
+            headers["Authorization"] = f"Bearer {settings.runner_internal_token}"
         request = Request(
             _runner_url("/run/stream" if on_output is not None else "/run"),
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         try:
