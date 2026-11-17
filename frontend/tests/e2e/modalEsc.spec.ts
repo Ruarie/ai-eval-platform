@@ -54,6 +54,21 @@ test('新建工作区弹窗可以用 Esc 关闭', async ({ page }) => {
   await expect(page.locator('.modal-backdrop')).toHaveCount(0)
 })
 
+test('新建文件预填名聚焦即全选，直接键入为替换', async ({ page }) => {
+  await mockApi(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/workspaces')
+  await page.getByRole('button', { name: /新建 Markdown 报告/ }).click()
+  const input = page.locator('.modal-backdrop input').first()
+  await expect(input).toBeFocused()
+  await expect(input).toHaveValue('report.md')
+  // 预填名整段选中：直接键入替换而不是拼接
+  await page.keyboard.type('qa.md')
+  await expect(input).toHaveValue('qa.md')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0)
+})
+
 test('编辑协议档弹窗可以用 Esc 关闭', async ({ page }) => {
   await mockApi(page)
   await page.setViewportSize({ width: 1440, height: 900 })
