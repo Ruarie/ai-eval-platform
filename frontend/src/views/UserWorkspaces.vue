@@ -676,6 +676,7 @@
         <div class="form-group">
           <label>新名称</label>
           <input
+            ref="renameWsInputRef"
             v-model="renameWsValue"
             class="input modal-input"
             autofocus
@@ -700,6 +701,7 @@
         <div class="form-group">
           <label>{{ createItemType === 'file' ? '文件名 (可包含后缀，如 report.md)' : '文件夹名' }}</label>
           <input
+            ref="createItemInputRef"
             v-model="createItemName"
             class="input modal-input"
             :placeholder="createItemType === 'file' ? 'main.py / README.md' : 'assets / docs'"
@@ -724,6 +726,7 @@
         <div class="form-group">
           <label>新名称</label>
           <input
+            ref="renamePathInputRef"
             v-model="renamePathValue"
             class="input modal-input"
             autofocus
@@ -743,7 +746,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useDialog, useMessage } from 'naive-ui'
 import { api } from '../api/http'
 import type {
@@ -1322,6 +1325,24 @@ function selectAllText(e: FocusEvent): void {
   el?.select()
 }
 
+// 弹窗内的输入框引用：动态插入的 autofocus 属性在 Chrome 不会生效，需显式聚焦。
+const createItemInputRef = ref<HTMLInputElement | null>(null)
+const renamePathInputRef = ref<HTMLInputElement | null>(null)
+const renameWsInputRef = ref<HTMLInputElement | null>(null)
+
+/** 打开弹窗后把焦点放到输入框并全选预填名。 */
+function focusAndSelect(target: 'createItem' | 'renamePath' | 'renameWs'): void {
+  void nextTick(() => {
+    const el = target === 'createItem'
+      ? createItemInputRef.value
+      : target === 'renamePath'
+        ? renamePathInputRef.value
+        : renameWsInputRef.value
+    el?.focus()
+    el?.select()
+  })
+}
+
 /**
  * 当前打开的自研弹窗关闭函数（后开的优先）。
  * 自研 modal-backdrop 不走 Naive UI，需要显式支持 Esc 关闭。
@@ -1400,6 +1421,7 @@ function promptCreate(type: 'file' | 'dir'): void {
   createItemParentPath.value = ''
   createItemName.value = ''
   showCreateItemModal.value = true
+  focusAndSelect('createItem')
 }
 
 async function submitCreateItem(): Promise<void> {
@@ -1432,6 +1454,7 @@ function quickCreateCode(): void {
   createItemParentPath.value = ''
   createItemName.value = 'script.py'
   showCreateItemModal.value = true
+  focusAndSelect('createItem')
 }
 
 function quickCreateMarkdown(): void {
@@ -1439,6 +1462,7 @@ function quickCreateMarkdown(): void {
   createItemParentPath.value = ''
   createItemName.value = 'report.md'
   showCreateItemModal.value = true
+  focusAndSelect('createItem')
 }
 
 // 重命名文件/目录
@@ -1446,6 +1470,7 @@ function openRenamePathModal(node: UserWorkspaceTreeNode): void {
   renamingTargetNode.value = node
   renamePathValue.value = node.name
   showRenamePathModal.value = true
+  focusAndSelect('renamePath')
 }
 
 async function submitRenamePath(): Promise<void> {
@@ -1592,6 +1617,7 @@ function openRenameModal(ws: UserWorkspace): void {
   wsToRename.value = ws
   renameWsValue.value = ws.name
   showRenameWsModal.value = true
+  focusAndSelect('renameWs')
 }
 
 async function submitRenameWorkspace(): Promise<void> {
