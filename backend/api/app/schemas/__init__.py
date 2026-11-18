@@ -157,6 +157,16 @@ from .kb import (  # noqa: F401
     KbQueryOut,
     KbUpdate,
 )
+from .resources import (  # noqa: F401
+    PlazaOut,
+    PlazaRankItem,
+    ResourceCloneIn,
+    ResourceCreateIn,
+    ResourceListOut,
+    ResourceOut,
+    ResourceUpdateIn,
+    ResourceUseOut,
+)
 
 __all__ = [
     "ApiModel",
@@ -306,4 +316,12 @@ __all__ = [
     "SearchItemOut",
     "SearchGroupOut",
     "SearchResultOut",
+    "ResourceOut",
+    "ResourceListOut",
+    "ResourceCreateIn",
+    "ResourceUpdateIn",
+    "ResourceCloneIn",
+    "ResourceUseOut",
+    "PlazaOut",
+    "PlazaRankItem",
 ]

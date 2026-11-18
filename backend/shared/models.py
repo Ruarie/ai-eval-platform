@@ -1467,3 +1467,54 @@ class HarnessDiagnostic(Base):
     span_id = Column(String, nullable=False)
     traceback = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class Resource(Base):
+    """能力中心资源：Agent / Skill / Script / Rule 四类统一实体。
+
+    四类资源共用一张表（一种资源一张卡）：``kind`` 决定前端渲染的字段，
+    ``content`` 存该类型的半结构化定义，``visibility`` 控制个人私有 / 团队共享，
+    ``source_id`` 记录「基于此创建」的血缘，``usage_count`` 供资源广场排序。
+    """
+
+    __tablename__ = "resources"
+    __table_args__ = (
+        Index("ix_resources_kind_visibility", "kind", "visibility"),
+        Index("ix_resources_owner", "owner_id"),
+        Index("ix_resources_usage", "usage_count"),
+    )
+
+    id = Column(String, primary_key=True, default=uuid_str)
+    kind = Column(String, nullable=False, index=True)
+    name = Column(Text, nullable=False, default="")
+    summary = Column(Text, nullable=False, default="")
+    content = Column(JSONB, nullable=False, default=dict)
+    owner_id = Column(
+        String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    visibility = Column(String, nullable=False, default="team")
+    usage_count = Column(Integer, nullable=False, default=0)
+    source_id = Column(
+        String, ForeignKey("resources.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
+class ResourceUsageEvent(Base):
+    """资源使用事件：按次记录，支撑资源广场「飙升榜」的近 7 日增量。"""
+
+    __tablename__ = "resource_usage_events"
+    __table_args__ = (
+        Index("ix_resource_usage_events_resource_time", "resource_id", "created_at"),
+        Index("ix_resource_usage_events_time", "created_at"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    resource_id = Column(
+        String, ForeignKey("resources.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)

@@ -53,6 +53,8 @@ from shared.models import (  # noqa: F401
     Report,
     RequirementBaseline,
     RequirementItem,
+    Resource,
+    ResourceUsageEvent,
     Session,
     SessionStream,
     Setting,

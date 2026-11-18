@@ -9,6 +9,8 @@ declare module 'vue-router' {
   interface RouteMeta {
     title?: string
     public?: boolean
+    /** 能力中心复用同一组件，用 kind 区分 Agent / Skill / Script / Rule。 */
+    resourceKind?: 'agent' | 'skill' | 'script' | 'rule'
   }
 }
 
@@ -33,6 +35,12 @@ const routes: RouteRecordRaw[] = [
       { path: 'case-quality', component: () => import('../views/CasegenQuality.vue'), meta: { title: '用例质量' } },
       { path: 'notifications', component: () => import('../views/NotificationCenter.vue'), meta: { title: '通知中心' } },
       { path: 'usage', component: () => import('../views/UsageCenter.vue'), meta: { title: '用量中心' } },
+      // 能力中心：四类资源共用 ResourceCenter，按 meta.resourceKind 区分。
+      { path: 'plaza', component: () => import('../views/ResourcePlaza.vue'), meta: { title: '资源广场' } },
+      { path: 'agents', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Agent 中心', resourceKind: 'agent' } },
+      { path: 'skills', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Skills 中心', resourceKind: 'skill' } },
+      { path: 'scripts', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Script 中心', resourceKind: 'script' } },
+      { path: 'rules', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Rules 中心', resourceKind: 'rule' } },
       // benchmark / RAG 已停止新建，页面文案统一为「历史」；标题只在本表维护。
       { path: 'reports', component: () => import('../views/Report.vue'), meta: { title: '历史报告' } },
       { path: 'reports/:id', component: () => import('../views/Report.vue'), meta: { title: '历史报告' } },
