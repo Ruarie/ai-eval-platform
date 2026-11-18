@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.64 |
-| 本轮审查日期 | 2026-11-17（`GET /api/kb/{id}/graph` 空库短路：库内 0 篇文档时直接返回空图 200，不再触达引擎；字段与错误码不变） |
+| 文档版本 | V2.65 |
+| 本轮审查日期 | 2026-11-18（新增 §3.14 能力中心：`resources` 与 `resource_usage_events` 两表、7 个端点、`kind/visibility/content` 三字段口径；广场飙升榜按近 7 日事件，不用累计值冒充） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.68（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -2450,6 +2450,85 @@ V1.64 Agent 不调短工具：原生 `task` 与 MCP `task.create/status/cancel` 
 JSON Schema 冻结点：短工具 M1 W4；音频工具输入以本节为准，结果只回安全文本/文件元数据；评测长工具 M2 W6；RAG M3 W10；stress M4 W13。禁止新增 REST 代理或浏览器直连上游音频服务。
 
 ---
+
+### 3.14 能力中心资源（V2.65，2026-11-18）
+
+四类资源（`agent` / `skill` / `script` / `rule`）共用一套实体与端点，`kind` 决定前端渲染的
+字段，`content` 存该类定义。**不保存任何密钥**：Agent 只引用协议档 ID，脚本/技能/规则只存文本。
+
+可见性两档：`team` 全员可见、`private` 仅属主与管理员可见；写操作只允许属主或管理员。
+`content` 序列化后上限 100KB，超限返回 `VALIDATION`。
+
+#### `GET /api/resources`
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `kind` | string? | `agent` / `skill` / `script` / `rule`；留空返回全部 |
+| `scope` | string | `all`（默认，按可见性过滤）/ `mine`（仅本人创建） |
+| `q` | string? | 名称与描述模糊匹配 |
+| `sort` | string | `recent`（默认，按更新时间）/ `popular`（按累计使用） |
+| `offset` / `limit` | int | 默认 0 / 30，`limit ≤ 100` |
+
+```json
+{
+  "items": [{
+    "id": "3f1c…", "kind": "agent", "name": "日志分析助手", "summary": "按错误聚合分析日志",
+    "content": {"system_prompt": "你是日志分析助手", "tools": ["read"]},
+    "owner_id": "u-1", "owner_name": "Alice", "visibility": "team",
+    "usage_count": 12, "source_id": null, "editable": true,
+    "created_at": "2026-11-01T10:00:00+00:00", "updated_at": "2026-11-18T09:00:00+00:00"
+  }],
+  "total": 1
+}
+```
+
+`editable` 由服务端判定（属主或管理员），前端不再复算权限。
+
+#### `POST /api/resources`
+
+```json
+{"kind": "skill", "name": "日志排查技能", "summary": "线上错误排查步骤",
+ "content": {"markdown": "## 适用\n- 线上错误排查"}, "visibility": "team"}
+```
+
+返回创建后的资源投影。`kind` 非法、`name` 为空或 `content` 超限返回 `VALIDATION`。
+
+#### `PATCH /api/resources/{id}`
+
+只提交要变更的字段（`name` / `summary` / `content` / `visibility`）。非属主且非管理员返回 `DENIED`。
+
+#### `DELETE /api/resources/{id}`
+
+硬删除，同时清理该资源的使用事件；由它克隆出的副本保留，`source_id` 置空。非属主且非管理员返回 `DENIED`。
+
+#### `POST /api/resources/{id}/use`
+
+记录一次使用：`usage_count + 1` 并写 `resource_usage_events`，返回最新计数与内容（前端据此复制）。
+
+```json
+{"id": "3f1c…", "usage_count": 13, "content": {"system_prompt": "你是日志分析助手", "tools": ["read"]}}
+```
+
+#### `POST /api/resources/{id}/clone`
+
+基于此创建：副本归当前用户、默认 `private`、`source_id` 记录来源；`name` 缺省为「原名 副本」。
+
+#### `GET /api/resources/plaza`
+
+只统计 `visibility=team` 的资源。
+
+```json
+{
+  "total": 12,
+  "featured":  [{"id": "…", "kind": "agent", "name": "…", "owner_name": "Alice", "usage_count": 42, "weekly_uses": 7, "created_at": "…"}],
+  "popular":   [],
+  "rising":    [],
+  "newest":    []
+}
+```
+
+口径：`popular` 按累计 `usage_count`；`rising` 按**近 7 日使用事件数**（`weekly_uses`）降序，
+没有事件的资源不进榜、不回落成累计值；`newest` 按 `created_at`。`featured` 取有使用记录的前 6 个。
 
 ## 7. 压测进程指标（浏览器不调用）
 

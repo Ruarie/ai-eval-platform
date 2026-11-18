@@ -38,6 +38,7 @@ from .routers import (
     profiles,
     reports,
     requirements,
+    resources,
     search,
     sessions,
     tasks,
@@ -246,6 +247,7 @@ app.include_router(agent_prefs.router)
 app.include_router(agent_memories.router)
 app.include_router(tasks.router)
 app.include_router(profiles.router)
+app.include_router(resources.router)
 app.include_router(datasets.router)
 app.include_router(datasets.folders_router)
 app.include_router(dataset_catalog.router)

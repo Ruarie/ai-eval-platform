@@ -515,6 +515,11 @@ V1 压测内核：**go-stress-testing**（Apache-2.0）扩展，独立 `stress` 
 | `/case-assets` | 用例资产库 | 已确认用例的跨集合资产检索、模块/策略/优先级/标签筛选、文本查重与历史回填 | 成员 |
 | `/notifications` | 通知中心 | 全部/未读筛选、单条/全部已读、跳转任务或用例集；顶栏铃铛展示未读数 | 成员 |
 | `/usage` | 用量中心 | 按 7/30/90 天聚合 token、调用、会话、模型与成员分布；不展示费用估算 | 成员 |
+| `/plaza` | 资源广场 | 能力中心入口：精选组件横滑卡、热门/飙升/新品三榜（飙升榜按近 7 日使用事件，不用累计值冒充） | 成员 |
+| `/agents` | Agent 中心 | 智能体资源的列表/新建/编辑/删除/使用/基于此创建；团队共享或本人私有；不保存任何模型密钥 | 成员 |
+| `/skills` | Skills 中心 | 技能说明（Markdown）的沉淀与复用，与 Agent 中心同构 | 成员 |
+| `/scripts` | Script 中心 | 多语言脚本的集中管理与复用，禁止写入密钥 | 成员 |
+| `/rules` | Rules 中心 | 判定口径与红线规则的集中维护，与 Agent 中心同构 | 成员 |
 | `/kb` | 知识库与切块检索 | 文档分块预览、2D 向量投影散点图、Top-K 相似度召回连线与重排前后位次对比 (Rerank Delta)、黄金 QA 维护 | 成员 |
 | `/admin/profiles` | 协议档治理 | 三类协议（`openai_chat`、`openai_responses`、`anthropic_messages`）及可选 Embedding / Reranker 端点维护、Key 只写不回显、连通性检查 | 成员 |
 | `/admin/stress` | 历史压测配置 | 现有配置与历史数据按保留的页面展示；不触发新的压测 | 成员 |
@@ -535,7 +540,8 @@ V1 压测内核：**go-stress-testing**（Apache-2.0）扩展，独立 `stress` 
 `CRUD /api/datasets` `CRUD /api/case-sets` `POST .../confirm`  
 `CRUD /api/kb` `POST /api/kb/{id}/docs` `CRUD /api/gold-qa`  
 `POST /api/tasks` `GET /api/tasks` `GET /api/tasks/{id}` `POST /api/tasks/{id}/cancel` `POST /api/tasks/{id}/rerun`  
-`GET /api/reports/{id}` `POST /api/reports/{id}/share`  
+`GET /api/reports/{id}` `POST /api/reports/{id}/share`
+`CRUD /api/resources` `POST /api/resources/{id}/use` `POST /api/resources/{id}/clone` `GET /api/resources/plaza`（能力中心，四类资源共用）  
 `GET /api/admin/settings` `PUT /api/admin/settings`  
 `POST /api/auth/ws-ticket` `GET /ws/agent?ticket=`
 

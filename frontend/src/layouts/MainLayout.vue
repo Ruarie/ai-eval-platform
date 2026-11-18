@@ -287,6 +287,42 @@ const IconCompare = () =>
     h('path', { d: 'M20 17H9M20 17l-3-3M20 17l-3 3' }),
   ])
 
+// 资源广场：四格 + 星标，表达"精选与榜单"。
+const IconPlaza = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('rect', { x: '3', y: '3', width: '8', height: '8', rx: '2' }),
+    h('rect', { x: '13', y: '3', width: '8', height: '8', rx: '2' }),
+    h('rect', { x: '3', y: '13', width: '8', height: '8', rx: '2' }),
+    h('path', { d: 'M17 13v6M14 16h6' }),
+  ])
+
+// 能力：拼图块，表达"可组合的 Agent / Skill / Script / Rule"。
+const IconCapability = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { d: 'M9 3h6v3a2 2 0 0 0 2 2h4v6h-4a2 2 0 0 0-2 2v5H9v-5a2 2 0 0 0-2-2H3V9h4a2 2 0 0 0 2-2z' }),
+  ])
+
+// 脚本：终端提示符。
+const IconScript = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('rect', { x: '3', y: '4', width: '18', height: '16', rx: '2.5' }),
+    h('path', { d: 'm7 9 3 3-3 3M13 15h4' }),
+  ])
+
+// 规则：清单 + 勾选。
+const IconRule = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { d: 'M9 5h11M9 12h11M9 19h11' }),
+    h('path', { d: 'm3 5 1.6 1.6L7 4M3 12l1.6 1.6L7 11M3 19l1.6 1.6L7 18' }),
+  ])
+
+// 技能：星形勋章。
+const IconSkill = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('circle', { cx: '12', cy: '9', r: '6' }),
+    h('path', { d: 'm9 14-1 7 4-2 4 2-1-7' }),
+  ])
+
 const navGroups = [
   {
     title: '工作台',
@@ -297,6 +333,16 @@ const navGroups = [
       { path: '/usage', label: '用量中心', icon: IconUsage, t: 'var(--t-tasks)', c: 'var(--c-tasks)' },
       { path: '/tasks', label: '任务中心', icon: IconTasks, t: 'var(--t-tasks)', c: 'var(--c-tasks)' },
       { path: '/dispatch', label: '调度中心', icon: IconDispatch, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)' },
+    ],
+  },
+  {
+    title: '能力',
+    items: [
+      { path: '/plaza', label: '资源广场', icon: IconPlaza, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)' },
+      { path: '/agents', label: 'Agent 中心', icon: IconCapability, t: 'var(--t-agent)', c: 'var(--c-agent)' },
+      { path: '/skills', label: 'Skills', icon: IconSkill, t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
+      { path: '/scripts', label: 'Scripts', icon: IconScript, t: 'var(--t-reports)', c: 'var(--c-reports)' },
+      { path: '/rules', label: 'Rules', icon: IconRule, t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
     ],
   },
   {
