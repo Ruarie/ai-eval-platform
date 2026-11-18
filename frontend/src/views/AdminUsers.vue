@@ -162,7 +162,7 @@
             </rect>
           </svg>
           <div class="row-between small">
-            <span class="tertiary">登录成功 <b class="num" style="color: var(--accent-success)">{{ kpiText(activity?.kpis.login_count) }} 次</b></span>
+            <span class="tertiary">登录成功 <b class="num" style="color: var(--c-agent)">{{ kpiText(activity?.kpis.login_count) }} 次</b></span>
             <span class="tertiary">登录失败 <b class="num" style="color: var(--accent-error)">{{ kpiText(activity?.kpis.login_failed) }} 次</b></span>
           </div>
         </div>

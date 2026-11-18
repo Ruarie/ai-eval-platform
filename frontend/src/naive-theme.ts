@@ -29,6 +29,7 @@ export const themeOverrides: GlobalThemeOverrides = {
     warningColor: '#B45309',
     errorColor: '#DC2626',
     infoColor: '#0F766E',
+    placeholderColor: '#6b7280',
   },
 }
 
@@ -55,7 +56,8 @@ export const darkThemeOverrides: GlobalThemeOverrides = {
     textColorBase: '#f9fafb',
     textColor1: '#f9fafb',
     textColor2: '#9ca3af',
-    textColor3: '#6b7280',
+    textColor3: '#8b95a5',
+    placeholderColor: '#7c8698',
     hoverColor: 'rgba(255, 255, 255, 0.06)',
   },
 }

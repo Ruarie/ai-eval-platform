@@ -15,20 +15,43 @@
   --bg-main: #ffffff;
   --bg-elevated: #f4f8f8;
   --text-primary: #111827;
-  --text-secondary: #6b7280;
-  --text-tertiary: #9ca3af;
+  --text-secondary: #4b5563;
+  /* 原 #9ca3af 在 #fff 上仅 2.5:1；提到 #6b7280 后 4.83:1 */
+  --text-tertiary: #6b7280;
   --border-subtle: #e5e7eb;
   --accent-ai: #1f5947;
-  --accent-success: #10b981;
-  --accent-warning: #f59e0b;
-  --accent-error: #ef4444;
+  /* 语义色兼作文字/徽标颜色，取白底 ≥4.5:1 的深一档；需要亮绿填充时用 --t-* 或 --c-* */
+  --accent-success: #047857;
+  --accent-warning: #b45309;
+  --accent-error: #dc2626;
   --accent-info: #3b82f6;
   --row-hover: rgba(17, 24, 39, 0.035);
   --sidebar-bg: rgba(255, 255, 255, 0.55);
 
+  /* ── 填充 / 边框 / 语义（补齐历史遗漏：曾有多处 var(--bg-card) 等
+     未定义令牌，浅色回退 #fff 在深色下变成白底白字） ────────── */
+  --bg-card: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-tertiary: #f3f4f6;
+  --bg-main-rgb: 255, 255, 255;
+  --border: #e5e7eb;
+  --border-color: #e5e7eb;
+  --border-default: #e5e7eb;
+  --fill-hover: rgba(17, 24, 39, 0.04);
+  --text-quaternary: #9ca3af;
+  --primary: #1f5947;
+  --primary-weak: #e6f1ec;
+  --danger: #b91c1c;
+  /* 需要承载白色文字的主色实底（按钮/头像/气泡/选中 chip）：
+     与 --accent-ai 分开，避免深色下为了让主色当文字而提亮后白字失读 */
+  --accent-solid: #1f5947;
+  /* 语义徽标：--t-* 淡底 / --c-* 深字，成对出现 */
+  --t-success: rgba(4, 120, 87, 0.1);   --c-success: #047857;
+  --t-error: rgba(220, 38, 38, 0.1);    --c-error: #b91c1c;
+
   /* ── 模块强调色（--t-* 柔和淡底 / --c-* 鲜明深字） ─────── */
   --t-agent: #e6f1ec;      --c-agent: #1f5947;
-  --t-dispatch: #e0f2fe;   --c-dispatch: #0284c7;
+  --t-dispatch: #e0f2fe;   --c-dispatch: #0369a1;
   --t-tasks: #e0e7ff;      --c-tasks: #4f46e5;
   --t-reports: #ede9fe;    --c-reports: #6d28d9;
   --t-datasets: #dbeafe;   --c-datasets: #1d4ed8;
@@ -74,9 +97,26 @@
 
   --bg-main: #111827;
   --bg-elevated: #1f2937;
+  /* 卡片比页面底色略亮一档，用来区分层级；深色下不能沿用浅色的 #fff */
+  --bg-card: #182032;
+  --bg-surface: #1f2937;
+  --bg-tertiary: #374151;
+  --bg-main-rgb: 17, 24, 39;
+  --border: #374151;
+  --border-color: #374151;
+  --border-default: #374151;
+  --fill-hover: rgba(255, 255, 255, 0.06);
+  --primary: #34d399;
+  --primary-weak: rgba(22, 151, 122, 0.2);
+  --danger: #f87171;
+  --accent-solid: #0f766e;
+  --t-success: rgba(22, 151, 122, 0.2); --c-success: #34d399;
+  --t-error: rgba(248, 113, 113, 0.18); --c-error: #f87171;
   --text-primary: #f9fafb;
   --text-secondary: #9ca3af;
-  --text-tertiary: #6b7280;
+  /* 原 #6b7280 在 #111827 / #1f2937 上只有 3.0:1，深色下提亮到 5.3:1 */
+  --text-tertiary: #8b95a5;
+  --text-quaternary: #7c8698;
   --border-subtle: #374151;
   --accent-ai: #16977a;
   --accent-success: #34d399;

@@ -27,7 +27,7 @@
           </div>
           <div class="k-stat">
             <span class="k-label tertiary">活跃并发</span>
-            <span class="k-val font-bold mono" style="color: var(--accent-ai)">{{ overviewReady ? runningCount + '/' + capacity : '—' }}</span>
+            <span class="k-val font-bold mono" style="color: var(--c-agent)">{{ overviewReady ? runningCount + '/' + capacity : '—' }}</span>
           </div>
           <div class="k-stat">
             <span class="k-label tertiary">心跳</span>

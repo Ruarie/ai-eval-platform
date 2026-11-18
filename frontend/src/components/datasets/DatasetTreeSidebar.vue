@@ -344,7 +344,8 @@ function onResizeStart(event: MouseEvent) {
   border: 1px solid var(--border-subtle);
 }
 .tree-node.active .version-badge {
-  background: rgba(255, 255, 255, 0.6);
+  /* 浅色态半透明白底在深色下会变成浅底 + 亮色字（对比度 1.1:1），改为跟随底色 */
+  background: color-mix(in srgb, var(--bg-main) 60%, transparent);
   color: var(--c-datasets);
 }
 .pending-dot {
