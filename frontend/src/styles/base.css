@@ -160,7 +160,7 @@ p { margin: 0; text-wrap: pretty; }
 .avatar {
   width: 30px; height: 30px; flex: 0 0 30px; border-radius: 50%;
   display: grid; place-items: center;
-  background: var(--accent-ai); color: #fff;
+  background: var(--accent-solid); color: #fff;
   font-size: 12px; font-weight: 600;
 }
 .user-meta { min-width: 0; }
@@ -191,7 +191,7 @@ p { margin: 0; text-wrap: pretty; }
   border: 1px solid var(--border-subtle); font: 600 11px/1 var(--font-mono); letter-spacing: .01em;
   white-space: nowrap;
 }
-.data-source-badge.live { color: var(--accent-success, #15803d); background: color-mix(in srgb, var(--accent-success, #15803d) 8%, var(--bg-elevated)); }
+.data-source-badge.live { color: var(--c-agent); background: color-mix(in srgb, var(--accent-success, #15803d) 8%, var(--bg-elevated)); }
 .data-source-badge.mock { color: var(--accent-warning); background: color-mix(in srgb, var(--accent-warning) 10%, var(--bg-elevated)); }
 .content { flex: 1; overflow-y: auto; padding: 24px; min-height: 0; }
 .content.flush { padding: 0; display: flex; flex-direction: column; }
@@ -209,7 +209,7 @@ p { margin: 0; text-wrap: pretty; }
 }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
-.btn-primary { background: var(--accent-ai); color: #fff; }
+.btn-primary { background: var(--accent-solid); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: #174a3a; }
 [data-theme='dark'] .btn-primary:hover:not(:disabled) { background: #148369; }
 /* 签名色：发送 / 确认主按钮黑底白字（规范 §8.3） */
@@ -304,11 +304,15 @@ p { margin: 0; text-wrap: pretty; }
 .ds-table tr:hover .row-actions { opacity: 1; }
 .link-btn {
   background: none; border: 0; padding: 4px 8px;
-  color: var(--accent-ai); font-size: 13px; font-weight: 500; border-radius: 6px;
+  color: var(--primary); font-size: 13px; font-weight: 500; border-radius: 6px;
 }
 .link-btn:hover { background: color-mix(in srgb, var(--accent-ai) 8%, transparent); }
-.link-btn.danger { color: var(--accent-error); }
-.link-btn.danger:hover { background: rgba(239, 68, 68, .08); }
+.link-btn.danger { color: var(--danger); }
+.link-btn.danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+/* Naive 空态描述沿用 textColor3，深色下过暗；统一走三级文字令牌 */
+.n-empty__description { color: var(--text-tertiary) !important; }
+[data-theme='dark'] .n-pagination .n-pagination-item.n-pagination-item--active { color: var(--accent-success); }
+[data-theme='dark'] .n-pagination .n-pagination-item.n-pagination-item--active .n-pagination-item__text { color: inherit; }
 .link-btn:disabled { color: var(--text-tertiary); background: none; cursor: not-allowed; }
 
 /* ─── 表单 ─────────────────────────────────────────────────── */
@@ -359,7 +363,7 @@ p { margin: 0; text-wrap: pretty; }
   transition: all .14s ease;
 }
 .chip:hover { border-color: var(--text-tertiary); color: var(--text-primary); }
-.chip.on { background: var(--accent-ai); border-color: var(--accent-ai); color: #fff; }
+.chip.on { background: var(--accent-solid); border-color: var(--accent-solid); color: #fff; }
 
 /* ─── 浮层：Toast / Dialog / Modal / Drawer（规范 §14）────── */
 .toast-stack {
@@ -615,7 +619,7 @@ p { margin: 0; text-wrap: pretty; }
 
 .msg-user { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .bubble-user {
-  background: var(--accent-ai); color: #fff;
+  background: var(--accent-solid); color: #fff;
   border-radius: 20px; border-bottom-right-radius: 6px;
   padding: 11px 16px; font-size: 15px; line-height: 1.65;
   max-width: 86%;

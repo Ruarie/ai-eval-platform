@@ -162,6 +162,7 @@ void props
   font-size: 11px;
 }
 .status-indicator-warning {
+  color: var(--c-profiles, #b45309);
   color: var(--accent-warning);
   font-weight: 500;
 }

@@ -1738,9 +1738,9 @@ onBeforeUnmount(() => {
 }
 
 .btn-primary {
-  background: #1f5947;
+  background: var(--accent-solid);
   color: #ffffff;
-  border-color: #1f5947;
+  border-color: var(--accent-solid);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -1750,8 +1750,8 @@ onBeforeUnmount(() => {
 }
 
 [data-theme='dark'] .btn-primary {
-  background: #16977a;
-  border-color: #16977a;
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
   color: #ffffff;
 }
 
@@ -1761,8 +1761,8 @@ onBeforeUnmount(() => {
 }
 
 .btn-danger-soft {
-  background: rgba(239, 68, 68, 0.06);
-  color: var(--accent-error, #ef4444);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
   border-color: rgba(239, 68, 68, 0.25);
 }
 

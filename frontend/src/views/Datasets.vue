@@ -1971,9 +1971,9 @@ onUnmounted(() => {
   font-size: 12.5px;
 }
 .btn-primary {
-  background: var(--accent-ai);
+  background: var(--accent-solid);
   color: #FFFFFF;
-  border: 1px solid var(--accent-ai);
+  border: 1px solid var(--accent-solid);
 }
 .btn-primary:hover {
   opacity: 0.92;

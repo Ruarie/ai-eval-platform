@@ -205,11 +205,12 @@
   border: 1px solid var(--border-subtle);
 }
 .tree-node.active .version-badge {
-  background: rgba(255, 255, 255, 0.6);
+  /* 浅色态半透明白底在深色下会变成浅底 + 亮色字（对比度 1.1:1），改为跟随底色 */
+  background: color-mix(in srgb, var(--bg-main) 60%, transparent);
   color: var(--c-cases);
 }
 .badge-confirmed { background: var(--t-cases); color: var(--c-cases); }
-.badge-cancelled { background: var(--bg-tertiary); color: var(--text-tertiary); }
+.badge-cancelled { background: var(--bg-elevated); color: var(--text-secondary); }
 .badge-draft { background: var(--t-profiles); color: var(--c-profiles); }
 
 .pending-dot {
@@ -429,16 +430,17 @@
   font-size: 12.5px;
 }
 .btn-primary {
-  background: var(--accent-ai);
+  background: var(--accent-solid);
   color: #FFFFFF;
-  border: 1px solid var(--accent-ai);
+  border: 1px solid var(--accent-solid);
 }
 .btn-primary:hover {
   opacity: 0.92;
 }
 .btn-success-solid {
-  background: var(--accent-success) !important;
-  border-color: var(--accent-success) !important;
+  /* 原用 --accent-success（浅色 #10b981 / 深色 #34d399）配白字只有 2.4:1 */
+  background: #047857 !important;
+  border-color: #047857 !important;
 }
 .btn-secondary {
   background: var(--bg-main);
@@ -580,6 +582,7 @@
 }
 
 .status-indicator-warning {
+  color: var(--c-profiles, #b45309);
   color: var(--accent-warning);
   font-weight: 500;
   white-space: nowrap;

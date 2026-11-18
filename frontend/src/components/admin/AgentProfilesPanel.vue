@@ -866,10 +866,10 @@ onMounted(loadProfiles)
   color: var(--text-primary);
 }
 .protocol-tag {
-  color: var(--text-tertiary, #9ca3af);
+  color: var(--text-secondary, #6b7280);
 }
 .model-chip-card.is-agent-core .protocol-tag {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 .url-mode-tag {
   border-radius: 4px;
@@ -904,16 +904,16 @@ onMounted(loadProfiles)
   border-top-color: rgba(217, 119, 6, 0.2);
 }
 .model-chip-bottom .link-btn {
-  color: #047857;
+  color: var(--c-agent);
   font-size: 12px;
   font-weight: 500;
   transition: color 0.15s ease;
 }
 .model-chip-bottom .link-btn:hover {
-  color: #065f46;
+  color: var(--accent-ai);
 }
 .model-chip-bottom .link-btn.danger {
-  color: #9ca3af;
+  color: var(--text-secondary);
 }
 .model-chip-bottom .link-btn.danger:hover {
   color: #ef4444;

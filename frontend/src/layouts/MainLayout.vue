@@ -621,7 +621,7 @@ async function submitChangePassword() {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: var(--accent-ai);
+  background: var(--accent-solid);
   color: #fff;
   font-size: 12px;
   font-weight: 600;
@@ -736,8 +736,8 @@ async function submitChangePassword() {
   white-space: nowrap;
 }
 .data-source-badge.live {
-  color: var(--accent-success);
-  background: rgba(16, 185, 129, 0.08);
+  color: var(--c-agent);
+  background: color-mix(in srgb, var(--accent-success) 10%, transparent);
 }
 .data-source-badge.mock {
   color: var(--accent-warning);

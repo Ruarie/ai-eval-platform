@@ -367,6 +367,7 @@ td {
 .diff-高 { background: var(--t-stress); color: var(--c-stress); }
 
 .status-tag-green {
+  color: var(--c-cases, #047857);
   font-size: 12px;
   color: var(--accent-success);
   font-weight: 500;
