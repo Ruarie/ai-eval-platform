@@ -91,6 +91,7 @@ const KIND_META: Record<ResourceKind, { noun: string; path: string; t: string; c
   skill: { noun: 'Skill', path: '/skills', t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
   script: { noun: 'Script', path: '/scripts', t: 'var(--t-reports)', c: 'var(--c-reports)' },
   rule: { noun: 'Rule', path: '/rules', t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
+  rag: { noun: 'RAG', path: '/rag', t: 'var(--t-kb)', c: 'var(--c-kb)' },
 }
 
 const kindStyle = (kind: ResourceKind) => KIND_META[kind] || KIND_META.agent

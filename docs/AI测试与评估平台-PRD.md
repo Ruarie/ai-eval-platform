@@ -520,6 +520,8 @@ V1 压测内核：**go-stress-testing**（Apache-2.0）扩展，独立 `stress` 
 | `/skills` | Skills 中心 | 技能说明（Markdown）的沉淀与复用，与 Agent 中心同构 | 成员 |
 | `/scripts` | Script 中心 | 多语言脚本的集中管理与复用，禁止写入密钥 | 成员 |
 | `/rules` | Rules 中心 | 判定口径与红线规则的集中维护，与 Agent 中心同构 | 成员 |
+| `/rag` | RAG 中心 | 把知识库与检索口径（mode / Top-K）存成可复用资源；详情内可用该口径直接试检索 | 成员 |
+| `/mcp` | MCP 中心 | 只读展示平台已注册的工具通道与工具清单、健康检查结果；不接受浏览器指定第三方 MCP 地址 | 成员 |
 | `/kb` | 知识库与切块检索 | 文档分块预览、2D 向量投影散点图、Top-K 相似度召回连线与重排前后位次对比 (Rerank Delta)、黄金 QA 维护 | 成员 |
 | `/admin/profiles` | 协议档治理 | 三类协议（`openai_chat`、`openai_responses`、`anthropic_messages`）及可选 Embedding / Reranker 端点维护、Key 只写不回显、连通性检查 | 成员 |
 | `/admin/stress` | 历史压测配置 | 现有配置与历史数据按保留的页面展示；不触发新的压测 | 成员 |

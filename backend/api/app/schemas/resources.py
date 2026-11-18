@@ -12,7 +12,7 @@ from pydantic import Field
 
 from .accounts import ApiModel
 
-ResourceKind = Literal["agent", "skill", "script", "rule"]
+ResourceKind = Literal["agent", "skill", "script", "rule", "rag"]
 ResourceVisibility = Literal["private", "team"]
 
 

@@ -47,6 +47,56 @@ async function mockApis(page: Page, store: { items: Res[]; creates: unknown[]; u
     if (path === '/api/auth/me') return route.fulfill({ json: USER })
     if (path === '/api/notifications/unread-count') return route.fulfill({ json: { unread: 0 } })
 
+    if (path === '/api/kb') return route.fulfill({ json: [{ id: 'kb-1', name: '退款知识库', kind: 'lightrag', doc_count: 12, is_core: false, owner: 'Alice' }] })
+    if (path === '/api/kb/kb-1/query') {
+      const body = req.postDataJSON() as { query: string; mode: string; k: number }
+      return route.fulfill({ json: {
+        query: body.query, mode: body.mode,
+        items: [{ chunk_id: 'c-1', doc_name: '退款说明.md', similarity: 0.71, text: '退款申请需在订单完成后 7 天内提交。' }],
+        reranked_ids: ['c-1'], metrics: { hit_rate: 1, mrr: 1, recall: 1, contain: 1 },
+      } })
+    }
+    if (path === '/api/mcp/all-tools') {
+      return route.fulfill({ json: { total: 3, items: [
+        { name: 'read', display_name: '读取文件', desc: '读取工作区文件', permission: 'read', risk_level: 'read', timeout_s: 30, transport: 'native', server_id: 'platform.native' },
+        { name: 'bash', display_name: '执行命令', desc: '在沙箱执行 shell', permission: 'write', risk_level: 'exec', timeout_s: 120, transport: 'native', server_id: 'platform.native' },
+        { name: 'task.create', display_name: '创建任务', desc: '写入任务队列', permission: 'write', risk_level: 'write', timeout_s: 10, transport: 'mcp', server_id: 'platform.tasks' },
+      ] } })
+    }
+    if (path === '/api/mcp/health-check') {
+      return route.fulfill({ json: {
+        ok: true, summary: { total_tools: 3, native_tools_count: 2, internal_mcp_tools_count: 1, external_mcp_servers_count: 0 },
+        channels: {
+          native: { channel: 'native_toolcall', name: 'NativeToolExecutor', ok: true, tools_count: 2, latency_ms: 3, message: '原生通道已注册', sandbox_mode: 'bwrap' },
+          internal_mcp: { channel: 'internal_mcp', name: 'platform.tasks', ok: true, tools_count: 1, latency_ms: 2, message: '内部 MCP 可用' },
+        },
+      } })
+    }
+    if (path === '/api/kb') return route.fulfill({ json: [{ id: 'kb-1', name: '退款知识库', kind: 'lightrag', doc_count: 12, is_core: false, owner: 'Alice' }] })
+    if (path === '/api/kb/kb-1/query') {
+      const body = req.postDataJSON() as { query: string; mode: string; k: number }
+      return route.fulfill({ json: {
+        query: body.query, mode: body.mode,
+        items: [{ chunk_id: 'c-1', doc_name: '退款说明.md', similarity: 0.71, text: '退款申请需在订单完成后 7 天内提交。' }],
+        reranked_ids: ['c-1'], metrics: { hit_rate: 1, mrr: 1, recall: 1, contain: 1 },
+      } })
+    }
+    if (path === '/api/mcp/all-tools') {
+      return route.fulfill({ json: { total: 3, items: [
+        { name: 'read', display_name: '读取文件', desc: '读取工作区文件', permission: 'read', risk_level: 'read', timeout_s: 30, transport: 'native', server_id: 'platform.native' },
+        { name: 'bash', display_name: '执行命令', desc: '在沙箱执行 shell', permission: 'write', risk_level: 'exec', timeout_s: 120, transport: 'native', server_id: 'platform.native' },
+        { name: 'task.create', display_name: '创建任务', desc: '写入任务队列', permission: 'write', risk_level: 'write', timeout_s: 10, transport: 'mcp', server_id: 'platform.tasks' },
+      ] } })
+    }
+    if (path === '/api/mcp/health-check') {
+      return route.fulfill({ json: {
+        ok: true, summary: { total_tools: 3, native_tools_count: 2, internal_mcp_tools_count: 1, external_mcp_servers_count: 0 },
+        channels: {
+          native: { channel: 'native_toolcall', name: 'NativeToolExecutor', ok: true, tools_count: 2, latency_ms: 3, message: '原生通道已注册', sandbox_mode: 'bwrap' },
+          internal_mcp: { channel: 'internal_mcp', name: 'platform.tasks', ok: true, tools_count: 1, latency_ms: 2, message: '内部 MCP 可用' },
+        },
+      } })
+    }
     if (path === '/api/resources/plaza') {
       const popular = store.items.map((r, i) => ({
         id: r.id, kind: r.kind, name: r.name, summary: r.summary, owner_name: r.owner_name,
@@ -181,4 +231,53 @@ test('资源广场：精选卡与三榜渲染，飙升榜空态给出口径说�
     route.fulfill({ json: { total: 1, featured: [], popular: [], rising: [], newest: [] } }))
   await page.reload()
   await expect(page.locator('.pl-board').nth(1)).toContainText('近 7 天还没有新的使用记录')
+})
+
+
+test('RAG 中心：绑定知识库并可用固化口径试检索', async ({ page }) => {
+  const store = { items: [] as Res[], creates: [] as unknown[], uses: [] as string[], clones: [] as string[] }
+  await mockApis(page, store)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/rag')
+
+  await expect(page.getByRole('heading', { name: 'RAG 中心' })).toBeVisible()
+  await page.locator('.rc-head-actions button:has-text("新建RAG")').click()
+  const dialog = page.locator('.n-modal')
+  await dialog.getByPlaceholder('例如：日志分析助手').fill('退款检索口径')
+  // 选知识库：点开下拉再选第一项
+  await dialog.locator('.n-select').first().click()
+  await page.locator('.n-base-select-option').first().click()
+  await dialog.getByRole('button', { name: '保存' }).click()
+
+  await expect(page.locator('.rc-card')).toHaveCount(1)
+  const payload = store.creates[0] as { kind: string; content: Record<string, unknown> }
+  expect(payload.kind).toBe('rag')
+  expect(payload.content).toMatchObject({ kb_id: 'kb-1', mode: 'hybrid', k: 5 })
+
+  // 详情里的试检索走真实 /api/kb/{id}/query
+  await page.locator('.rc-card').first().getByRole('button', { name: '详情' }).click()
+  const drawer = page.locator('.n-drawer')
+  await expect(drawer).toBeVisible()
+  await drawer.getByPlaceholder('输入一个问题，用这份口径检索一次').fill('退款多久内可以申请')
+  await drawer.getByRole('button', { name: '检索' }).click()
+  await expect(drawer.locator('.rc-probe-list li')).toHaveCount(1)
+  await expect(drawer).toContainText('退款说明.md')
+})
+
+test('MCP 中心：只读通道状态与工具清单', async ({ page }) => {
+  const store = { items: [] as Res[], creates: [] as unknown[], uses: [] as string[], clones: [] as string[] }
+  await mockApis(page, store)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/mcp')
+
+  await expect(page.getByRole('heading', { name: 'MCP 中心' })).toBeVisible()
+  await expect(page.locator('.mc-channel')).toHaveCount(2)
+  await expect(page.locator('.mc-channel').first()).toContainText('NativeToolExecutor')
+  // 原生 2 个 + MCP 1 个，表头之外应为 3 行
+  await expect(page.locator('.mc-row:not(.mc-row-head)')).toHaveCount(3)
+  await expect(page.locator('.mc-tools')).toContainText('task.create')
+  await expect(page.locator('.mc-note')).toContainText('不能指定任意第三方 MCP 地址')
+
+  await page.getByRole('button', { name: '健康检查' }).click()
+  await expect(page.locator('.mc-channel').first()).toContainText('原生通道已注册')
 })
