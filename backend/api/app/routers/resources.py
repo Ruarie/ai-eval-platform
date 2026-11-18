@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..deps import get_current_user
 from ..errors import AppError, ErrorCode
-from ..models import Resource, ResourceUsageEvent, User
+from ..models import KnowledgeBase, Resource, ResourceUsageEvent, User
 from ..schemas import (
     PlazaOut,
     PlazaRankItem,
@@ -38,7 +38,8 @@ from ._common import write_audit
 
 router = APIRouter(prefix="/api/resources", tags=["resources"])
 
-KINDS = ("agent", "skill", "script", "rule")
+KINDS = ("agent", "skill", "script", "rule", "rag")
+RAG_MODES = ("naive", "local", "global", "hybrid")
 # content 上限：定义文本足够描述一个 Agent/Skill，同时挡住大文件与二进制。
 MAX_CONTENT_BYTES = 100_000
 PLAZA_LIMIT = 10
@@ -107,6 +108,30 @@ def _normalize_content(kind: str, content: dict) -> dict:
     if size > MAX_CONTENT_BYTES:
         raise AppError(ErrorCode.VALIDATION, "资源内容超过 100KB 上限")
     return content
+
+
+def _normalize_rag(db: Session, content: dict) -> dict:
+    """RAG 资源必须绑定一个真实存在的知识库，并固化检索参数。
+
+    只存 ``kb_id`` 与检索口径，不复制文档正文；``kb_name`` 作为快照便于列表展示，
+    知识库改名后以知识库页为准。
+    """
+    kb_id = str(content.get("kb_id") or "").strip()
+    if not kb_id:
+        raise AppError(ErrorCode.VALIDATION, "RAG 资源必须绑定一个知识库")
+    kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+    if not kb:
+        raise AppError(ErrorCode.VALIDATION, "绑定的知识库不存在")
+    mode = str(content.get("mode") or "hybrid")
+    if mode not in RAG_MODES:
+        raise AppError(ErrorCode.VALIDATION, "未知的检索模式")
+    try:
+        k = int(content.get("k") or 5)
+    except (TypeError, ValueError):
+        raise AppError(ErrorCode.VALIDATION, "Top-K 必须是整数") from None
+    if not 1 <= k <= 20:
+        raise AppError(ErrorCode.VALIDATION, "Top-K 需在 1–20 之间")
+    return {"kb_id": kb_id, "kb_name": kb.name, "mode": mode, "k": k}
 
 
 @router.get("", response_model=ResourceListOut, summary="资源列表（按类型与范围过滤）")
@@ -206,6 +231,8 @@ def create_resource(
 ) -> ResourceOut:
     """新建资源：属主固定为当前用户，初始使用计数为 0。"""
     content = _normalize_content(payload.kind, payload.content)
+    if payload.kind == "rag":
+        content = _normalize_rag(db, content)
     resource = Resource(
         kind=payload.kind,
         name=payload.name.strip(),
@@ -258,7 +285,10 @@ def update_resource(
     if payload.summary is not None:
         resource.summary = payload.summary.strip()
     if payload.content is not None:
-        resource.content = _normalize_content(resource.kind, payload.content)
+        content = _normalize_content(resource.kind, payload.content)
+        if resource.kind == "rag":
+            content = _normalize_rag(db, content)
+        resource.content = content
     if payload.visibility is not None:
         resource.visibility = payload.visibility
     resource.updated_at = datetime.now(UTC)

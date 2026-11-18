@@ -7,7 +7,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档版本 | V2.65 |
-| 本轮审查日期 | 2026-11-18（新增 §3.14 能力中心：`resources` 与 `resource_usage_events` 两表、7 个端点、`kind/visibility/content` 三字段口径；广场飙升榜按近 7 日事件，不用累计值冒充） |
+| 本轮审查日期 | 2026-11-18（§3.14 能力中心补充 `rag` 类型：绑定知识库并固化检索口径，试检索复用 `/api/kb/{id}/query`；MCP 中心为只读目录，复用既有 `/api/mcp/all-tools` 与 `/api/mcp/health-check`） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.68（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -2453,7 +2453,7 @@ JSON Schema 冻结点：短工具 M1 W4；音频工具输入以本节为准，�
 
 ### 3.14 能力中心资源（V2.65，2026-11-18）
 
-四类资源（`agent` / `skill` / `script` / `rule`）共用一套实体与端点，`kind` 决定前端渲染的
+五类资源（`agent` / `skill` / `script` / `rule` / `rag`）共用一套实体与端点，`kind` 决定前端渲染的
 字段，`content` 存该类定义。**不保存任何密钥**：Agent 只引用协议档 ID，脚本/技能/规则只存文本。
 
 可见性两档：`team` 全员可见、`private` 仅属主与管理员可见；写操作只允许属主或管理员。
@@ -2463,7 +2463,7 @@ JSON Schema 冻结点：短工具 M1 W4；音频工具输入以本节为准，�
 
 | 参数 | 类型 | 说明 |
 | --- | --- | --- |
-| `kind` | string? | `agent` / `skill` / `script` / `rule`；留空返回全部 |
+| `kind` | string? | `agent` / `skill` / `script` / `rule` / `rag`；留空返回全部 |
 | `scope` | string | `all`（默认，按可见性过滤）/ `mine`（仅本人创建） |
 | `q` | string? | 名称与描述模糊匹配 |
 | `sort` | string | `recent`（默认，按更新时间）/ `popular`（按累计使用） |
@@ -2483,6 +2483,15 @@ JSON Schema 冻结点：短工具 M1 W4；音频工具输入以本节为准，�
 ```
 
 `editable` 由服务端判定（属主或管理员），前端不再复算权限。
+
+`kind=rag` 的 `content` 必须绑定一个真实存在的知识库，服务端会固化 `kb_name` 快照：
+
+```json
+{"kb_id": "kb-1", "kb_name": "退款知识库", "mode": "hybrid", "k": 8}
+```
+
+`mode` ∈ `naive/local/global/hybrid`，`k` ∈ 1–20；缺失或非法返回 `VALIDATION`。只存检索口径，
+不复制文档正文；试检索由前端直接调用既有 `POST /api/kb/{id}/query`，复用知识库自身的权限口径。
 
 #### `POST /api/resources`
 

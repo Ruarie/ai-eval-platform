@@ -323,6 +323,22 @@ const IconSkill = () =>
     h('path', { d: 'm9 14-1 7 4-2 4 2-1-7' }),
   ])
 
+// MCP：插头，表达"连接外部能力"。
+const IconMcp = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { d: 'M9 3v5M15 3v5' }),
+    h('path', { d: 'M6 8h12v3a6 6 0 0 1-12 0z' }),
+    h('path', { d: 'M12 17v4' }),
+  ])
+
+// RAG：书页 + 检索放大镜。
+const IconRag = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { d: 'M4 5a2 2 0 0 1 2-2h6v18H6a2 2 0 0 1-2-2z' }),
+    h('circle', { cx: '15.5', cy: '13.5', r: '3.5' }),
+    h('path', { d: 'm18.2 16.2 2.3 2.3' }),
+  ])
+
 const navGroups = [
   {
     title: '工作台',
@@ -343,6 +359,8 @@ const navGroups = [
       { path: '/skills', label: 'Skills', icon: IconSkill, t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
       { path: '/scripts', label: 'Scripts', icon: IconScript, t: 'var(--t-reports)', c: 'var(--c-reports)' },
       { path: '/rules', label: 'Rules', icon: IconRule, t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
+      { path: '/rag', label: 'RAG 中心', icon: IconRag, t: 'var(--t-kb)', c: 'var(--c-kb)' },
+      { path: '/mcp', label: 'MCP 中心', icon: IconMcp, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
     ],
   },
   {

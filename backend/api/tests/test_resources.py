@@ -19,9 +19,9 @@ from sqlalchemy.pool import StaticPool
 from app.db import get_db
 from app.deps import get_current_user
 from app.main import app
-from app.models import AuditLog, Resource, ResourceUsageEvent, User
+from app.models import AuditLog, KnowledgeBase, Resource, ResourceUsageEvent, User
 
-_NEEDED_MODELS = (User, Resource, ResourceUsageEvent, AuditLog)
+_NEEDED_MODELS = (User, KnowledgeBase, Resource, ResourceUsageEvent, AuditLog)
 
 
 @pytest.fixture
@@ -54,6 +54,7 @@ def center():
                 User(id="u-1", username="alice", display_name="Alice", password_hash="x"),
                 User(id="u-2", username="bob", display_name="Bob", password_hash="x"),
                 User(id="u-3", username="root", display_name="Root", password_hash="x", role="admin"),
+                KnowledgeBase(id="kb-1", name="退款知识库", kind="lightrag", created_by="u-1"),
             ]
         )
 
@@ -192,3 +193,31 @@ def test_plaza_boards(center):
     assert plaza["newest"][0]["name"] == "冷门资源"  # 后建的在最前
     assert [row["name"] for row in plaza["rising"]] == ["热门资源"]  # 30 天前的事件不算
     assert plaza["rising"][0]["weekly_uses"] == 2
+
+
+def test_rag_resource_requires_real_knowledge_base(center):
+    """RAG 资源必须绑定存在的知识库，检索参数被固化并校验范围。"""
+    client = center.client
+    missing = _create(client, kind="rag", content={})
+    assert missing.status_code == 400 and "知识库" in missing.json()["message"]
+
+    ghost = _create(client, kind="rag", content={"kb_id": "kb-404"})
+    assert ghost.status_code == 400 and "不存在" in ghost.json()["message"]
+
+    bad_mode = _create(client, kind="rag", content={"kb_id": "kb-1", "mode": "semantic"})
+    assert bad_mode.status_code == 400
+
+    bad_k = _create(client, kind="rag", content={"kb_id": "kb-1", "k": 99})
+    assert bad_k.status_code == 400
+
+    created = _create(
+        client, kind="rag", name="退款检索口径",
+        content={"kb_id": "kb-1", "mode": "hybrid", "k": 8},
+    )
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["content"] == {"kb_id": "kb-1", "kb_name": "退款知识库", "mode": "hybrid", "k": 8}
+    # 使用计数与克隆对 RAG 同样生效
+    assert client.post(f"/api/resources/{body['id']}/use").json()["usage_count"] == 1
+    cloned = client.post(f"/api/resources/{body['id']}/clone", json={}).json()
+    assert cloned["kind"] == "rag" and cloned["content"]["kb_id"] == "kb-1"

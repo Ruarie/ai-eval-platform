@@ -1,7 +1,7 @@
 /** 能力中心：Agent / Skill / Script / Rule 四类资源的统一客户端。 */
 import http from './http'
 
-export type ResourceKind = 'agent' | 'skill' | 'script' | 'rule'
+export type ResourceKind = 'agent' | 'skill' | 'script' | 'rule' | 'rag'
 export type ResourceVisibility = 'private' | 'team'
 
 /** 列表与详情共用的资源投影；editable 由服务端判定，前端不重复算权限。 */

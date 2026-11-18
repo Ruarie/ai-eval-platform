@@ -124,6 +124,22 @@
           />
         </template>
 
+        <template v-else-if="kind === 'rag'">
+          <label class="rc-label">绑定知识库 <span class="req">*</span></label>
+          <n-select
+            v-model:value="editor.kbId"
+            :options="kbOptions"
+            filterable
+            placeholder="选择要复用的知识库"
+            :status="kbOptions.length ? undefined : 'warning'"
+          />
+          <p v-if="!kbOptions.length" class="rc-hint">还没有可选的知识库，可先到「知识库」页创建。</p>
+          <label class="rc-label">检索模式</label>
+          <n-select v-model:value="editor.mode" :options="RAG_MODES" style="width: 240px" />
+          <label class="rc-label">Top-K</label>
+          <n-input-number v-model:value="editor.k" :min="1" :max="20" style="width: 140px" />
+        </template>
+
         <template v-else>
           <label class="rc-label">{{ kind === 'skill' ? '技能说明' : '规则内容' }} <span class="req">*</span></label>
           <n-input
@@ -179,6 +195,32 @@
             <h3 class="rc-h3">脚本内容</h3>
             <pre class="rc-pre">{{ asText(detail.item.content.code) || '（空）' }}</pre>
           </template>
+          <template v-else-if="detail.item.kind === 'rag'">
+            <h3 class="rc-h3">检索口径</h3>
+            <p class="rc-muted">
+              知识库：{{ asText(detail.item.content.kb_name) || asText(detail.item.content.kb_id) }}
+              · 模式 {{ asText(detail.item.content.mode) || 'hybrid' }}
+              · Top-{{ detail.item.content.k || 5 }}
+            </p>
+            <h3 class="rc-h3">试检索</h3>
+            <div class="rc-probe">
+              <n-input v-model:value="probe.query" placeholder="输入一个问题，用这份口径检索一次" @keyup.enter="runProbe" />
+              <n-button :loading="probe.loading" @click="runProbe">检索</n-button>
+            </div>
+            <p v-if="probe.error" class="rc-probe-err">{{ probe.error }}</p>
+            <ol v-if="probe.items.length" class="rc-probe-list">
+              <li v-for="(hit, index) in probe.items" :key="hit.chunk_id">
+                <span class="rc-probe-rank">{{ index + 1 }}</span>
+                <span class="rc-probe-main">
+                  <b>{{ hit.doc_name || '未命名文档' }}</b>
+                  <small>{{ hit.similarity != null ? '相似度 ' + hit.similarity.toFixed(3) : '相似度 —' }}</small>
+                  <p>{{ hit.text }}</p>
+                </span>
+              </li>
+            </ol>
+            <p v-else-if="probe.done && !probe.error" class="rc-muted">这次检索没有召回内容。</p>
+          </template>
+
           <template v-else>
             <h3 class="rc-h3">{{ detail.item.kind === 'skill' ? '技能说明' : '规则内容' }}</h3>
             <pre class="rc-pre">{{ asText(detail.item.content.markdown) || '（空）' }}</pre>
@@ -200,6 +242,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
+import { api } from '../api/http'
 import { resources, type ResourceItem, type ResourceKind, type ResourceVisibility } from '../api/resources'
 
 const route = useRoute()
@@ -218,6 +261,7 @@ const CONFIG: Record<ResourceKind, KindConfig> = {
   skill: { title: 'Skills 中心', sub: '把可复用的操作经验沉淀成技能，团队随取随用', noun: 'Skill', t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
   script: { title: 'Script 中心', sub: '集中管理脚本 · 支持多语言 · 快速复用', noun: 'Script', t: 'var(--t-reports)', c: 'var(--c-reports)' },
   rule: { title: 'Rules 中心', sub: '把判定口径与红线固化成规则，减少来回确认', noun: 'Rule', t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
+  rag: { title: 'RAG 中心', sub: '把知识库与检索口径存成可复用资源，随手试检索', noun: 'RAG', t: 'var(--t-kb)', c: 'var(--c-kb)' },
 }
 
 const TOOLS = [
@@ -227,6 +271,12 @@ const TOOLS = [
   { label: 'bash（执行命令）', value: 'bash' },
   { label: 'web_search（联网搜索）', value: 'web_search' },
   { label: 'task（任务中心）', value: 'task' },
+]
+const RAG_MODES = [
+  { label: 'hybrid（混合，推荐）', value: 'hybrid' },
+  { label: 'naive（纯向量）', value: 'naive' },
+  { label: 'local（实体局部）', value: 'local' },
+  { label: 'global（全局关系）', value: 'global' },
 ]
 const LANGUAGES = [
   { label: 'Python', value: 'python' },
@@ -268,10 +318,34 @@ const editor = reactive({
   markdown: '',
   language: 'python',
   code: '',
+  kbId: '' as string,
+  mode: 'hybrid',
+  k: 5,
 })
 const saving = ref(false)
 
 const detail = reactive({ show: false, item: null as ResourceItem | null })
+
+// RAG 资源需要选知识库：按需加载，避免每次进页面都请求。
+const kbOptions = ref<{ label: string; value: string }[]>([])
+async function loadKbs(): Promise<void> {
+  if (kbOptions.value.length) return
+  try {
+    const list = await api.kb.list()
+    kbOptions.value = list.map((kb) => ({ label: kb.name, value: kb.id }))
+  } catch {
+    kbOptions.value = []
+  }
+}
+
+// 详情里的「试检索」：直接用这份资源固化的口径打一次真实检索。
+const probe = reactive({
+  query: '',
+  loading: false,
+  error: '',
+  done: false,
+  items: [] as { chunk_id: string; doc_name: string; similarity: number | null; text: string }[],
+})
 
 /** 秒级时间戳转「今天 / 昨天 / MM-DD」，列表里只表达新鲜度。 */
 function shortTime(iso: string): string {
@@ -321,6 +395,10 @@ function openEditor(item?: ResourceItem): void {
   editor.markdown = asText(content.markdown)
   editor.language = asText(content.language) || 'python'
   editor.code = asText(content.code)
+  editor.kbId = asText(content.kb_id)
+  editor.mode = asText(content.mode) || 'hybrid'
+  editor.k = Number(content.k) || 5
+  if (kind.value === 'rag') void loadKbs()
 }
 
 /** 按类型组装 content，避免把无关字段写进 JSONB。 */
@@ -331,6 +409,9 @@ function buildContent(): Record<string, unknown> {
   if (kind.value === 'script') {
     return { language: editor.language, code: editor.code }
   }
+  if (kind.value === 'rag') {
+    return { kb_id: editor.kbId, mode: editor.mode, k: editor.k }
+  }
   return { markdown: editor.markdown }
 }
 
@@ -339,6 +420,7 @@ function validate(): string {
   if (kind.value === 'agent' && !editor.prompt.trim()) return '请填写系统提示词'
   if (kind.value === 'script' && !editor.code.trim()) return '请填写脚本内容'
   if ((kind.value === 'skill' || kind.value === 'rule') && !editor.markdown.trim()) return '请填写内容'
+  if (kind.value === 'rag' && !editor.kbId) return '请选择要绑定的知识库'
   return ''
 }
 
@@ -429,6 +511,39 @@ async function removeItem(item: ResourceItem): Promise<void> {
 function openDetail(item: ResourceItem): void {
   detail.item = item
   detail.show = true
+  probe.query = ''
+  probe.items = []
+  probe.error = ''
+  probe.done = false
+}
+
+/** 用资源固化的模式与 Top-K 真跑一次知识库检索。 */
+async function runProbe(): Promise<void> {
+  const item = detail.item
+  if (!item || item.kind !== 'rag') return
+  const question = probe.query.trim()
+  if (!question) {
+    message.warning('请输入检索问题')
+    return
+  }
+  probe.loading = true
+  probe.error = ''
+  probe.items = []
+  probe.done = false
+  try {
+    const result = await api.kb.query(asText(item.content.kb_id), {
+      query: question,
+      mode: asText(item.content.mode) || 'hybrid',
+      k: Number(item.content.k) || 5,
+    })
+    probe.items = (result.items || []).slice(0, 8)
+    probe.done = true
+  } catch (err) {
+    probe.error = err instanceof Error ? err.message : '检索失败'
+    probe.done = true
+  } finally {
+    probe.loading = false
+  }
 }
 
 // 从导航切换类型时（/agents → /skills）复用同一组件，需要重新拉数据。
@@ -506,4 +621,14 @@ onMounted(reload)
 .rc-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .rc-chip { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
 .rc-lineage { margin-top: 16px; font-size: 12px; color: var(--text-tertiary); }
+.rc-hint { margin: 4px 0 0; font-size: 12px; color: var(--accent-warning); }
+.rc-probe { display: flex; gap: 8px; align-items: center; }
+.rc-probe-err { margin: 8px 0 0; font-size: 12.5px; color: var(--danger); }
+.rc-probe-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rc-probe-list li { display: flex; gap: 8px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-card); }
+.rc-probe-rank { flex: 0 0 auto; width: 18px; height: 18px; border-radius: 50%; background: var(--bg-elevated); color: var(--text-secondary); font-size: 11px; display: grid; place-items: center; }
+.rc-probe-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rc-probe-main b { font-size: 12.5px; }
+.rc-probe-main small { font-size: 11px; color: var(--text-tertiary); }
+.rc-probe-main p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 </style>

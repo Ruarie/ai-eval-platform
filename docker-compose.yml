@@ -151,8 +151,10 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 10s
       timeout: 5s
-      retries: 6
-      start_period: 10s
+      # 冷启动要跑 alembic + 导入 langgraph/openai/anthropic 等重依赖；宿主内存紧张时会换页，
+      # 实测冷启动可超过 85s（2026-11-18 部署因此被判 unhealthy 并中断）。放宽到 ~4 分钟。
+      retries: 12
+      start_period: 120s
 
   media-mcp:
     # 独立 Streamable HTTP MCP：只在 Compose 内网开放，由平台后端接入。

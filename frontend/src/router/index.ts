@@ -10,7 +10,7 @@ declare module 'vue-router' {
     title?: string
     public?: boolean
     /** 能力中心复用同一组件，用 kind 区分 Agent / Skill / Script / Rule。 */
-    resourceKind?: 'agent' | 'skill' | 'script' | 'rule'
+    resourceKind?: 'agent' | 'skill' | 'script' | 'rule' | 'rag'
   }
 }
 
@@ -41,6 +41,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'skills', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Skills 中心', resourceKind: 'skill' } },
       { path: 'scripts', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Script 中心', resourceKind: 'script' } },
       { path: 'rules', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Rules 中心', resourceKind: 'rule' } },
+      { path: 'rag', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'RAG 中心', resourceKind: 'rag' } },
+      { path: 'mcp', component: () => import('../views/McpCenter.vue'), meta: { title: 'MCP 中心' } },
       // benchmark / RAG 已停止新建，页面文案统一为「历史」；标题只在本表维护。
       { path: 'reports', component: () => import('../views/Report.vue'), meta: { title: '历史报告' } },
       { path: 'reports/:id', component: () => import('../views/Report.vue'), meta: { title: '历史报告' } },
