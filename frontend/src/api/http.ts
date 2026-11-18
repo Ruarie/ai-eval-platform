@@ -315,7 +315,9 @@ export const api = {
         const name = localStorage.getItem('ae_user') || 'admin'
         return mockStore.users.find((x) => x.username === name) || mockStore.users[0]
       }
-      const { data } = await http.get('/api/auth/me')
+      // 服务重启/冷启动时该接口可能长时间无响应，而路由守卫在等它：
+      // 短超时让页面尽快落到登录页，而不是停在空白壳。
+      const { data } = await http.get('/api/auth/me', { timeout: 8000 })
       return data
     },
     async changePassword(payload: { old_password?: string; new_password: string }): Promise<void> {

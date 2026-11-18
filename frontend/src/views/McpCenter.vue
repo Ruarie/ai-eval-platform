@@ -25,7 +25,7 @@
       <section v-if="channels.length" class="mc-channels">
         <article v-for="c in channels" :key="c.channel" class="mc-channel" :class="{ bad: !c.ok }">
           <div class="mc-channel-top">
-            <span class="mc-dot" :class="c.ok ? 'ok' : 'bad'"></span>
+            <span class="mc-dot" :class="dotClass(c)"></span>
             <b>{{ c.name }}</b>
             <span class="mc-latency">{{ c.latency_ms }}ms</span>
           </div>
@@ -104,6 +104,12 @@ const loading = ref(false)
 const checking = ref(false)
 const error = ref('')
 
+/** 未启用（standby）不是故障，用中性色区分，避免绿点误导。 */
+const dotClass = (c: Channel): string => {
+  if (c.ok) return (c.message || '').includes('未启用') ? 'idle' : 'ok'
+  return 'bad'
+}
+
 const permLabel = (permission?: string): string => {
   if (permission === 'write') return '写入'
   if (permission === 'network') return '联网'
@@ -127,7 +133,7 @@ async function loadAll(): Promise<void> {
   try {
     const { data } = await http.get<{ items: ToolItem[]; total: number }>('/api/mcp/all-tools')
     tools.value = data.items || []
-    summary.value = { total_tools: data.total ?? tools.value.length }
+    summary.value = { ...summary.value, total_tools: data.total ?? tools.value.length }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载工具清单失败'
   } finally {
@@ -180,6 +186,7 @@ onMounted(() => {
 .mc-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
 .mc-dot.ok { background: var(--accent-success); }
 .mc-dot.bad { background: var(--danger); }
+.mc-dot.idle { background: var(--text-tertiary); }
 .mc-latency { font-size: 11.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 .mc-channel-msg { margin: 8px 0 6px; font-size: 12.5px; line-height: 1.55; color: var(--text-secondary); }
 .mc-channel-meta { display: flex; gap: 10px; font-size: 11.5px; color: var(--text-tertiary); flex-wrap: wrap; }
