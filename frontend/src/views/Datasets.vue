@@ -1827,22 +1827,35 @@ onUnmounted(() => {
   align-items: center;
   width: 100%;
   gap: 12px;
+  /* 与用例工作台同口径：工具项多时整行折行，避免 flex 把标题列压到几十像素宽后逐字换行。 */
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 
 .toolbar-title-group {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* 标题列不参与收缩：宁可让右侧操作组折到下一行，也不把标题挤成竖排。 */
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 .title-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .main-dataset-title {
   font-size: 16.5px;
   font-weight: 600;
   color: var(--text-primary);
+  /* 超长数据集名以省略号收尾，不换行、不参与压缩。 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .version-tag {
   font-family: var(--font-mono);
@@ -1853,12 +1866,14 @@ onUnmounted(() => {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
+  white-space: nowrap;
 }
 .asset-type-badge {
   font-size: 11.5px;
   font-weight: 500;
   padding: 1px 7px;
   border-radius: 4px;
+  white-space: nowrap;
 }
 .type-dataset { background: var(--t-datasets); color: var(--c-datasets); }
 .type-gold { background: var(--t-profiles); color: var(--c-profiles); }
@@ -1869,6 +1884,7 @@ onUnmounted(() => {
   border-radius: 4px;
   background: var(--t-profiles);
   color: var(--c-profiles);
+  white-space: nowrap;
 }
 
 .breadcrumb-row {

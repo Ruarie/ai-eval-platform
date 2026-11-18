@@ -1314,6 +1314,12 @@ async function hydrateAttachments() {
   pointer-events: none;
 }
 @media(max-width:768px){.loop-chat-shell{width:100%!important;max-width:none;min-width:0;margin:0}.loop-chat-shell .loop-composer-wrap{padding:8px}.loop-chat-shell.has-interaction .loop-conversation{min-height:72px;padding-bottom:8px}.loop-width-edge{display:none}.loop-chat-shell .loop-conversation{padding:16px 12px}}
+/* 769–1024：侧栏 + 会话列表占去约 500px 后，聊天壳的 520px 硬下限会把内容顶出容器
+   （780px 视口下 .loop-chat-shell 的 scrollWidth 比 clientWidth 大 100px）。
+   该区间让聊天壳可收缩，输入区控件按需折行，避免出现内部横向滚动条。 */
+@media(max-width:1024px){
+  .loop-chat-shell{min-width:0;width:min(900px,100%);max-width:100%}
+}
 
 /* 顶栏操作区：对齐与垂直居中 */
 .loop-tabs-actions {
@@ -1735,6 +1741,9 @@ async function hydrateAttachments() {
   --subtle: var(--text-secondary);
   --accent: #a5b4fc;
   border-bottom-color: var(--border-subtle);
+  /* 浅色态的半透明白底在深色下会形成一条贯穿内容区的浅色带，选中标签（浅紫）
+     落在该带上对比度接近 1:1，文字基本不可读；深色下改为透明，直接继承卡片底色。 */
+  background: transparent;
 }
 [data-theme='dark'] .loop-message.user {
   background: rgba(22, 151, 122, 0.16);

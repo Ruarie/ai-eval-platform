@@ -75,9 +75,12 @@ const turnMarkers = computed(() => rows.value.flatMap((row, index) => {
   return [{ key: `${turn}:${row.cursor}`, label: `第 ${turn} 轮`, style: { left: `${index / rows.value.length * 100}%` } }]
 }))
 /** 泳道表达类别，横坐标只表达持久顺序，避免伪造模型耗时。 */
-function segmentStyle(row: LoopFrame, index: number) {
+function segmentStyle(row: LoopFrame, index: number): Record<string, string> {
   const lane = role(row).key === 'assistant' ? 1 : ['tool', 'approval'].includes(role(row).key) ? 2 : 0
-  return { left: `${index / rows.value.length * 100}%`, width: `max(2px, calc(${100 / rows.value.length}% - 2px))`, top: `${7 + lane * 14}px` }
+  // 泳道纵向位置交给样式表换算：基础块行距 14px、放大块行距 17px。
+  // 若在这里写死 top，放大块会把轨道标签挪到 17px 行距而色条仍停在 14px 行距，
+  // 表现就是色条压在「工具」标签上、三条轨道看起来叠在一起。
+  return { left: `${index / rows.value.length * 100}%`, width: `max(2px, calc(${100 / rows.value.length}% - 2px))`, '--trace-segment-lane': String(lane) }
 }
 const docs: Record<string,[string,string]> = {
   'session.updated':['会话信息已更新','会话的公开展示信息已经更新。'], 'turn.start':['轮次开始','一轮 Agent 执行的持久边界。'], 'turn.end':['轮次结束','本轮已经结算，原因字段说明完成、取消或失败。'],
@@ -216,7 +219,7 @@ async function copy() { const text = JSON.stringify(safePacket(range.value ? row
     .trace-waterfall:focus-visible { outline: 1px solid #536fe4; outline-offset: -1px; }
     .trace-selection-range { position: absolute; z-index: 0; top: 0; bottom: 0; min-width: 1px; border-right: 3px solid #536fe4; border-left: 3px solid #536fe4; background: rgba(83,111,228,.12); box-shadow: -100vw 0 0 100vw rgba(255,255,255,.58), 100vw 0 0 100vw rgba(255,255,255,.58); pointer-events: none; }
     .trace-turn-marker { position: absolute; z-index: 3; top: 0; transform: translateX(-1px); border-left: 1px dashed #7463b6; padding-left: 3px; color: #6955a5; font: 700 9px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; pointer-events: none; white-space: nowrap; }
-    .trace-segment { position: absolute; z-index: 1; top: calc(7px + var(--trace-segment-lane) * 14px); left: calc(var(--trace-segment-left) + var(--trace-segment-gap)); width: max(2px,calc(var(--trace-segment-width) - var(--trace-segment-gap) - var(--trace-segment-gap))); height: 8px; min-width: 2px; border: 0; border-radius: 1px; outline: 0; background: #78879d; padding: 0; cursor: pointer; opacity: .78; }
+    .trace-segment { position: absolute; z-index: 1; top: calc(7px + var(--trace-segment-lane, 0) * 14px); height: 8px; min-width: 2px; border: 0; border-radius: 1px; outline: 0; background: #78879d; padding: 0; cursor: pointer; opacity: .78; }
     .trace-segment:hover { z-index: 2; opacity: 1; }
     .trace-segment.selected { z-index: 2; opacity: 1; box-shadow: 0 0 0 1px #fcfdff,0 0 0 2px #536fe4; }
     .trace-segment.out-of-range { opacity: .2; }
@@ -308,7 +311,7 @@ async function copy() { const text = JSON.stringify(safePacket(range.value ? row
 @media(prefers-reduced-motion:reduce){.trace-row{transition:none}}
 /* 增大轨迹阅读字号，并使用系统中清晰的中英文与等宽字体回退链。 */
 .trace-toolbar{min-height:48px}.trace-filter{min-height:31px;padding:0 10px;font-size:12px}.trace-toolbar-meta{font:11px/1.45 var(--trace-font-mono)}.trace-search input{height:32px;font-size:12px}
-.trace-waterfall-panel,.trace-waterfall{height:58px;flex-basis:58px}.trace-waterfall-panel{grid-template-columns:50px minmax(0,1fr)}.trace-lane-labels{font-size:11px}.trace-lane-labels span{right:6px;height:10px}.trace-lane-labels span:nth-child(1){top:8px}.trace-lane-labels span:nth-child(2){top:25px}.trace-lane-labels span:nth-child(3){top:42px}.trace-turn-marker{font:700 10px/1.5 var(--trace-font-mono)}.trace-segment{top:calc(8px + var(--trace-segment-lane) * 17px);height:10px}
+.trace-waterfall-panel,.trace-waterfall{height:68px;flex-basis:68px}.trace-waterfall-panel{grid-template-columns:50px minmax(0,1fr)}.trace-lane-labels{font-size:11px}.trace-lane-labels span{right:6px;height:10px}.trace-lane-labels span:nth-child(1){top:18px}.trace-lane-labels span:nth-child(2){top:35px}.trace-lane-labels span:nth-child(3){top:52px}.trace-turn-marker{font:700 10px/1.5 var(--trace-font-mono)}.trace-segment{top:calc(18px + var(--trace-segment-lane, 0) * 17px);height:10px}
 .trace-main{grid-template-columns:minmax(0,1fr) minmax(390px,480px)}.trace-empty{font-size:14px}.trace-row{min-height:40px;grid-template-columns:62px minmax(0,1fr);gap:10px;padding:7px 12px 7px 9px}.trace-row-seq{font:11.5px/1.5 var(--trace-font-mono)}.trace-row-title{gap:8px;font-size:13.5px}.trace-badge{padding:2px 6px;font-size:10.5px}.trace-turn-badge{padding:2px 6px;font:700 10.5px/1.4 var(--trace-font-mono)}.trace-row-preview{font:12.5px/1.5 var(--trace-font-mono)}
 .trace-detail-head{padding:15px 18px 12px}.trace-detail-eyebrow{font:10.5px/1.4 var(--trace-font-mono)}.trace-detail-title{font:600 15.5px/1.4 var(--trace-font-mono)}.trace-detail-state{padding:4px 8px;font-size:11px}.trace-copy-button{min-height:27px;padding:0 9px;font-size:11.5px}.trace-detail-tabs{padding:0 14px}.trace-detail-tab{min-height:42px;padding:0 9px;font-size:12px}.trace-detail-body{padding:18px 20px 30px}.trace-purpose{font-size:14.5px}.trace-kv{grid-template-columns:112px minmax(0,1fr);gap:9px 13px;font-size:14.5px}.trace-kv dd{font-family:var(--trace-font-mono);font-size:13.5px;line-height:1.6}.trace-overview-label,.trace-section-title{font-size:12.5px}.trace-preview-empty,.trace-detail-body>p,.trace-workspace>p{font-size:13.5px}.trace-result-state{font:11px/1.45 var(--trace-font-mono)}.trace-inline-summary{font-size:13px}.trace-notice{padding:10px 11px;font-size:12.5px}.trace-chain-label{font-size:12px}.trace-chain-link{padding:4px 8px;font:11.5px/1.4 var(--trace-font-mono)}
 .trace-field-table,.trace-schema-table{font-size:12.5px}.trace-field-table td,.trace-schema-table td{padding-top:9px;padding-bottom:9px}.trace-field-table td:first-child,.trace-schema-table td:first-child,.trace-field-table code,.trace-schema-table code{font-family:var(--trace-font-mono);font-size:12px}.trace-json{padding:13px 14px;font:14px/1.7 var(--trace-font-mono)}.trace-schema-card{padding:13px}.trace-schema-card-head{gap:5px;margin-bottom:10px}.trace-schema-card-head strong{font:600 14.5px/1.55 var(--trace-font-mono)}.trace-schema-card-head p{font-size:14px}.trace-json-tree{padding:12px 14px;font:14px/1.72 var(--trace-font-mono)}.trace-json-tree :deep(.json-tree){font:14px/1.72 var(--trace-font-mono)}.trace-help{padding:7px 16px;font:11px/1.55 var(--trace-font-mono)}.trace-pagination{padding:12px;font-size:12px}.trace-pagination button{padding:5px 9px}
