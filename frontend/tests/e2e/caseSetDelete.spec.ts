@@ -71,5 +71,7 @@ test('已入库用例集：确认文案说明只归档，不承诺不可恢复',
   const dialog = page.locator('.n-dialog')
   await expect(dialog).toContainText('历史版本与评审记录仍保留')
   await dialog.getByRole('button', { name: '删除' }).click()
+  // 先等 toast（说明请求已返回），再断言调用，避免 CI 慢机上的竞态。
+  await expect(page.locator('.n-message')).toContainText('已删除「已入库集」')
   expect(calls.deleted).toEqual(['set-2'])
 })
