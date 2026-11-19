@@ -136,11 +136,17 @@ export BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 
-# 迁移链必须是唯一 head：多个 head 会让 `alembic upgrade head` 在生产直接失败，
-# 而这类问题往往来自两条 PR 各自把迁移接在同一个父节点上，越早拦住越好。
-if ! python3 tools/check_migration_heads.py backend/api/migrations/versions; then
-    echo "错误：迁移链存在多个 head，已停止部署（先合并迁移再重新部署）" >&2
-    exit 1
+# 迁移链必须是唯一 head：多个 head 会让 `alembic upgrade head` 在生产直接失败。
+# 权威判定在 CI（migration-heads 作业，PR 与 main 都查）；这里是部署前的兜底。
+# 部署目录不在 main 时可能没有该脚本（见上一步的分支保护），此时降级为警告，
+# 不能因为缺脚本就误拦一次正常部署。
+if [ -f tools/check_migration_heads.py ]; then
+    if ! python3 tools/check_migration_heads.py backend/api/migrations/versions; then
+        echo "错误：迁移链存在多个 head，已停止部署（先合并迁移再重新部署）" >&2
+        exit 1
+    fi
+else
+    echo "警告：部署目录缺少 tools/check_migration_heads.py（工作区可能不在 main），跳过迁移 preflight"
 fi
 
 # 先判断部署差异：纯文档/测试提交同步 Git 后即可结束，不访问 Docker 或清理镜像。
