@@ -62,9 +62,10 @@ class _NameBody(BaseModel):
     """工作区创建/改名请求（name 每属主活跃唯一）。
 
     创建时可选 ``kind=ssh`` 打开远程工作区；改名只读取 ``name``。
+    名称上限 60：它只在左栏与下拉里展示，过长会把布局撑坏（文件/文件夹名仍是 255）。
     """
 
-    name: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=60)
     kind: str = Field(default="local", max_length=16)
     # key_file：用服务端预置私钥；password：连接时由页面临时提供密码（不落库）。
     auth_type: str = Field(default="key_file", max_length=16)

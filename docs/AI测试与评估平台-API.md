@@ -22,6 +22,8 @@
 
 > V2.64（2026-11-17）：`GET /api/kb/{id}/graph` 增加**空库短路**（§3.9）。库内 0 篇文档时直接返回 `200` + 空 `nodes` / `edges`，不调用 LightRAG；库内有文档但引擎不可用时仍为 `UPSTREAM`(502)。字段、`limit` 与错误码均不变，仅避免把「还没上传文档」误报成引擎故障。
 
+> V2.67（2026-11-19）：工作区名称上限 **60** 字符（原 255）。它只用于左栏与下拉展示，过长会撑坏布局；超限时返回 `400 VALIDATION` 且 `fields.name` 说明原因。工作区内的文件/目录名不受影响（仍旧 255，见 `_FileBody`/`_CreateFileBody`）。
+>
 > V2.66（2026-11-19）：`400 VALIDATION` 的 `fields` 不再只覆盖业务错误——FastAPI 请求体校验（原 422）归一为 400 时，也会带回 `{字段名: 校验信息}`，前端据此把红字标到具体表单项（§1.3 契约本就要求如此，此前实现只返回通用文案）。同时 `POST /api/users` 的调用方不再传 `role`：全员同权，服务端恒写 `member`，契约外字段会被 `extra="forbid"` 拒绝。前端 `/workspaces` 对远程（`kind=ssh`）工作区收口写入口：新建/重命名/上传/下载原文件改为禁用并说明原因，与 V2.48「远程工作区 upload/files/rename/files/raw 返回 VALIDATION」保持一致。
 >
 > V2.62（2026-11-16）：`POST /api/case-sets/ai-generate`、`/ai-compare`、`/{id}/ai-review` 改为 `202`，响应 `{job_id, status:"queued"}`。结果用 `GET /api/case-sets/ai-jobs/{job_id}` 取回：`succeeded` 时 `result` 为原先的同步响应体，`failed` 时带 `error.code/message`。Worker 领取执行，候选仍不落库；评审仍写入 `checks` 与 `case_review_runs`。`POST /api/workspaces/{id}/exec/{approval_id}/confirm` 改为 `202 {status:"running", timeout_s}`，执行在请求线程之外；`GET /api/workspaces/{id}/exec/{approval_id}` 取回 `exit_code/stdout/stderr` 或 `failed`。审批单在配置了 Redis 时跨副本共享，否则仍是进程内存。`ssh_host` 白名单口径与 V2.48 一致：留空不限制主机，非空才收紧。远程文件路径上的符号链接直接 `VALIDATION`。

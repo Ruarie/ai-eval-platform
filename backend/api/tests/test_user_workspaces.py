@@ -186,3 +186,23 @@ def test_router_module_surface() -> None:
         workspace_service.workspace_dir_for("../etc")
     with pytest.raises(Exception):
         workspace_service.workspace_dir_for("")
+
+
+class TestWorkspaceNameLimit:
+    """工作区名上限 60：只约束工作区名，文件/文件夹名仍是 255。"""
+
+    def test_accepts_sixty_chars(self) -> None:
+        body = user_workspaces._NameBody(name="测" * 60)
+        assert len(body.name) == 60
+
+    def test_rejects_sixty_one_chars(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc:
+            user_workspaces._NameBody(name="测" * 61)
+        assert "name" in str(exc.value)
+
+    def test_file_names_keep_long_limit(self) -> None:
+        # 工作区内的文件/目录名走 _FileBody / _CreateFileBody，仍是 255。
+        assert user_workspaces._FileBody(name="a" * 255).name
+        assert user_workspaces._CreateFileBody(name="a" * 255).name

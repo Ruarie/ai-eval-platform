@@ -467,9 +467,11 @@
             v-model="newWsName"
             class="input modal-input"
             placeholder="例如：大模型评测主库"
+            :maxlength="WORKSPACE_NAME_MAX"
             autofocus
             @keyup.enter="submitCreateWorkspace"
           />
+          <span class="form-hint">{{ newWsName.length }} / {{ WORKSPACE_NAME_MAX }} 字</span>
         </div>
         <div class="form-group">
           <label>工作区类型</label>
@@ -682,6 +684,7 @@
             ref="renameWsInputRef"
             v-model="renameWsValue"
             class="input modal-input"
+            :maxlength="WORKSPACE_NAME_MAX"
             autofocus
             @focus="selectAllText"
             @keyup.enter="submitRenameWorkspace"
@@ -845,6 +848,9 @@ const currentWorkspace = computed(() => {
 })
 
 /** 远程工作区：命令走 SFTP/SSH，本地专属操作（上传/新建）不展示。 */
+// 与后端 _NameBody.name 保持一致：工作区名只用于列表展示，超长会撑坏布局。
+const WORKSPACE_NAME_MAX = 60
+
 const isRemoteWorkspace = computed(() => currentWorkspace.value?.kind === 'ssh')
 // 远程（SSH）工作区本轮只做浏览：新建/重命名/上传/下载原文件在后端都被 _require_local 拦截，
 // 这里统一收口，避免按钮可点但必然失败。
@@ -1593,6 +1599,11 @@ function chooseBrowseDir(): void {
 async function submitCreateWorkspace(): Promise<void> {
   const name = newWsName.value.trim()
   if (!name) return
+  // maxlength 只管键盘输入，粘贴/脚本赋值仍可能超长，提交前再兜一次。
+  if (name.length > WORKSPACE_NAME_MAX) {
+    message.warning(`工作区名称最多 ${WORKSPACE_NAME_MAX} 个字符`)
+    return
+  }
   const options =
     newWsKind.value === 'ssh'
       ? {
@@ -1642,6 +1653,10 @@ function openRenameModal(ws: UserWorkspace): void {
 async function submitRenameWorkspace(): Promise<void> {
   const name = renameWsValue.value.trim()
   if (!name || !wsToRename.value) return
+  if (name.length > WORKSPACE_NAME_MAX) {
+    message.warning(`工作区名称最多 ${WORKSPACE_NAME_MAX} 个字符`)
+    return
+  }
   busy.value = true
   try {
     await api.workspaces.rename(wsToRename.value.id, name)
@@ -1986,6 +2001,10 @@ onBeforeUnmount(() => {
   color: #34d399;
 }
 
+.form-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
 .readonly-pill {
   margin-left: 6px;
   font-size: 11px;
