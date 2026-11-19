@@ -3,6 +3,7 @@
  * 依据：docs/AI测试与评估平台-API.md (V1.5)
  */
 import axios from 'axios'
+import { describeFieldErrors, GENERIC_VALIDATION_MESSAGE } from './fieldErrors'
 import {
   ErrorCode,
   ERROR_MESSAGES,
@@ -205,7 +206,13 @@ http.interceptors.response.use(
       if (status === 401) handleSessionExpired(String(err.config?.url || ''))
       const data = err.response.data || {}
       const code: ErrorCode = data.code || (status === 401 ? ErrorCode.UNAUTHORIZED : status === 404 ? ErrorCode.NOT_FOUND : ErrorCode.INTERNAL)
-      const message = data.message || ERROR_MESSAGES[code] || `请求失败 (${status})`
+      const raw = data.message || ERROR_MESSAGES[code] || `请求失败 (${status})`
+      // 请求体校验失败时后端只给「请检查标红字段」；有 fields 就换成字段级描述，
+      // 这样所有表单（不只开通成员）都能直接看出是哪个字段、错在哪。
+      const detail = describeFieldErrors(data.fields)
+      const message = code === ErrorCode.VALIDATION && detail && raw === GENERIC_VALIDATION_MESSAGE
+        ? `请检查：${detail}`
+        : raw
 
       return Promise.reject(new ApiError(message, code, status, data.fields, data))
     }
