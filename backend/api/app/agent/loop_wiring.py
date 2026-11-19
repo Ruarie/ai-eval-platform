@@ -32,6 +32,7 @@ from app.llm.loop_contracts import (
 from app.llm.providers.reasoning_templates import is_newapi_template
 from app.llm.resolver import AuthorizedProfileSnapshot, build_adapter, resolve_request
 from app.models import ProtocolProfile, Session, Setting, User, Workspace
+from app.profile_access import require_visible_profile
 from app.session_access import require_visible_session
 from app.workspace_service import resolve_session_sandbox
 
@@ -281,6 +282,14 @@ async def _build_dependencies(service, entry, actor_id: str, data: dict, resourc
     subagent_tier = None
     with service.session_factory() as db:
         profile, context_window = authorized_profile(db, data)
+        # 回合级归属校验：个人模型只有属主（或管理端）可用。真实路径下协议档
+        # 一定存在；内存测试替身没有协议档行时跳过，避免把授权逻辑耦合到夹具。
+        profile_row = db.get(ProtocolProfile, profile.profile_id)
+        if profile_row is not None:
+            actor = db.get(User, actor_id)
+            if actor is None or actor.disabled:
+                raise AppError(ErrorCode.UNAUTHORIZED, "成员不可用")
+            require_visible_profile(db, profile.profile_id, actor)
         overlay = get_agent_prompt_overlay(db, profile.profile_id)
         preparation_contract = data.get("_preparation_contract") if data.get("_subagent") is True else None
         expert_prompt = (preparation_contract["expert_prompt"] if preparation_contract

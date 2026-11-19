@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..deps import get_current_user
+from ..deps import get_current_user, require_admin
 from ..errors import AppError, ErrorCode
 from ..models import AuditLog, Task, User
 from ..schemas import ResetPasswordRequest, UserCreate, UserOut, UserStatusUpdate, UserUpdate
@@ -44,7 +44,7 @@ def create_user(
     body: UserCreate,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     """创建同权成员账号，并记录不含密码的审计事件。"""
     _validate_password(body.password)
@@ -101,7 +101,7 @@ def activity_summary(
     from_ts: str | None = Query(default=None, alias="from"),
     to_ts: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     """按 [from, to) 区间聚合成员活跃 KPI 与逐小时登录桶（API §3.3）。
 
@@ -185,7 +185,7 @@ def activity_summary(
 def user_audit_logs(
     user_id: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     """读取指定成员作为行为人的近期审计记录。"""
     if not db.query(User).filter(User.id == user_id).first():
@@ -219,7 +219,7 @@ def update_user(
     body: UserUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     """更新成员展示资料，不提供角色修改入口。"""
     member = db.query(User).filter(User.id == user_id).first()
@@ -254,7 +254,7 @@ def update_user_status(
     body: UserStatusUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     """启停成员，确保系统始终保留至少一个正常账号。"""
     member = db.query(User).filter(User.id == user_id).first()
@@ -287,7 +287,7 @@ def reset_password(
     body: ResetPasswordRequest,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     """重置成员密码并失效该成员所有既有浏览器会话。"""
     _validate_password(body.password)

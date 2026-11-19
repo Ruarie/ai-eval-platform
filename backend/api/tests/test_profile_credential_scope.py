@@ -11,6 +11,9 @@ from app.routers import profiles
 from app.schemas import FetchModelsIn, ProfileProbeUpdate, ProfileUpdate
 from tests.test_profile_check import _ProfileDb
 
+# 平台协议档的改删已收口为管理端；测试用管理员身份覆盖凭据边界本身。
+_ADMIN = SimpleNamespace(id="unit-admin", role="admin")
+
 
 @pytest.mark.parametrize("target,allowed", [
     ("https://HOST.invalid:443/v1", True), ("https://host.invalid/other", True),
@@ -34,11 +37,11 @@ def test_profile_edits_reject_cross_origin_before_network(monkeypatch, route):
         if route == "probe":
             body = ProfileProbeUpdate(name="unit", protocol="openai_responses", base_url="https://different.invalid",
                                       model="unit", reasoning_template_id="newapi-no-reasoning-v1")
-            profiles.probe_update_profile(profile.id, body, SimpleNamespace(), db, SimpleNamespace())
+            profiles.probe_update_profile(profile.id, body, SimpleNamespace(), db, _ADMIN)
         elif route == "models":
-            profiles.fetch_models(FetchModelsIn(profile_id=profile.id, base_url="https://different.invalid"), db, SimpleNamespace())
+            profiles.fetch_models(FetchModelsIn(profile_id=profile.id, base_url="https://different.invalid"), db, _ADMIN)
         else:
-            profiles._update_profile(profile.id, ProfileUpdate(base_url="https://different.invalid"), SimpleNamespace(), db, SimpleNamespace())
+            profiles._update_profile(profile.id, ProfileUpdate(base_url="https://different.invalid"), SimpleNamespace(), db, _ADMIN)
     assert caught.value.code == ErrorCode.VALIDATION
     assert "重新填写" in caught.value.message
     assert "fake-key" not in caught.value.message
@@ -52,7 +55,7 @@ def test_explicit_replacement_key_is_used_for_new_origin(monkeypatch):
     monkeypatch.setattr(profiles, "read_profile_env", lambda *a: SimpleNamespace(full_url=False))
     monkeypatch.setattr(profiles, "fetch_remote_models", lambda **kw: seen.append(kw) or [])
     profiles.fetch_models(FetchModelsIn(profile_id="unit", base_url="https://new.invalid", api_key="fake-new"),
-                          _ProfileDb(profile), SimpleNamespace())
+                          _ProfileDb(profile), _ADMIN)
     assert seen[0]["api_key"] == "fake-new"
 
 
@@ -68,7 +71,7 @@ def test_auxiliary_endpoint_edit_cannot_reuse_hidden_key(monkeypatch, kind):
     monkeypatch.setattr(profiles, "_profile_connection", lambda *a, **k: ("https://main.invalid", "unit", "fake-main"))
     body = ProfileUpdate(**{f"{kind}_base_url": "https://new.invalid"})
     with pytest.raises(AppError, match="重新填写"):
-        profiles._update_profile("unit", body, SimpleNamespace(), _ProfileDb(profile), SimpleNamespace())
+        profiles._update_profile("unit", body, SimpleNamespace(), _ProfileDb(profile), _ADMIN)
 
 
 @pytest.mark.parametrize("target,expected", [

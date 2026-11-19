@@ -143,6 +143,9 @@
                 <ProviderLogo class="model-chip-brand" :provider="getModelLogoKey(p.model)" compact :size="18" />
                 <span class="model-chip-name" :title="p.name">{{ p.name }}</span>
                 <span v-if="p.id === selectedAgentProfileId" class="tag-soft agent-core-tag">核心驱动</span>
+                <span class="tag-soft" :class="p.visibility === 'personal' ? 'scope-personal-tag' : 'scope-platform-tag'">
+                  {{ p.visibility === 'personal' ? `${p.owner_username || '成员'} 私有` : '平台' }}
+                </span>
               </div>
 
               <!-- 探活按钮 -->
@@ -227,6 +230,9 @@
               <span class="row" style="gap: 8px; align-items: center">
                 <span>{{ p.name }}</span>
                 <span v-if="p.id === selectedAgentProfileId" class="tag-soft agent-core-tag">核心驱动</span>
+                <span class="tag-soft" :class="p.visibility === 'personal' ? 'scope-personal-tag' : 'scope-platform-tag'">
+                  {{ p.visibility === 'personal' ? `${p.owner_username || '成员'} 私有` : '平台' }}
+                </span>
               </span>
             </td>
             <td>
@@ -310,6 +316,8 @@
     v-model:show="showModal"
     :profile="selectedProfile"
     :initial-data="modalInitialData"
+    scope="platform"
+    allow-scope-choice
     @success="loadProfiles"
   />
 
@@ -380,8 +388,11 @@ interface PingState {
 const pingStates = ref<Record<string, PingState>>({})
 const pinging = ref<Record<string, boolean>>({})
 
+// 平台默认模型必须是公共模型：个人模型只在「我的模型」里按轮次选择。
 const agentProfileOptions = computed(() =>
-  profiles.value.filter(p => p.usages?.includes('agent')).map((p) => ({ label: `${p.name} (${p.model})`, value: p.id })),
+  profiles.value
+    .filter(p => p.usages?.includes('agent') && p.visibility !== 'personal')
+    .map((p) => ({ label: `${p.name} (${p.model})`, value: p.id })),
 )
 
 interface VendorGroup {
@@ -839,6 +850,25 @@ onMounted(loadProfiles)
   padding: 1.5px 8px;
   font-size: 11px;
   font-weight: 600;
+  white-space: nowrap;
+}
+/* 归属徽标：平台公共模型与成员私有模型在读表时一眼可分。 */
+.scope-platform-tag {
+  background: rgba(56, 132, 255, 0.08);
+  color: #2f6fd0;
+  border: 1px solid rgba(56, 132, 255, 0.28);
+  border-radius: 999px;
+  padding: 1.5px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.scope-personal-tag {
+  background: rgba(150, 106, 255, 0.1);
+  color: #6b4bc4;
+  border: 1px solid rgba(150, 106, 255, 0.3);
+  border-radius: 999px;
+  padding: 1.5px 8px;
+  font-size: 11px;
   white-space: nowrap;
 }
 .model-chip-meta {

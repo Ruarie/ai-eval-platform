@@ -25,7 +25,9 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
-    """兼容旧 router 依赖；V1.0 单一成员角色下不再区分管理员。"""
+    """管理端接口守卫：仅 role=admin 的账号可访问，普通成员返回 403。"""
+    if getattr(user, "role", None) != "admin":
+        raise AppError(ErrorCode.DENIED, "仅管理端账号可执行此操作")
     return user
 
 

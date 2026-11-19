@@ -225,7 +225,7 @@ def test_saved_tool_status_invalidates_with_credentials_or_template(monkeypatch,
         db.refresh = lambda item: None
         monkeypatch.setattr(profiles, "client_ip", lambda request: None)
         result = profiles._update_profile(profile.id, ProfileUpdate(api_key="new-channel-key"),
-                                         SimpleNamespace(), db, SimpleNamespace(id="unit-user"))
+                                         SimpleNamespace(), db, SimpleNamespace(id="unit-user", role="admin"))
         assert profile.reasoning_probe is None
     else:
         result = profiles._profile_out(profile)

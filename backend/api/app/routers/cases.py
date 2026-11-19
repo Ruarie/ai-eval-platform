@@ -60,6 +60,7 @@ from ..models import (
     utcnow,
     uuid_str,
 )
+from ..profile_access import require_visible_profile
 from ..schemas import (
     CaseAiCompareIn,
     CaseAiFillIn,
@@ -435,17 +436,13 @@ def get_case_ai_job(
     return body
 
 
-def _load_compare_profiles(db: Session, profile_ids: list[str]) -> list[ProtocolProfile]:
-    """按请求顺序取出两个已启用 agent 用途的协议档。"""
-    found = {
-        profile.id: profile
-        for profile in db.query(ProtocolProfile).filter(ProtocolProfile.id.in_(profile_ids)).all()
-    }
+def _load_compare_profiles(
+    db: Session, profile_ids: list[str], user: User
+) -> list[ProtocolProfile]:
+    """按请求顺序取出两个可用协议档，并校验平台/个人归属。"""
     profiles: list[ProtocolProfile] = []
     for profile_id in profile_ids:
-        profile = found.get(profile_id)
-        if profile is None:
-            raise AppError(ErrorCode.NOT_FOUND, "协议档不存在")
+        profile = require_visible_profile(db, profile_id, user)
         if "agent" not in (profile.usages or []):
             raise AppError(ErrorCode.VALIDATION, f"协议档「{profile.name}」未启用 agent 用途")
         profiles.append(profile)
@@ -473,7 +470,7 @@ def _prepare_compare(
 ) -> tuple[str, bool, list[Any], dict[str, int], int]:
     """校验来源和两个协议档。线程启动前先复制 ORM 字段。"""
     source_text, source_truncated, weights, max_count = _load_generation_request(body, db, user)
-    profiles = _load_compare_profiles(db, body.profile_ids)
+    profiles = _load_compare_profiles(db, body.profile_ids, user)
     return source_text, source_truncated, [_profile_snapshot(profile) for profile in profiles], weights, max_count
 
 

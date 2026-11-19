@@ -19,6 +19,8 @@
 | 最近修订 | 2026-09-03：V1.67 混合引擎执行落地（H2 Workflow DAG / H3 Agent TAOR）：恢复持久事件 `tool_call` / `tool_result`（payload 见 §4.3，ToolCard 只渲染脱敏摘要，观察全文不进任何事件）；`response.completed` 的 `engine` 从「分流结论」升级为「真实执行引擎」——`workflow`（H2，W0–W7 硬编码 DAG）与 `agent`（H3，plan→discover→orchestrator⇄tools 单图内 TAOR）均已真实执行，`agent_id` 审计随 Worker 目录（§3.6.3）供归属核验；`thought` / `tool_progress` / `tool_output_delta` / `confirm` / `clarify` 仍不产生。历史 `ws_events` 中的旧工具事件仍不重放。 |2026-09-03：V1.66 混合引擎 H1 Router 审计契约：`response.completed` payload 新增可选 `engine` / `router_confidence` / `router_reason`（仅 `hybrid_engine_enabled=true` 时出现，旧客户端忽略未知字段即可）；新增 `GET /api/agents` Worker 只读目录（§3.6.3）。本版不新增 WS 事件名、不恢复 `thought` / `tool_*`；`workflow` / `agent` 引擎在 H1 阶段降级按 `chat` 执行，`engine` 如实记录分流结论并经 `router_reason` 标注降级。2026-09-02：V1.65 工具契约加固（T1–T3）：JSON Schema 子集新增 `minItems`/`maxItems` 并为 8 处数组参数补上限；`output_schema` 从装饰字段升级为强制契约（注册期拒绝未声明，运行期按声明比对展示投影）；`platform.tasks` 三工具补全 `output_schema`；移除 `/api/mcp/tools/{name}/code` 端点与 `code_snippet` 字段。2026-08-28：V1.53 `web_fetch` 直抓路径接入 trafilatura 正文提取：可读性算法识别文章主体，保留标题层级/链接/图片/表格，未安装或提取失败降级回内置 `_TextExtractor`；提取真实产出 Markdown 时才声明 `format=markdown`（§4.3.1）。V1.52 优化 `web_fetch` 长文完整性与卡片预览：模型正文预算 8,000→60,000 字符，卡片预览与 `read` 同源对齐 `TOOL_PREVIEW_MAX_CHARS` 并随 `web.preview_limit_chars` 下发，直接抓取字节窗口 256KB→1MB（§4.3.1）。2026-08-27：V1.51 新增持久事件 `session_title`（§4.3）与会话标题 AI 生成契约（§4.3.2）：默认标题会话首条消息后由 Agent 协议档弱结构化生成标题并落库广播，修复标题不持久化问题。V1.50 统一 Agent 文本附件 staging 与 `read` 的 20MB 边界；`read` 模型窗口为 2,000 行 / 600,000 字符。V1.49 协议档新增 `max_output_tokens`（256–131072，默认 8192），创建/更新/列表/详情均支持；Agent 模型调用从协议档读取输出上限，长文档总结/导出类任务可调大避免回答被截断。2026-08-26：V1.48 同轮多调用默认串行，灰度开启后仅 `read`/`web_search`/`web_fetch` 可并行，回填按原始 `call_id`。V1.47 新增 `GET /api/agent/metrics`，不含正文/参数，不新增 WS 事件。V1.46 明确 native 一次 ToolCall 结束当前上游响应，结果回填后再请求，不新增事件名。V1.45 思考链只下发可展示摘要，隐藏 CoT（`Here's a thinking process` / `Analyze User Input`）由服务端替换，不原样推给前端。V1.44 ToolCall 在执行前持久化，新增瞬态 `tool_progress` / `tool_output_delta`，并冻结原生工具的输出 Schema、权限边界和失败恢复字段。V1.43 思考增量允许合并下发；有思考链时 `think_final` 在 `response.completed` 之前。V1.42 Direct `/help`、未知斜杠与图内防御提示在业务事件后必须再发 `response.completed`（成功 `stop`，校验/防御 `error`），结束整轮生成态。V1.41 确认卡预填与 `confirm_ack` 入队前丢掉已删除的协议档/数据集/知识库 ID，避免 Worker 再报「协议档不存在或已删除」。V1.40 `/cancel` 与 `/stress` 按 §4.4 解禁（仍走 `user_message`）：`/cancel` 取消本会话非终态任务，`/stress` 发出质量任务确认卡且 `with_stress=true`，禁止 `kind=stress`。V1.39 原生工具卡片收起态副标题统一为 `ToolCall`，不在卡片摘要区回显文件路径、命令或写入内容；详细参数仍在展开区展示。V1.38 明确原生基础 ToolCall 卡片使用英文工具名，展开区统一显示 `ToolCall` 与 `输出`，文件、命令和代码/文档结果使用行号展示；MCP/平台短工具仍按下方中文名映射。2026-08-24：V1.24 修复 Agent 附件上下文链路：服务端校验文件归属并在模型窗口解析文本、PDF、DOCX、XLSX，图片按三协议图文内容块发送；历史消息附件补齐安全元数据，前端可在刷新后继续预览。同步调整输入框内附件按钮与用户消息附件位序。V1.23 扩展 Agent 附件契约，支持图片、Word 文档与多附件拖拽上传；保留 `POST /api/files` 后再以既有 `file_id` 引用的消息链路，补充图片缩略图、PDF/文本预览与 Office 文件打开/下载说明。V1.22 修复 V1.21 遗留：§4.4 标题「仅此三条」改「仅此四条」、§9 禁止清单「第四种」改「第五种」并补四类上行事件枚举、§4.3 `tool_result.source` 语义对齐 M7 `Observation.source`（溯源标识字符串，非 short\|long 枚举）、§4.3 共享流规则补 clarify/plan/confirm 持久化广播说明、§4.4 clarify 多副本限制注明、§9 Ask/Plan 补注非 Harness plan 事件；V1.20 及更早版本沿用历史修订记录。 |
 | 适用范围 | V1.0：浏览器 `web/` ↔ `api`；全域 REST + WS 接口规范 |
 
+> V2.63（2026-11-19）：协议档增加归属与账号隔离。`protocol_profiles` 增量 `visibility`（`platform|personal`，默认 `platform`）与 `owner_id`（个人模型必填，平台模型为空）；`GET /api/profiles` 只返回平台模型 + 本人个人模型（admin 可见全部），`ProfileOut` 增量 `visibility/owner_id/owner_username/can_manage`。创建时 `visibility` 可选：admin 可建平台/个人，普通成员只能建个人模型（请求平台模型返回 `DENIED`）；平台模型仅 admin 可改删，个人模型仅属主与 admin 可改删；归属创建后不可变。个人模型不写 `LLM_*` 全局别名、不继承平台凭据。Agent 回合（`turn.submit` 的 `profile_id`）、Agent 任务建单与用例 AI 对比均按归属复核。账号侧：`admin` 引导账号角色提升为 `admin`；`/api/admin/*`、成员开户/停用/重置密码/活跃统计/成员审计收口为 admin（普通成员返回 `DENIED`），`GET /api/users` 保持登录可读用于协作指派。前端新增 `/my-models`「我的模型」，管理端「模型管理」与「账号」仅 admin 可见。存量协议档一律回填为平台模型（迁移 `b3d8e1f6a2c4`）。
+>
 > V2.62（2026-11-16）：`POST /api/case-sets/ai-generate`、`/ai-compare`、`/{id}/ai-review` 改为 `202`，响应 `{job_id, status:"queued"}`。结果用 `GET /api/case-sets/ai-jobs/{job_id}` 取回：`succeeded` 时 `result` 为原先的同步响应体，`failed` 时带 `error.code/message`。Worker 领取执行，候选仍不落库；评审仍写入 `checks` 与 `case_review_runs`。`POST /api/workspaces/{id}/exec/{approval_id}/confirm` 改为 `202 {status:"running", timeout_s}`，执行在请求线程之外；`GET /api/workspaces/{id}/exec/{approval_id}` 取回 `exit_code/stdout/stderr` 或 `failed`。审批单在配置了 Redis 时跨副本共享，否则仍是进程内存。`ssh_host` 白名单口径与 V2.48 一致：留空不限制主机，非空才收紧。远程文件路径上的符号链接直接 `VALIDATION`。
 
 > V2.46（2026-11-02）：知识库接入真实 LightRAG 引擎（§3.9）。**不新增平台 REST/WS 路径与字段**，仅明确既有语义：上传响应与文档列表的 `status` 由引擎异步建索引决定（`indexing | indexed | failed`），`indexing` 会在列表查询时向 LightRAG 回读并收敛；`DELETE` 文档/知识库改为「先删引擎索引、再删库内记录」，引擎已配置但删除失败返回 `UPSTREAM`；Playground 的 `similarity` 允许为 `null`（LightRAG 只给排序不给分数），前端显示占位符而不伪造 0；检索降级口径收紧为「仅不可达/服务端错误才回退本地关键词」，引擎可用但召回为空仍记 `lightrag`。删除与状态回读在服务端按批执行（删除 ≤50/批、状态 ≤200/批），对调用方仍是一次请求；`indexing`/`failed` 文档的删除不强制引擎成功，避免引擎不可用时无法清理。适配服务内部契约（`/documents/index`、`/documents/status`、`/documents/delete`、`/query`）属容器内网，不属于本契约范围，见《AI测试与评估平台-LightRAG接入技术方案.md》。
@@ -266,9 +268,10 @@ WS `error` 事件 payload 与上表同一套 `code` + `message`（可带 `fields
 | **数据集工作台 (datasets.html)** | 数据集目录树 / 行内即点即改网格 / 自定义列扩展 / AI 数据集生成 | `/api/dataset-folders`, `/api/datasets`, `/api/datasets/{id}`, `/api/datasets/{id}/rows`, `/api/datasets/ai-generate`, `/api/kb` | GET/POST/PUT/DELETE | 成员 · 全员同权 |
 | **用例工作台 (cases.html)** | 6 大策略分布、自检、草稿编辑与审核、72h 倒计时、Excel 导入导出及 AI PRD 用例抽取；旧评测映射入口停用 | `/api/case-folders`, `/api/case-sets`, `/api/case-sets/from-candidates`, `/api/case-sets/{id}`, `/api/case-sets/{id}/cases`, `/api/case-sets/{id}/confirm`, `/api/case-sets/{id}/cancel`, `/api/case-sets/ai-generate`, `/api/case-sets/ai-compare`, `/api/case-sets/import-template`, `/api/case-sets/{id}/import`, `/api/case-sets/{id}/export` | GET/POST/PUT/DELETE | 成员 · 全员同权 |
 | **知识库 (kb.html)** | 3栏工作台 / 文档与切块预览 / 4模式检索 Playground / 黄金 QA | `/api/kb`, `/api/kb/{id}`, `/api/kb/{id}/documents`, `/api/kb/{id}/documents/{doc_id}/chunks`, `/api/kb/{id}/query`, `/api/kb/{id}/gold-qa` | GET/POST/DELETE | 成员 · 全员同权 |
-| **协议档与智能体 (admin-profiles.html)** | 4 Tab 架构（协议档、MCP 工具只读、技能受控说明、运行时治理）/ 连通性探活 Ping | `/api/profiles`, `/api/profiles/{id}/check`, `/api/mcp/tools`, `/api/admin/settings` | GET/POST/PUT/DELETE | 成员 · 全员同权 |
-| **压测治理** | 前端页面已移除。新建压测已停用，并发上限在调度中心维护。白名单接口仍保留给历史执行器 | `/api/admin/stress/whitelist` | GET/POST/DELETE | 成员 · 全员同权 |
-| **成员与账号 (admin-users.html)** | 4 维 KPI 卡片 / 成员搜索表格 / 24h 登录活动柱状图 / 改密与停用 | `/api/users`, `/api/users/activity-summary`, `/api/users/{id}/status`, `/api/users/{id}/reset-password`, `/api/users/{id}/audit-logs` | GET/POST/PUT | 成员 · 全员同权 |
+| **模型管理 (admin-profiles.html)** | 5 Tab 架构（平台/个人协议档、RAG 全局模型、MCP 工具只读、技能、运行时治理）/ 归属徽标 / 连通性探活 Ping | `/api/profiles`, `/api/profiles/{id}/check`, `/api/mcp/tools`, `/api/admin/*` | GET/POST/PUT/DELETE | 管理端（admin） |
+| **我的模型 (my-models.html)** | 成员自助添加/编辑/删除个人模型；平台模型只读展示 | `/api/profiles`, `/api/profiles/probe-create`, `/api/profiles/{id}/probe-update` | GET/POST/PUT/DELETE | 成员（仅本人模型） |
+| **压测治理** | 前端页面已移除。新建压测已停用，并发上限在调度中心维护。白名单接口仍保留给历史执行器 | `/api/admin/stress/whitelist` | GET/POST/DELETE | 管理端（admin） |
+| **成员与账号 (admin-users.html)** | 4 维 KPI 卡片 / 成员搜索表格 / 24h 登录活动柱状图 / 改密与停用 | `/api/users`, `/api/users/activity-summary`, `/api/users/{id}/status`, `/api/users/{id}/reset-password`, `/api/users/{id}/audit-logs` | GET/POST/PUT | 管理端（admin）；`GET /api/users` 登录可读 |
 
 ---
 
@@ -773,13 +776,18 @@ AI_PROFILE_<PROFILE_ID_NORMALIZED>_RERANKER_API_KEY
 
 #### `GET /api/profiles`
 
-全员可列（无 Key），供确认卡和 RAG 上下文工程使用。除主模型外，Embedding 与 Reranker
-端点均为可选；响应只返回 URL、模型标识和 `has_*_api_key` 布尔值，不返回任何 Key。
+按归属裁剪：平台模型（`visibility=platform`）对全员可见，个人模型（`visibility=personal`）
+仅属主可见；`admin` 可见全部模型。除主模型外，Embedding 与 Reranker 端点均为可选；响应只返回
+URL、模型标识和 `has_*_api_key` 布尔值，不返回任何 Key。
 item：`id, name, protocol, base_url, model, usages[], context_window, max_output_tokens, tool_call_mode,
 embedding_base_url, embedding_model, has_embedding_api_key, reranker_base_url, reranker_model,
-has_reranker_api_key, created_at`
+has_reranker_api_key, visibility, owner_id, owner_username, can_manage, created_at`
 
 #### `POST /api/profiles`  已登录成员
+
+请求体可带 `visibility`：admin 可建 `platform` 或 `personal`；普通成员只能建 `personal`，
+请求 `platform` 返回 `DENIED`。平台模型要求 admin 角色，个人模型写入 `owner_id=当前账号`。
+归属创建后不可修改；个人模型不会写入 `LLM_*` 全局别名，也不能复用平台凭据。
 
 ```json
 {

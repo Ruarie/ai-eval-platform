@@ -169,18 +169,26 @@ def _to_case_items(case_set_id: str, cases: list[dict]) -> list[CaseItem]:
     return items
 
 
-def _pick_generation_profile(db: Session, profile_id: str | None):
+def _pick_generation_profile(db: Session, profile_id: str | None, owner_id: str | None = None):
     """选生成用例用的协议档；返回 ``(profile, 是否发生了切换)``。
 
     用例生成是"长结构化 JSON 输出"，effort 型思考模板（``reasoning_effort`` 只是
     建议值、思考量由模型决定）会把 max_tokens 全烧在思考上、正文为空——实测 hy4
     单模块 8K/16K 预算均输出 0 字符。因此优先选非 effort 模板的档位。
+
+    归属边界：快照指定的个人模型必须属于任务创建者；自动换档只在平台模型中挑选，
+    绝不能让一个任务借用其他成员的私有模型或凭据。
     """
     preferred = (
         db.query(ProtocolProfile).filter(ProtocolProfile.id == profile_id).first()
         if profile_id
         else None
     )
+    if preferred is not None and (
+        getattr(preferred, "visibility", "platform") == "personal"
+        and preferred.owner_id != owner_id
+    ):
+        preferred = None
 
     def risky(item: ProtocolProfile | None) -> bool:
         return bool(item) and "effort" in str(getattr(item, "reasoning_template_id", "") or "").lower()
@@ -189,7 +197,10 @@ def _pick_generation_profile(db: Session, profile_id: str | None):
         return preferred, False
     safe = (
         db.query(ProtocolProfile)
-        .filter(~ProtocolProfile.reasoning_template_id.ilike("%effort%"))
+        .filter(
+            ProtocolProfile.visibility == "platform",
+            ~ProtocolProfile.reasoning_template_id.ilike("%effort%"),
+        )
         .order_by(ProtocolProfile.created_at)
         .first()
     )
@@ -262,7 +273,7 @@ def run_testcase(task_id: str) -> None:
         )
         row = db.query(Setting).filter(Setting.key == "agent_profile_id").first()
         profile_id = requested_id or (row.value if row else None)
-        profile, profile_switched = _pick_generation_profile(db, profile_id)
+        profile, profile_switched = _pick_generation_profile(db, profile_id, task.created_by)
         if profile_switched:
             db.add(TaskEvent(
                 task_id=task.id, event="progress",

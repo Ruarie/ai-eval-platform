@@ -64,7 +64,7 @@ BUILD_TIME = os.environ.get("BUILD_TIME", "").strip()
 
 
 def _bootstrap_admin() -> None:
-    """创建首个同权成员，并将早期骨架角色归一为 member。"""
+    """创建管理端引导账号，并把该账号的早期 member 角色提升为 admin。"""
     db = SessionLocal()
     try:
         existing = db.query(User).filter(User.username == settings.bootstrap_admin_username).first()
@@ -74,16 +74,17 @@ def _bootstrap_admin() -> None:
                     username=settings.bootstrap_admin_username,
                     password_hash=hash_password(settings.bootstrap_admin_password),
                     display_name=settings.bootstrap_admin_username,
-                    role="member",
+                    role="admin",
                     # V1.83 起机制废除：引导成员同样不再强制首次改密。
                     must_change_password=False,
                 )
             )
             db.commit()
-            logger.info("已创建引导成员 %s", settings.bootstrap_admin_username)
-        elif existing.role != "member":
-            existing.role = "member"
+            logger.info("已创建引导管理端账号 %s", settings.bootstrap_admin_username)
+        elif existing.role != "admin":
+            existing.role = "admin"
             db.commit()
+            logger.info("已将引导账号 %s 提升为管理端", settings.bootstrap_admin_username)
     finally:
         db.close()
 

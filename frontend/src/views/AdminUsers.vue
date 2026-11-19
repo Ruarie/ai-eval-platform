@@ -3,7 +3,7 @@
     <!-- U5 顶部：权限说明条 + 4 维 KPI 统计卡（对齐原型 admin-users.html 70-95） -->
     <div class="row-between">
       <div class="info-strip" style="margin: 0; padding: 6px 14px; border-radius: 8px">
-        单一角色「成员（Member）」，全员同权。所有人均具备发起评测、数据集管理与调度观测能力。
+        账号分为「管理端（admin）」与「成员（member）」：管理端维护平台模型与配置，成员使用平台并管理自己的私有模型。
       </div>
     </div>
 
@@ -30,7 +30,7 @@
     <div class="users-grid">
       <!-- 左主栏：成员列表与即时筛选 -->
       <div class="panel glow" style="--glow-c: var(--c-users)">
-        <div class="panel-title">
+        <div class="panel-title users-panel-title">
           <div class="row">
             <span>平台成员账号列表</span>
             <span class="mono" style="font-size: 12px; color: var(--text-tertiary)">({{ filteredUsers.length }} / {{ users.length }} 个成员)</span>
@@ -72,11 +72,11 @@
           <thead>
             <tr>
               <th>成员信息</th>
-              <th style="width: 130px">权限与角色</th>
-              <th style="width: 110px">账号状态</th>
-              <th style="width: 130px">最近登录 (IP)</th>
-              <th style="width: 120px">开户时间</th>
-              <th style="width: 176px; text-align: right">操作</th>
+              <th style="width: 90px">角色</th>
+              <th style="width: 104px">账号状态</th>
+              <th style="width: 128px">最近登录</th>
+              <th style="width: 112px">开户时间</th>
+              <th style="width: 168px; text-align: right">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -93,7 +93,9 @@
                 </div>
               </td>
               <td>
-                <span class="tag-soft">成员 · 全员同权</span>
+                <span class="tag-soft" :class="u.role === 'admin' ? 'role-admin' : ''">
+                  {{ u.role === 'admin' ? '管理端' : '成员' }}
+                </span>
               </td>
               <td>
                 <!-- U8 状态徽标：正常 succeeded / 停用 cancelled，均带呼吸点 -->
@@ -485,6 +487,21 @@ onMounted(loadPage)
   white-space: nowrap;
   min-width: 62px;
   text-align: center;
+}
+.role-admin {
+  color: var(--c-profiles);
+  border: 1px solid var(--c-profiles);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+/* 标题与操作组在窄屏/中等宽度允许换行，避免标题被挤成逐字竖排 */
+.users-panel-title {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+.users-panel-title > .row:last-child {
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 /* 审计时间线 warn 类型节点色（base.css 仅定义 ok/err/info，此处补齐原型 warn 态） */
 .tl-item.warn::before {

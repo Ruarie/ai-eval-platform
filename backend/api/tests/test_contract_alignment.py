@@ -85,9 +85,9 @@ class _FakeRequest:
     client = None
 
 
-def _user(uid: str = "u-1", username: str = "alice") -> User:
+def _user(uid: str = "u-1", username: str = "alice", role: str = "member") -> User:
     """构造不落库的成员 ORM 实例。"""
-    return User(id=uid, username=username)
+    return User(id=uid, username=username, role=role)
 
 
 def _task(creator: str) -> Task:
@@ -125,7 +125,7 @@ def test_delete_profile_blocked_when_referenced_by_agent():
     setting = Setting(key="agent_profile_id", value="p-1")
     db = _RichFakeDb({ProtocolProfile: profile, Setting: setting})
     with pytest.raises(AppError) as exc:
-        delete_profile(profile_id="p-1", request=_FakeRequest(), db=db, user=_user())
+        delete_profile(profile_id="p-1", request=_FakeRequest(), db=db, user=_user(role="admin"))
     assert exc.value.code == ErrorCode.VALIDATION
     assert db.deleted == []
 
@@ -134,7 +134,7 @@ def test_delete_profile_allowed_when_not_referenced():
     # 未被引用：正常删除并返回 ok
     profile = ProtocolProfile(id="p-1", name="old-model")
     db = _RichFakeDb({ProtocolProfile: profile, Setting: None})
-    out = delete_profile(profile_id="p-1", request=_FakeRequest(), db=db, user=_user())
+    out = delete_profile(profile_id="p-1", request=_FakeRequest(), db=db, user=_user(role="admin"))
     assert out["ok"] is True
     assert db.deleted == [profile]
 

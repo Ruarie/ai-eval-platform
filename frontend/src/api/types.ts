@@ -137,6 +137,12 @@ export interface Profile {
   max_output_tokens?: number // Agent 单回合模型输出上限 (max_tokens)
   reasoning_effort?: ProfileEffort
   tool_call_mode?: ToolCallMode
+  /** 平台公共模型 / 成员私有模型；个人模型仅属主与管理端可见。 */
+  visibility?: 'platform' | 'personal'
+  owner_id?: string | null
+  owner_username?: string | null
+  /** 当前账号是否可编辑/删除该模型。 */
+  can_manage?: boolean
   created_at: string
   updated_at?: string
 }
@@ -160,6 +166,8 @@ export interface ProfileCreateIn {
   max_output_tokens?: number
   tool_call_mode?: ToolCallMode
   reasoning_template_id?: string
+  /** 管理端可显式选择归属；普通成员只能创建个人模型。 */
+  visibility?: 'platform' | 'personal'
 }
 
 export interface ProfileUpdateIn {

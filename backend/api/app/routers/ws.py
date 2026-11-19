@@ -1054,6 +1054,8 @@ def _selected_model_config(db: Session) -> tuple[ModelConfig, _ProfileSnapshot]:
         raise AppError(ErrorCode.VALIDATION, "Agent 协议档不存在")
     if "agent" not in (profile.usages or []):
         raise AppError(ErrorCode.VALIDATION, "协议档未启用 agent 用途")
+    if getattr(profile, "visibility", "platform") != "platform":
+        raise AppError(ErrorCode.VALIDATION, "平台默认模型不能使用个人模型")
     base_url, model, api_key = _profile_connection(profile, allow_global_alias=True)
     if not base_url or not model:
         raise AppError(ErrorCode.VALIDATION, "Agent 协议档配置不完整")

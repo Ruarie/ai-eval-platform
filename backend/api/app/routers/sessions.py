@@ -30,6 +30,7 @@ from ..models import (
     WsEvent,
 )
 from ..models import Session as AgentSession
+from ..profile_access import can_view_profile
 from ..profile_env import profile_env_read_scope
 from ..schemas import (
     SessionCreate,
@@ -105,7 +106,12 @@ def _loop_ui(db: Session, user: User, request: Request, session=None) -> dict:
             "default_effort": default,
         }
 
-    rows = db.query(ProtocolProfile).order_by(ProtocolProfile.created_at.desc()).all()
+    # 只发布当前账号可用的模型：平台公共模型 + 本人私有模型（管理端可见全部）。
+    rows = [
+        row
+        for row in db.query(ProtocolProfile).order_by(ProtocolProfile.created_at.desc()).all()
+        if can_view_profile(row, user)
+    ]
     default_row = db.get(Setting, "agent_profile_id")
     default_id = default_row.value.strip() if default_row and isinstance(default_row.value, str) else None
     default_item = None
@@ -129,8 +135,13 @@ def _loop_ui(db: Session, user: User, request: Request, session=None) -> dict:
         if allowed:
             item = profile_item(row, snapshot, allowed, default)
             profiles.append(item)
-            # 默认项只复用原配置校验成功的结果，不能把关闭思考的探测回退当默认配置。
-            if row.id == default_id and configured_effort_valid:
+            # 默认项只复用原配置校验成功的结果，不能把关闭思考的探测回退当默认配置；
+            # 平台默认模型必须是公共模型，避免历史脏数据把个人模型作为全员默认。
+            if (
+                row.id == default_id
+                and configured_effort_valid
+                and (getattr(row, "visibility", None) or "platform") == "platform"
+            ):
                 default_item = item
 
     profile_data, allowed, default = None, [], None
