@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.44 ｜ 审查日期：2026-11-19（下线无调用方的常驻服务：① `stress` 压测引擎从 `docker-compose.yml` 移除——任务中心的压测入口要求父任务为 benchmark/rag，两类新建入口已停用，容器常驻无实际调用；`deploy/plan_services.py` 与 `deploy/deploy.sh` 同步移除该服务，`backend/stress` 代码与 `GET /api/tasks/{id}/stress-series` 历史查询保留。② 清理宿主机上 compose 之外的残留 `api-pytest` 容器（自带 restart 策略反复拉起，常驻约 85MB）。部署计划单测 25 项通过；下线后 `docker ps` 只剩 web/api/worker/runner/lightrag/media-mcp/https + postgres/redis。）
+>
 > 版本：V2.43 ｜ 审查日期：2026-11-18（能力中心补齐 RAG 与 MCP：① `resources.kind` 增加 `rag`，`content` 必须绑定存在的知识库并固化 `kb_id/kb_name/mode/k`，`mode` ∈ naive/local/global/hybrid、`k` ∈ 1–20，缺失或非法返回 VALIDATION；试检索复用 `POST /api/kb/{id}/query`，不新增检索端点、不复制正文。② 新增 `/mcp` 只读中心，复用 `/api/mcp/all-tools` 与 `/api/mcp/health-check`，按原生/MCP 分组展示权限、风险与超时；仍不接受浏览器指定任意第三方 MCP 地址。前端新增 `/rag`、`/mcp` 两个路由，侧栏「能力」补齐 7 项。门禁：api 2537 passed/97 skipped、ruff 通过、前端 typecheck/build、单测 162/162、e2e 155/155。契约见 API V2.65 修订与 PRD 5.8。）
 >
 > 版本：V2.42 ｜ 审查日期：2026-11-18（能力中心 MVP：新增资源中心（Agent / Skills / Scripts / Rules）与资源广场。新增 `resources` 与 `resource_usage_events`（迁移 `b9e2f4a7c318`），四类资源 `agent/skill/script/rule` 共用一套实体与 7 个端点（列表 / 详情 / 新建 / 更新 / 删除 / 使用 / 克隆，外加广场三榜）；可见性两档 `team/private`，写操作限属主或管理员，`content` 序列化后上限 100KB；不落任何密钥（Agent 只引用协议档 ID）。前端新增 `/plaza`、`/agents`、`/skills`、`/scripts`、`/rules` 五个路由（共用 `ResourceCenter.vue`，按 `meta.resourceKind` 区分），侧栏新增「能力」分组；广场飙升榜按近 7 日使用事件，不用累计值冒充。门禁：api 2536 passed/97 skipped、ruff 通过、前端 typecheck/build、单测 162/162、e2e 153/153。契约见 API V2.65、PRD 5.8。）
@@ -93,7 +95,7 @@
 | **数据库** | `postgres` | `5432` | PostgreSQL 16 关系数据库（pgvector 镜像，含向量扩展；持久卷 `pgdata`） |
 | **缓存/记忆** | `redis` | - | 容器内部网络通信；Harness 记忆层短期回合状态与幂等键（持久卷 `redisdata`） |
 | **RAG 引擎** | `lightrag` | 容器内 `9621` | LightRAG 混合检索；不映射宿主机，业务接口要求内部口令 |
-| **压测引擎** | `stress` | 容器内 `19090` | go-stress-testing；不映射宿主机，`/run` 已停用 |
+| ~~**压测引擎**~~ | ~~`stress`~~ | — | **已下线（2026-11-19）**：创建压测任务要求父任务为 benchmark/rag，而这两类新建入口早已停用；容器常驻只白占内存。`backend/stress` 代码与 `GET /api/tasks/{id}/stress-series` 历史查询仍保留。 |
 
 > 初始管理员：`admin / admin123`（由 `.env` 中 `BOOTSTRAP_ADMIN_PASSWORD` 注入）。
 

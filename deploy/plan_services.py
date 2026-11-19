@@ -26,7 +26,7 @@ def definitions(root: Path) -> dict[str, dict[str, str]]:
         },
         **{
             name: {"context": f"backend/{name}", "dockerfile": f"backend/{name}/Dockerfile"}
-            for name in ("lightrag", "stress")
+            for name in ("lightrag",)
         },
     }
     for dockerfile in sorted((root / "backend").glob("*_mcp/Dockerfile")):

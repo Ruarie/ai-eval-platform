@@ -285,7 +285,7 @@ fi
 # 虽记录了目标不可变镜像，但线上仍会继续运行旧容器。把镜像不一致的服务
 # 重新纳入本轮更新，避免工作流误报成功而静态前端仍停留在旧版本。
 RECONCILED_SERVICES=()
-TRACKED_IMAGE_SERVICES=(web api worker runner lightrag stress "${MCP_BUILD_SERVICES[@]}")
+TRACKED_IMAGE_SERVICES=(web api worker runner lightrag "${MCP_BUILD_SERVICES[@]}")
 for service in "${TRACKED_IMAGE_SERVICES[@]}"; do
     image_variable="$(service_image_variable "$service")"
     expected_image="${!image_variable:-}"

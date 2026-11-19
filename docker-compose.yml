@@ -349,14 +349,9 @@ services:
       retries: 5
       start_period: 30s
 
-  stress:
-    image: ${STRESS_IMAGE:-ai-eval-platform-stress}
-    mem_limit: 128m
-    build: ./backend/stress
-    restart: unless-stopped
-    # 压测引擎只给 worker 用，不再映射到宿主机。
-    expose:
-      - "19090"
+  # 压测引擎（stress）已下线：任务中心的压测入口要求父任务为 benchmark/rag，
+  # 而这两类任务的新建入口早已停用，容器常驻只会白占内存。需要时按
+  # deploy/deploy.sh 的历史版本临时拉回 backend/stress 即可。
 
 volumes:
   pgdata:
