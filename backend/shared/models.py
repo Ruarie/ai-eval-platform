@@ -980,6 +980,8 @@ class CaseSet(Base):
     column_schema = Column(JSONB, nullable=False, default=list)
     # 确认页红字检查项数组：[{level, code, message}]，由生成/保存侧计算
     checks = Column(JSONB, nullable=False, default=list)
+    # 软删除：只隐藏入口，版本快照、评审记录与历史报告仍可追溯（对照工作区注销口径）。
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
     # 需求基线：用例集生成/绑定后固定，基线改版不回溯影响旧集。
     requirement_baseline_id = Column(
         String,

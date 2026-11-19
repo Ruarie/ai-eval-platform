@@ -1167,6 +1167,16 @@ export const api = {
       }
       await http.post(`/api/case-sets/${id}/confirm`, payload)
     },
+    /** 删除用例集：服务端软删，列表与详情不再返回，历史版本仍可追溯。 */
+    async removeSet(id: string): Promise<void> {
+      if (getDataMode() === 'mock') {
+        const idx = mockStore.caseSets.findIndex((x) => x.id === id)
+        if (idx < 0) throw new ApiError('用例集不存在', ErrorCode.NOT_FOUND, 404)
+        mockStore.caseSets.splice(idx, 1)
+        return
+      }
+      await http.delete(`/api/case-sets/${id}`)
+    },
     async cancelSet(id: string, expectedRevision: number, reason?: string): Promise<void> {
       if (getDataMode() === 'mock') {
         const cs = mockStore.caseSets.find((x) => x.id === id)
