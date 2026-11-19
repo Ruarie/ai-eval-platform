@@ -146,6 +146,12 @@ const http = axios.create({
   timeout: 30000,
 })
 
+// 远程 SSH 工作区每次操作都要新建连接（TCP + banner + 认证），慢链路下会超过
+// 全局 30s；给远程文件操作单独放宽，避免浏览器先报超时而后端还在握手。
+const REMOTE_SSH_TIMEOUT_MS = 60000
+// 上传走 SFTP 整文件传输，大文件需要更长预算（后端上限 20MB）。
+const REMOTE_SSH_UPLOAD_TIMEOUT_MS = 300000
+
 // 远程工作区的 SSH 密码只存在 sessionStorage（关闭标签即失效），由拦截器按
 // 工作区 ID 附加到请求头；服务端不落库、不写日志。
 http.interceptors.request.use(config => {
@@ -1898,15 +1904,19 @@ export const api = {
       parent: string | null
       entries: Array<{ name: string; path: string }>
     }> {
-      const { data } = await http.post('/api/workspaces/ssh/browse', {
-        host: params.host,
-        user: params.user,
-        port: params.port ?? 22,
-        auth_type: params.auth_type ?? 'key_file',
-        key_name: params.key_name,
-        path: params.path ?? '/',
-        password: params.password,
-      })
+      const { data } = await http.post(
+        '/api/workspaces/ssh/browse',
+        {
+          host: params.host,
+          user: params.user,
+          port: params.port ?? 22,
+          auth_type: params.auth_type ?? 'key_file',
+          key_name: params.key_name,
+          path: params.path ?? '/',
+          password: params.password,
+        },
+        { timeout: REMOTE_SSH_TIMEOUT_MS },
+      )
       return data
     },
     /** 远程命令第一步：登记待确认请求（不执行，返回审批单与预览）。 */
@@ -1971,41 +1981,70 @@ export const api = {
       return data
     },
     async listFiles(id: string, path = ''): Promise<UserWorkspaceFileList> {
-      const { data } = await http.get(`/api/workspaces/${id}/files`, { params: { path } })
+      const { data } = await http.get(`/api/workspaces/${id}/files`, {
+        params: { path },
+        timeout: REMOTE_SSH_TIMEOUT_MS,
+      })
       return data
     },
     async createFolder(id: string, path: string, name: string): Promise<{ ok: boolean; path: string }> {
-      const { data } = await http.post(`/api/workspaces/${id}/files`, { path, name })
+      const { data } = await http.post(
+        `/api/workspaces/${id}/files`,
+        { path, name },
+        { timeout: REMOTE_SSH_TIMEOUT_MS },
+      )
       return data
     },
     async getTree(id: string, max_depth = 5): Promise<UserWorkspaceTree> {
-      const { data } = await http.get(`/api/workspaces/${id}/files/tree`, { params: { max_depth } })
+      const { data } = await http.get(`/api/workspaces/${id}/files/tree`, {
+        params: { max_depth },
+        timeout: REMOTE_SSH_TIMEOUT_MS,
+      })
       return data
     },
     async getFileContent(id: string, path: string): Promise<UserWorkspaceFileContent> {
-      const { data } = await http.get(`/api/workspaces/${id}/files/content`, { params: { path } })
+      const { data } = await http.get(`/api/workspaces/${id}/files/content`, {
+        params: { path },
+        timeout: REMOTE_SSH_TIMEOUT_MS,
+      })
       return data
     },
     async saveFileContent(id: string, path: string, content: string): Promise<{ ok: boolean; path: string; size: number }> {
-      const { data } = await http.put(`/api/workspaces/${id}/files/content`, { path, content })
+      const { data } = await http.put(
+        `/api/workspaces/${id}/files/content`,
+        { path, content },
+        { timeout: REMOTE_SSH_TIMEOUT_MS },
+      )
       return data
     },
     async createFile(id: string, path: string, name: string, content = ''): Promise<{ ok: boolean; path: string; name: string }> {
-      const { data } = await http.post(`/api/workspaces/${id}/files/file`, { path, name, content })
+      const { data } = await http.post(
+        `/api/workspaces/${id}/files/file`,
+        { path, name, content },
+        { timeout: REMOTE_SSH_TIMEOUT_MS },
+      )
       return data
     },
     async renamePath(id: string, path: string, new_name: string): Promise<{ ok: boolean; old_path: string; new_path: string; name: string }> {
-      const { data } = await http.patch(`/api/workspaces/${id}/files/rename`, { path, new_name })
+      const { data } = await http.patch(
+        `/api/workspaces/${id}/files/rename`,
+        { path, new_name },
+        { timeout: REMOTE_SSH_TIMEOUT_MS },
+      )
       return data
     },
     async deletePath(id: string, path: string): Promise<{ ok: boolean; path: string; deleted: boolean }> {
-      const { data } = await http.delete(`/api/workspaces/${id}/files`, { params: { path } })
+      const { data } = await http.delete(`/api/workspaces/${id}/files`, {
+        params: { path },
+        timeout: REMOTE_SSH_TIMEOUT_MS,
+      })
       return data
     },
     async getRawBlob(id: string, path: string): Promise<Blob> {
       const res = await http.get(`/api/workspaces/${id}/files/raw`, {
         params: { path },
         responseType: 'blob',
+        timeout: REMOTE_SSH_TIMEOUT_MS,
       })
       return res.data
     },
@@ -2020,6 +2059,7 @@ export const api = {
       form.append('path', path)
       const { data } = await http.post(`/api/workspaces/${id}/files/upload`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: REMOTE_SSH_UPLOAD_TIMEOUT_MS,
       })
       return data
     },

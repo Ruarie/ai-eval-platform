@@ -21,7 +21,10 @@ from __future__ import annotations
 import logging
 import posixpath
 import shlex
+import socket
 import stat as stat_module
+import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -123,7 +126,14 @@ def _load_private_key(key_name: str) -> paramiko.PKey:
 
 @contextmanager
 def _connect(workspace: Any, password: str = "") -> Iterator[paramiko.SSHClient]:
+    """建立 SSH 连接；``workspace_ssh_connect_timeout_s`` 是**整段**连接预算。
+
+    paramiko 的 ``timeout`` / ``banner_timeout`` / ``auth_timeout`` 各算各的，
+    三段串联时最坏可达 3 倍（30s），浏览器 30s 超时会先于后端返回。这里统一按
+    一个 deadline 预算控制，并在到点时强制关闭 socket，保证调用方拿到明确错误。
+    """
     target = target_for(workspace)
+    budget = max(1, int(settings.workspace_ssh_connect_timeout_s))
     client = paramiko.SSHClient()
     # 有 known_hosts 就严格校验指纹（防中间人）；没有则退化为 AutoAdd 并告警，
     # 避免内网首次接入直接不可用，但公网主机应配置 known_hosts。
@@ -141,25 +151,74 @@ def _connect(workspace: Any, password: str = "") -> Iterator[paramiko.SSHClient]
         if target.auth_type == "password"
         else {"pkey": _load_private_key(target.key_name)}
     )
+
+    deadline = time.monotonic() + budget
+    timed_out = threading.Event()
+
+    def _remaining() -> float:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise RemoteWorkspaceError(f"SSH 连接超时（{budget}s）：{target.host}:{target.port}")
+        return left
+
+    try:
+        sock = socket.create_connection((target.host, target.port), timeout=_remaining())
+    except RemoteWorkspaceError:
+        raise
+    except TimeoutError as exc:
+        raise RemoteWorkspaceError(
+            f"SSH 连接超时（{budget}s）：{target.host}:{target.port}"
+        ) from exc
+    except OSError as exc:
+        logger.warning(
+            "SSH 连接失败 host=%s port=%s err=%s", target.host, target.port, type(exc).__name__
+        )
+        raise RemoteWorkspaceError(f"SSH 连接失败：{type(exc).__name__}") from exc
+
+    def _abort() -> None:
+        """到点强制断开，避免握手阶段绕开 socket 超时把线程占住。"""
+        timed_out.set()
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+    left = deadline - time.monotonic()
+    if left <= 0:
+        sock.close()
+        raise RemoteWorkspaceError(f"SSH 连接超时（{budget}s）：{target.host}:{target.port}")
+    watchdog = threading.Timer(left, _abort)
+    watchdog.daemon = True
+    watchdog.start()
     try:
         client.connect(
             hostname=target.host,
             port=target.port,
             username=target.user,
+            sock=sock,
             **credentials,
-            timeout=settings.workspace_ssh_connect_timeout_s,
-            banner_timeout=settings.workspace_ssh_connect_timeout_s,
-            auth_timeout=settings.workspace_ssh_connect_timeout_s,
+            timeout=_remaining(),
+            banner_timeout=_remaining(),
+            auth_timeout=_remaining(),
             look_for_keys=False,
             allow_agent=False,
         )
     except RemoteWorkspaceError:
+        client.close()
         raise
     except Exception as exc:  # noqa: BLE001 - 统一转"不可用"
+        client.close()
+        if timed_out.is_set():
+            logger.warning("SSH 连接超时 host=%s user=%s budget=%ss", target.host, target.user, budget)
+            raise RemoteWorkspaceError(
+                f"SSH 连接超时（{budget}s）：{target.host}:{target.port}"
+            ) from exc
         logger.warning(
             "SSH 连接失败 host=%s user=%s err=%s", target.host, target.user, type(exc).__name__
         )
         raise RemoteWorkspaceError(f"SSH 连接失败：{type(exc).__name__}") from exc
+    finally:
+        watchdog.cancel()
     try:
         yield client
     finally:
@@ -315,7 +374,7 @@ def browse_dirs(workspace: Any, path: str = "/", password: str = "") -> dict:
 
 def probe(workspace: Any, password: str = "") -> dict:
     """轻量连通性探测：能连上并列出根目录才算配置有效。"""
-    entries = list_dir(workspace, ".")
+    entries = list_dir(workspace, ".", password)
     return {"ok": True, "entries": len(entries)}
 
 
