@@ -38,6 +38,7 @@ export interface AuditEntry {
   at?: string
   ts?: string
   actor_id?: string | null
+  actor_name?: string
   action: string
   target?: AuditTarget
   target_type?: string | null

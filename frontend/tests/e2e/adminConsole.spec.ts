@@ -36,6 +36,7 @@ const AUDIT = {
     id: 60 - i,
     at: '2026-11-19T01:00:00+00:00',
     actor_id: 'u-1',
+    actor_name: '管理员',
     action: i % 3 === 0 ? 'resource_delete' : 'resource_create',
     target: { type: 'resource', id: `r-${String(i).padStart(8, '0')}` },
     detail: { kind: 'agent' },
@@ -109,6 +110,7 @@ test('审计日志：默认分页、动作过滤与加载更多', async ({ page 
 
   await expect(page.getByRole('heading', { name: '审计日志' })).toBeVisible()
   await expect(page.locator('.aa-total')).toContainText('共 60 条')
+  await expect(page.locator('.aa-table tbody tr').first()).toContainText('管理员')
   // 默认一页 50 行
   await expect(page.locator('.aa-table tbody tr')).toHaveCount(50)
 
