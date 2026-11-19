@@ -30,6 +30,8 @@ jobs:
         run: python3 tools/check_migration_heads.py
 
   deploy-scripts:
+    # PR 只跑迁移守卫；其余作业留在 main 推送后执行，避免 PR 消耗 Runner。
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -44,6 +46,8 @@ jobs:
           python3 -m unittest discover -s deploy/tests -v
 
   backend:
+    # PR 只跑迁移守卫；其余作业留在 main 推送后执行，避免 PR 消耗 Runner。
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     # 隔离临时 PG 运行真实事实/WS/文件闭环测试，绝不借用生产库。
     services:
@@ -102,6 +106,8 @@ jobs:
         run: pytest
 
   runner:
+    # PR 只跑迁移守卫；其余作业留在 main 推送后执行，避免 PR 消耗 Runner。
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -133,6 +139,8 @@ jobs:
         run: pytest
 
   worker:
+    # PR 只跑迁移守卫；其余作业留在 main 推送后执行，避免 PR 消耗 Runner。
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -171,6 +179,8 @@ jobs:
         run: PYTHONPATH=.:.. pytest
 
   frontend:
+    # PR 只跑迁移守卫；其余作业留在 main 推送后执行，避免 PR 消耗 Runner。
+    if: github.event_name == 'push'
     # runner 已升级到 ubuntu-26.04，Playwright 1.58 不支持：
     # `playwright install --with-deps chromium` 会直接报 "does not support chromium on ubuntu26.04-x64"。
     # 固定到 24.04（Playwright 官方支持矩阵内的最新 LTS）。
