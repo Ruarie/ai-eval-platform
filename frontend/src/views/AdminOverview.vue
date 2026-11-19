@@ -146,15 +146,23 @@ const actionLabel = (action: string): string => ACTION_LABELS[action] || action
 
 interface OverviewCard { key: string; label: string; value: string | number; sub: string; color: string }
 
+/** 文件体量按 KB / MB 自适应，避免小文件一律显示 0.0 MB。 */
+function formatBytes(bytes?: number): string {
+  if (bytes === undefined || bytes === null) return '—'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
 const cards = computed<OverviewCard[]>(() => {
   const d = data.value
-  const mb = d ? (d.storage.bytes / 1024 / 1024).toFixed(1) : '—'
+  const size = formatBytes(d?.storage.bytes)
   return [
     { key: 'users', label: '成员', value: d?.users.total ?? '—', sub: `近 7 天活跃 ${d?.users.active_7d ?? '—'} · 停用 ${d?.users.disabled ?? '—'}`, color: 'var(--c-users)' },
     { key: 'sessions', label: '会话', value: d?.sessions.total ?? '—', sub: `近 7 天新增 ${d?.sessions.new_7d ?? '—'} · 共享 ${d?.sessions.shared ?? '—'}`, color: 'var(--c-agent)' },
     { key: 'tasks', label: '任务（7 天）', value: d?.tasks.total_7d ?? '—', sub: `成功 ${d?.tasks.by_status.succeeded ?? 0} · 失败 ${d?.tasks.by_status.failed ?? 0}`, color: 'var(--c-tasks)' },
     { key: 'resources', label: '能力资源', value: d?.resources.total ?? '—', sub: `团队 ${d?.resources.team ?? '—'} · 私有 ${d?.resources.private ?? '—'}`, color: 'var(--c-datasets)' },
-    { key: 'storage', label: '文件存储', value: mb === '—' ? '—' : `${mb} MB`, sub: `${d?.storage.files ?? '—'} 个文件 · 知识库 ${d?.storage.kb_count ?? '—'} 个`, color: 'var(--c-kb)' },
+    { key: 'storage', label: '文件存储', value: size, sub: `${d?.storage.files ?? '—'} 个文件 · 知识库 ${d?.storage.kb_count ?? '—'} 个`, color: 'var(--c-kb)' },
     { key: 'audit', label: '审计（24h）', value: d?.audit_24h ?? '—', sub: '写操作全量留痕', color: 'var(--c-profiles)' },
   ]
 })
@@ -228,7 +236,7 @@ onMounted(load)
 .ao-head p { margin: 0; color: var(--text-secondary); font-size: 13.5px; }
 .ao-head-actions { display: flex; gap: 8px; }
 
-.ao-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.ao-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 10px; }
 .ao-card {
   border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-card);
   padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
