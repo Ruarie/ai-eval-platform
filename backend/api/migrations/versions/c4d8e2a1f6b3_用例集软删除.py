@@ -1,10 +1,10 @@
-"""用例集软删除列。
+"""用例集软删除列（接在能力中心与模型归属的合并节点之后）。
 
 只用 `deleted_at` 标记：列表与详情过滤掉，版本快照、评审记录、报告仍然可追溯。
 对照工作区注销的口径，不做物理删除，避免级联清掉历史。
 
 Revision ID: c4d8e2a1f6b3
-Revises: b9e2f4a7c318
+Revises: c9f1d2e3a4b5
 Create Date: 2026-11-19
 """
 
@@ -15,7 +15,7 @@ from alembic import op
 
 # Alembic 迁移标识。
 revision: str = "c4d8e2a1f6b3"
-down_revision: Union[str, None] = "b9e2f4a7c318"
+down_revision: Union[str, None] = "c9f1d2e3a4b5"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
