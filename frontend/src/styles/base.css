@@ -224,7 +224,37 @@ p { margin: 0; text-wrap: pretty; }
 .btn-warn { background: var(--accent-warning); color: #fff; }
 .btn-warn:hover:not(:disabled) { background: #D97706; }
 .btn-sm { min-height: 30px; padding: 4px 12px; font-size: 13px; border-radius: 8px; }
+.btn-xs { min-height: 26px; padding: 3px 8px; font-size: 12px; border-radius: 6px; }
 .btn-icon { width: 36px; height: 36px; padding: 0; border-radius: 10px; }
+/* 无底色轻按钮：跨页面共用，避免仅在个别页面 scoped 定义导致原生灰底 */
+.btn-ghost-subtle { background: transparent; border-color: transparent; color: var(--text-secondary); }
+.btn-ghost-subtle:hover:not(:disabled) { background: var(--row-hover); color: var(--text-primary); }
+
+/* 顶栏图标按钮：NotificationBell 等子组件也依赖，必须全局定义 */
+.topbar-icon-btn {
+  width: 32px; height: 32px;
+  padding: 0;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  transition: all .15s ease;
+}
+.topbar-icon-btn:hover:not(:disabled) { border-color: var(--text-tertiary); color: var(--text-primary); }
+
+/* 表头扩展列删除按钮：Cases 与 Datasets 共用 */
+.th-del-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px;
+  padding: 0;
+  border: 0; border-radius: 4px;
+  background: none;
+  color: var(--text-tertiary); font-size: 11px;
+  cursor: pointer;
+}
+.th-del-btn:hover:not(:disabled) { color: var(--accent-error); background: rgba(239, 68, 68, .08); }
+.th-del-btn:disabled { opacity: .45; cursor: not-allowed; }
 
 /* ─── 徽章与标签 ───────────────────────────────────────────── */
 .badge {

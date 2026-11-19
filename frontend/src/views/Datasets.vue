@@ -1827,12 +1827,17 @@ onUnmounted(() => {
   align-items: center;
   width: 100%;
   gap: 12px;
+  /* 中等宽度下让操作组换行，避免把数据集标题压成逐字竖排 */
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 
 .toolbar-title-group {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 0 0 auto;
+  min-width: 210px;
 }
 .title-row {
   display: flex;
