@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.45 ｜ 审查日期：2026-11-19（新增管理后台三页：`/admin` 平台概览、`/admin/audit` 审计日志、`/admin/resources` 资源治理。后端新增 `GET /api/admin/overview`：一次聚合成员/会话/任务/资源/存储/审计六组计数，口径为「会话不计软删除、任务只看近 7 天、资源按 kind 分组、审计近 24h + Top5 动作」；前端不二次聚合。资源治理复用 `/api/resources` 的 PATCH/DELETE（服务端已允许管理员），切换可见性与下架都会落 AuditLog。门禁：api 2539 passed/97 skipped、ruff 通过、前端 typecheck/build、单测 162/162、e2e 158/158。）
+>
 > 版本：V2.44 ｜ 审查日期：2026-11-19（下线无调用方的常驻服务：① `stress` 压测引擎从 `docker-compose.yml` 移除——任务中心的压测入口要求父任务为 benchmark/rag，两类新建入口已停用，容器常驻无实际调用；`deploy/plan_services.py` 与 `deploy/deploy.sh` 同步移除该服务，`backend/stress` 代码与 `GET /api/tasks/{id}/stress-series` 历史查询保留。② 清理宿主机上 compose 之外的残留 `api-pytest` 容器（自带 restart 策略反复拉起，常驻约 85MB）。部署计划单测 25 项通过；下线后 `docker ps` 只剩 web/api/worker/runner/lightrag/media-mcp/https + postgres/redis。）
 >
 > 版本：V2.43 ｜ 审查日期：2026-11-18（能力中心补齐 RAG 与 MCP：① `resources.kind` 增加 `rag`，`content` 必须绑定存在的知识库并固化 `kb_id/kb_name/mode/k`，`mode` ∈ naive/local/global/hybrid、`k` ∈ 1–20，缺失或非法返回 VALIDATION；试检索复用 `POST /api/kb/{id}/query`，不新增检索端点、不复制正文。② 新增 `/mcp` 只读中心，复用 `/api/mcp/all-tools` 与 `/api/mcp/health-check`，按原生/MCP 分组展示权限、风险与超时；仍不接受浏览器指定任意第三方 MCP 地址。前端新增 `/rag`、`/mcp` 两个路由，侧栏「能力」补齐 7 项。门禁：api 2537 passed/97 skipped、ruff 通过、前端 typecheck/build、单测 162/162、e2e 155/155。契约见 API V2.65 修订与 PRD 5.8。）

@@ -1,12 +1,13 @@
 """全员同权的运行时配置、压测白名单治理与审计查询接口。"""
 
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import Field, model_validator
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..agent.log import agent_trace
@@ -33,7 +34,18 @@ from ..harness.skills.storage import (
     restore_skill_document,
     update_skill_document,
 )
-from ..models import AuditLog, ProtocolProfile, Setting, User
+from ..models import (
+    AuditLog,
+    KbDocument,
+    KnowledgeBase,
+    ProtocolProfile,
+    Resource,
+    Setting,
+    StoredFile,
+    Task,
+    User,
+)
+from ..models import Session as ChatSession
 from ..profile_env import (
     ProfileEnvSnapshot,
     read_global_rag_env,
@@ -41,7 +53,16 @@ from ..profile_env import (
     write_global_rag_env,
     write_profile_env,
 )
-from ..schemas import ApiModel
+from ..schemas import (
+    AdminOverviewOut,
+    ApiModel,
+    OverviewAuditItem,
+    OverviewResources,
+    OverviewSessions,
+    OverviewStorage,
+    OverviewTasks,
+    OverviewUsers,
+)
 from .profiles import _profile_connection
 from .users import _parse_bound
 
@@ -770,3 +791,124 @@ def get_audit_logs(
         ],
         "total": total,
     }
+
+
+@router.get("/overview", response_model=AdminOverviewOut, summary="后台总览聚合")
+def admin_overview(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AdminOverviewOut:
+    """一次请求给出后台首屏所需的全部计数。
+
+    口径约定：
+    - 会话不计软删除；团队共享单列，避免把私有会话算成协作资产。
+    - 任务只看近 7 天，历史全量对首屏没有价值且会拖慢查询。
+    - 资源按 kind 分组，使用量为 ``usage_count`` 求和。
+    - 审计取近 24h 计数 + Top5 动作 + 最近 8 条，明细留在审计页。
+    """
+    _ = user
+    now = datetime.now(UTC)
+    since7 = now - timedelta(days=7)
+    since24 = now - timedelta(hours=24)
+
+    def count(query) -> int:
+        return int(query.scalar() or 0)
+
+    users_total = count(db.query(func.count(User.id)))
+    users_new7 = count(db.query(func.count(User.id)).filter(User.created_at >= since7))
+    users_active7 = count(db.query(func.count(User.id)).filter(User.last_login_at >= since7))
+    users_disabled = count(db.query(func.count(User.id)).filter(User.disabled.is_(True)))
+
+    live_sessions = db.query(func.count(ChatSession.id)).filter(ChatSession.deleted_at.is_(None))
+    sessions_total = count(live_sessions)
+    sessions_new7 = count(
+        db.query(func.count(ChatSession.id)).filter(
+            ChatSession.deleted_at.is_(None), ChatSession.created_at >= since7
+        )
+    )
+    sessions_shared = count(
+        db.query(func.count(ChatSession.id)).filter(
+            ChatSession.deleted_at.is_(None), ChatSession.visibility == "team"
+        )
+    )
+
+    task_rows = (
+        db.query(Task.status, func.count(Task.id))
+        .filter(Task.created_at >= since7)
+        .group_by(Task.status)
+        .all()
+    )
+    tasks_by_status = {status: int(total) for status, total in task_rows}
+
+    resource_rows = db.query(Resource.kind, func.count(Resource.id)).group_by(Resource.kind).all()
+    resources_by_kind = {kind: int(total) for kind, total in resource_rows}
+    resources_total = sum(resources_by_kind.values())
+    resources_team = count(db.query(func.count(Resource.id)).filter(Resource.visibility == "team"))
+    resources_private = count(db.query(func.count(Resource.id)).filter(Resource.visibility == "private"))
+    resources_new7 = count(db.query(func.count(Resource.id)).filter(Resource.created_at >= since7))
+    resources_usage = count(db.query(func.coalesce(func.sum(Resource.usage_count), 0)))
+
+    files_count = count(db.query(func.count(StoredFile.id)))
+    files_bytes = count(db.query(func.coalesce(func.sum(StoredFile.size_bytes), 0)))
+    kb_count = count(db.query(func.count(KnowledgeBase.id)))
+    kb_docs = count(db.query(func.count(KbDocument.id)))
+
+    audit_24h = count(db.query(func.count(AuditLog.id)).filter(AuditLog.ts >= since24))
+    action_rows = (
+        db.query(AuditLog.action, func.count(AuditLog.id))
+        .filter(AuditLog.ts >= since24)
+        .group_by(AuditLog.action)
+        .order_by(func.count(AuditLog.id).desc())
+        .limit(5)
+        .all()
+    )
+    top_actions = {action: int(total) for action, total in action_rows}
+
+    recent = (
+        db.query(AuditLog, User.username, User.display_name)
+        .outerjoin(User, User.id == AuditLog.user_id)
+        .order_by(AuditLog.ts.desc(), AuditLog.id.desc())
+        .limit(8)
+        .all()
+    )
+
+    return AdminOverviewOut(
+        users=OverviewUsers(
+            total=users_total,
+            new_7d=users_new7,
+            active_7d=users_active7,
+            disabled=users_disabled,
+        ),
+        sessions=OverviewSessions(
+            total=sessions_total, new_7d=sessions_new7, shared=sessions_shared
+        ),
+        tasks=OverviewTasks(
+            total_7d=sum(tasks_by_status.values()), by_status=tasks_by_status
+        ),
+        resources=OverviewResources(
+            total=resources_total,
+            new_7d=resources_new7,
+            team=resources_team,
+            private=resources_private,
+            usage_total=resources_usage,
+            by_kind=resources_by_kind,
+        ),
+        storage=OverviewStorage(
+            files=files_count, bytes=files_bytes, kb_count=kb_count, kb_docs=kb_docs
+        ),
+        audit_24h=audit_24h,
+        top_actions=top_actions,
+        recent_audit=[
+            OverviewAuditItem(
+                id=row.id,
+                action=row.action,
+                target_type=row.target_type,
+                target_id=row.target_id,
+                user_name=display or username or "",
+                ip=row.ip,
+                ts=(row.ts if row.ts.tzinfo else row.ts.replace(tzinfo=UTC)).isoformat(),
+            )
+            for row, username, display in recent
+        ],
+        generated_at=now.isoformat(),
+    )

@@ -53,6 +53,10 @@ const routes: RouteRecordRaw[] = [
       // F1（工作区与沙箱设计方案 G1）：用户工作区——PRD 5.8 增补随 F1 契约修订登记
       { path: 'workspaces', component: () => import('../views/UserWorkspaces.vue'), meta: { title: '我的工作区' } },
       { path: 'memories', component: () => import('../views/UserMemories.vue'), meta: { title: '我的记忆' } },
+      // 管理后台：概览聚合、审计查询、资源治理；账号与协议档沿用既有页面。
+      { path: 'admin', component: () => import('../views/AdminOverview.vue'), meta: { title: '平台概览' } },
+      { path: 'admin/audit', component: () => import('../views/AdminAudit.vue'), meta: { title: '审计日志' } },
+      { path: 'admin/resources', component: () => import('../views/AdminResources.vue'), meta: { title: '资源治理' } },
       { path: 'admin/profiles', component: () => import('../views/AdminProfiles.vue'), meta: { title: '协议档' } },
       { path: 'admin/users', component: () => import('../views/AdminUsers.vue'), meta: { title: '账号' } },
       // 兜底放在布局内：未知地址不再白屏，且保留侧边导航便于回到正常页面。

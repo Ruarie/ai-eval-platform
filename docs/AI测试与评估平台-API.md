@@ -7,7 +7,8 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档版本 | V2.65 |
-| 本轮审查日期 | 2026-11-18（§3.14 能力中心补充 `rag` 类型：绑定知识库并固化检索口径，试检索复用 `/api/kb/{id}/query`；MCP 中心为只读目录，复用既有 `/api/mcp/all-tools` 与 `/api/mcp/health-check`） |
+| 本轮审查日期 | 2026-11-19（新增 `GET /api/admin/overview` 后台聚合与 `/admin`、`/admin/audit`、`/admin/resources` 三个后台页；口径与 §3.12 审计一致） |
+| 上一轮审查 | 2026-11-18（§3.14 能力中心补充 `rag` 类型：绑定知识库并固化检索口径，试检索复用 `/api/kb/{id}/query`；MCP 中心为只读目录，复用既有 `/api/mcp/all-tools` 与 `/api/mcp/health-check`） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
 | 对应 PRD | V1.68（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
@@ -5216,3 +5217,29 @@ diff 响应：
 
 - `backend/api/app/routers/usage.py`、`reports.py`、`metrics.py`、`search.py`、`sessions.py`、`tasks.py`、`kb.py`：列投影与批量计数。
 - `backend/api/tests/test_usage.py`、`test_reports_list.py`、`test_casegen_metrics.py`、`test_search.py`、`test_kb_doc_list.py`、`test_agent_performance.py`：用实际 SQL 断言大列不进入 SELECT。
+
+#### `GET /api/admin/overview`
+
+后台首屏聚合：一次返回成员 / 会话 / 任务 / 资源 / 存储 / 审计六组计数，前端不再二次聚合。
+
+```json
+{
+  "users":     {"total": 12, "new_7d": 2, "active_7d": 7, "disabled": 1},
+  "sessions":  {"total": 48, "new_7d": 9, "shared": 5},
+  "tasks":     {"total_7d": 21, "by_status": {"succeeded": 15, "running": 2, "failed": 3}},
+  "resources": {"total": 9, "new_7d": 3, "team": 6, "private": 3, "usage_total": 33,
+                "by_kind": {"agent": 4, "rag": 2, "skill": 2, "rule": 1}},
+  "storage":   {"files": 25, "bytes": 5242880, "kb_count": 2, "kb_docs": 13},
+  "audit_24h": 18,
+  "top_actions": {"resource_create": 6, "resource_update": 5},
+  "recent_audit": [{"id": 3, "action": "resource_create", "target_type": "resource",
+                    "target_id": "r-abc12345", "user_name": "Alice", "ip": "10.0.0.1",
+                    "ts": "2026-11-19T02:00:00+00:00"}],
+  "generated_at": "2026-11-19T02:10:00+00:00"
+}
+```
+
+口径：会话不计软删除（`deleted_at IS NULL`），团队共享单列；任务只统计近 7 天；
+资源按 `kind` 分组、使用量为 `usage_count` 求和；审计取近 24 小时计数与 Top5 动作，
+明细仍走 `GET /api/admin/audit-logs`。
+

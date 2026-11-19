@@ -27,6 +27,15 @@ from .accounts import (  # noqa: F401
     UserStatusUpdate,
     UserUpdate,
 )
+from .admin import (  # noqa: F401
+    AdminOverviewOut,
+    OverviewAuditItem,
+    OverviewResources,
+    OverviewSessions,
+    OverviewStorage,
+    OverviewTasks,
+    OverviewUsers,
+)
 from .agent import (  # noqa: F401
     CaseAssetBackfillOut,
     CaseAssetListOut,
@@ -324,4 +333,11 @@ __all__ = [
     "ResourceUseOut",
     "PlazaOut",
     "PlazaRankItem",
+    "AdminOverviewOut",
+    "OverviewUsers",
+    "OverviewSessions",
+    "OverviewTasks",
+    "OverviewResources",
+    "OverviewStorage",
+    "OverviewAuditItem",
 ]
