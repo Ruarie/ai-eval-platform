@@ -1827,6 +1827,7 @@ const ctxMenuOptions = computed<DropdownOption[]>(() => {
       { label: '复制用例集 ID', key: 'copy-id', icon: renderIcon(['M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.242a2 2 0 0 0-.602-1.43L16.083 2.57A2 2 0 0 0 14.685 2H10a2 2 0 0 0-2 2z', 'M16 18v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2']) },
       { type: 'divider', key: 'd2' },
       { label: '废弃草稿用例集', key: 'delete-set', disabled: s?.status !== 'generated', props: { style: 'color: #DC2626' }, icon: renderIcon(['M3 6h18', 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'], '#DC2626') },
+      { label: '删除用例集', key: 'remove-set', props: { style: 'color: #DC2626' }, icon: renderIcon(['M3 6h18', 'M8 6V4h8v2', 'M6 6l1 14h10l1-14'], '#DC2626') },
     ]
   }
   if (ctxMenu.value.type === 'folder') {
@@ -1886,6 +1887,9 @@ async function handleFileCtxAction(key: string, targetId: string) {
     case 'delete-set':
       confirmDeleteCaseSet(s)
       break
+    case 'remove-set':
+      confirmRemoveCaseSet(s)
+      break
   }
 }
 
@@ -1907,6 +1911,33 @@ function confirmDeleteCaseSet(s: CaseSet) {
       } catch (err: any) {
         if (err.status === 409) message.warning('用例已在其他窗口更新，请刷新核对后再废弃')
         else message.error(err.message || '废弃失败')
+      }
+    },
+  })
+}
+
+/** 删除用例集：草稿不可恢复，已入库只归档隐藏（版本与评审记录保留）。 */
+function confirmRemoveCaseSet(s: CaseSet) {
+  const draft = s.status === 'generated' || s.status === 'cancelled'
+  dialog.warning({
+    title: '删除用例集',
+    content: draft
+      ? `确认删除「${s.name}」？该草稿及其用例将被移除，无法恢复。`
+      : `「${s.name}」已入库。删除后将从列表隐藏，历史版本与评审记录仍保留供追溯。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await api.cases.removeSet(s.id)
+        if (s.id === activeSetId.value) {
+          activeSetId.value = ''
+          hasUnsavedChanges.value = false
+          cases.value = []
+        }
+        await loadCaseSets()
+        message.success(`已删除「${s.name}」`)
+      } catch (err: any) {
+        message.error(err.message || '删除失败')
       }
     },
   })

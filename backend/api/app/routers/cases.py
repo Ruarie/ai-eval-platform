@@ -15,7 +15,7 @@ import io
 import json
 import logging
 import zipfile
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -134,7 +134,7 @@ _XMIND_MEDIA_TYPE = "application/vnd.xmind.workbook"
 
 def _get_case_set_or_404(db: Session, set_id: str, *, lock: bool = False) -> CaseSet:
     """读取用例集或抛出 NOT_FOUND。"""
-    query = db.query(CaseSet).filter(CaseSet.id == set_id)
+    query = db.query(CaseSet).filter(CaseSet.id == set_id, CaseSet.deleted_at.is_(None))
     if lock:
         query = query.populate_existing().with_for_update()
     case_set = query.first()
@@ -291,7 +291,7 @@ def list_case_sets(
 ):
     """列出全部用例集，按契约返回 {items, total} 包装，支持分页与关键词过滤。"""
     query = db.query(CaseSet)
-    filters = []
+    filters = [CaseSet.deleted_at.is_(None)]
     if q and q.strip():
         filters.append(CaseSet.name.ilike(f"%{q.strip()}%"))
     if filters:
@@ -675,6 +675,37 @@ async def create_case_set_from_excel(
         raise
     db.refresh(case_set)
     return {"case_set_id": case_set.id, **_import_result(case_set, fmt, "replace", imported, skipped)}
+
+
+@router.delete("/{set_id}", status_code=204, response_class=Response)
+def delete_case_set(
+    set_id: str,
+    request: FastApiRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """删除用例集：只打软删标记，版本快照与评审记录保留供审计。
+
+    草稿与已入库走同一套语义——列表与详情不再返回，历史版本仍可按需回溯。
+    """
+    case_set = _get_case_set_or_404(db, set_id, lock=True)
+    case_set.deleted_at = datetime.now(UTC)
+    db.add(
+        AuditLog(
+            user_id=user.id,
+            action="case_set_delete",
+            target_type="case_set",
+            target_id=case_set.id,
+            detail={
+                "name": case_set.name,
+                "status": case_set.status,
+                "confirmed_count": case_set.confirmed_count,
+            },
+            ip=client_ip(request),
+        )
+    )
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/{set_id}", response_model=CaseSetDetailOut)
