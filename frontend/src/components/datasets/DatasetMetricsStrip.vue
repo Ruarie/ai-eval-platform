@@ -99,6 +99,9 @@ void props
   display: flex;
   align-items: center;
   gap: 12px;
+  row-gap: 8px;
+  /* 窄宽度下换行，避免「主评分指标」被压成逐字竖排 */
+  flex-wrap: wrap;
   font-size: 12.5px;
 }
 .strip-left {
@@ -190,10 +193,13 @@ void props
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .metric-label {
   color: var(--text-tertiary);
   font-size: 12px;
+  white-space: nowrap;
 }
 .metric-select {
   height: 26px;

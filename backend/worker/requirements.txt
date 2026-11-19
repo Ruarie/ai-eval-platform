@@ -1,7 +1,7 @@
 sqlalchemy==2.0.36
 psycopg2-binary==2.9.10
 # Worker 解密协议档 API Key 需要 Fernet，版本与 api 容器保持一致
-cryptography==44.0.0
+cryptography==50.0.2
 # testcase 任务解析 Excel 来源文档，版本与 api 容器保持一致
 openpyxl==3.1.5
 # 引入 LangGraph 用于评测流水线工作流图编排，版本与 api 容器保持一致

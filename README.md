@@ -126,8 +126,13 @@ docker compose up -d --build
 启动后可访问：
 
 - 前端：`http://localhost`
-- 健康检查：`http://localhost:8000/api/health`
+- 健康检查：`http://localhost:8000/api/health`（存活探针，无 IO）
+- 就绪检查：`http://localhost:8000/api/ready`（校验数据库，供编排层使用）
 - API 文档：`http://localhost:8000/docs`
+
+> API 端口默认只绑定回环地址（`API_BIND_HOST=127.0.0.1`），远程机器请用 SSH 隧道
+> （`ssh -L 8000:127.0.0.1:8000 <host>`）或显式设置 `API_BIND_HOST=0.0.0.0`；
+> 浏览器侧统一走 web 反代（`http://<host>` / `https://<host>:8443`）。
 
 首次启动会根据环境变量创建引导管理员。生产环境必须自行设置强密码与密钥，禁止使用示例值。
 

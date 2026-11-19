@@ -509,6 +509,12 @@ class ProtocolProfile(Base):
     reasoning_template_id = Column(String, nullable=True)
     reasoning_probe = Column(JSONB, nullable=True)
     reasoning_config_version = Column(Integer, nullable=False, default=1, server_default="1")
+    # 模型归属：platform = 管理端维护的平台公共模型；personal = 成员私有模型。
+    # owner_id 为空仅表示平台模型；个人模型必须带属主，凭据仍只写环境文件。
+    visibility = Column(String, nullable=False, default="platform", server_default="platform")
+    owner_id = Column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     created_by = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)

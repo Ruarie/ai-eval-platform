@@ -17,7 +17,7 @@ from ..agent_prompt_settings import (
     update_agent_prompt_overlay,
 )
 from ..db import get_db
-from ..deps import get_current_user
+from ..deps import get_current_user, require_admin
 from ..errors import AppError, ErrorCode
 from ..expert_prompt_settings import (
     MAX_EXPERT_PROMPT_LENGTH,
@@ -66,7 +66,12 @@ from ..schemas import (
 from .profiles import _profile_connection
 from .users import _parse_bound
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+# 管理端配置（协议档提示词、技能、RAG 模型、白名单、审计等）仅 admin 角色可读写。
+router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 class RagCheckIn(ApiModel):
@@ -153,6 +158,8 @@ def _require_agent_profile(db: Session, profile_id: str) -> ProtocolProfile:
         raise AppError(ErrorCode.NOT_FOUND, "Agent 协议档不存在")
     if "agent" not in (profile.usages or []):
         raise AppError(ErrorCode.VALIDATION, "所选协议档未启用 agent 用途")
+    if getattr(profile, "visibility", "platform") != "platform":
+        raise AppError(ErrorCode.VALIDATION, "个人模型不支持平台级提示词配置")
     return profile
 
 
@@ -176,6 +183,8 @@ def _validate_settings(body: dict[str, Any], db: Session) -> None:
             raise AppError(ErrorCode.NOT_FOUND, "Agent 协议档不存在")
         if "agent" not in (profile.usages or []):
             raise AppError(ErrorCode.VALIDATION, "所选协议档未启用 agent 用途")
+        if getattr(profile, "visibility", "platform") != "platform":
+            raise AppError(ErrorCode.VALIDATION, "Agent 默认模型必须是平台模型")
     for key in ("max_running_tasks", "max_inflight_model_calls"):
         if key in body and (not isinstance(body[key], int) or body[key] < 1):
             raise AppError(ErrorCode.VALIDATION, f"{key} 必须为正整数")

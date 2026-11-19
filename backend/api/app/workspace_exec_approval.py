@@ -100,6 +100,22 @@ def _client():
     return _redis
 
 
+def redis_ready() -> bool | None:
+    """就绪探针的 Redis 连通性：未启用返回 None，连不上返回 False。
+
+    Redis 属可降级依赖（短票与审批单都有内存回退），因此该结果只作
+    报告，不参与就绪判定。
+    """
+    client = _client()
+    if client is None:
+        return None
+    try:
+        client.ping()
+        return True
+    except Exception:
+        return False
+
+
 def _pack(item: PendingExec) -> str:
     body = json.dumps({
         "approval_id": item.approval_id,

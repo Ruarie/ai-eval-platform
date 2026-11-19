@@ -13,7 +13,7 @@
 
       <nav class="nav">
         <!-- 分组导航：所有业务路由必须有入口，历史页面显式标注，避免出现只能手输 URL 的孤立页。 -->
-        <template v-for="group in navGroups" :key="group.title">
+        <template v-for="group in visibleNavGroups" :key="group.title">
           <div class="nav-group">{{ group.title }}</div>
           <router-link
             v-for="item in group.items"
@@ -401,19 +401,28 @@ const navGroups = [
       // F1（G1）：我的工作区（用户自管数据域；管理端清理视图已于 V1.79 下线）
       { path: '/workspaces', label: '我的工作区', icon: IconWorkspaces, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
       { path: '/memories', label: '我的记忆', icon: IconMemories, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
+      { path: '/my-models', label: '我的模型', icon: IconProfiles, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
     ],
   },
   {
     title: '管理',
     items: [
-      { path: '/admin', label: '平台概览', icon: IconOverview, t: 'var(--t-reports)', c: 'var(--c-reports)' },
-      { path: '/admin/audit', label: '审计日志', icon: IconAudit, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)' },
-      { path: '/admin/resources', label: '资源治理', icon: IconGovern, t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
-      { path: '/admin/profiles', label: '协议档', icon: IconProfiles, t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
-      { path: '/admin/users', label: '账号', icon: IconUsers, t: 'var(--t-users)', c: 'var(--c-users)' },
+      { path: '/admin', label: '平台概览', icon: IconOverview, t: 'var(--t-reports)', c: 'var(--c-reports)', adminOnly: true },
+      { path: '/admin/audit', label: '审计日志', icon: IconAudit, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)', adminOnly: true },
+      { path: '/admin/resources', label: '资源治理', icon: IconGovern, t: 'var(--t-datasets)', c: 'var(--c-datasets)', adminOnly: true },
+      { path: '/admin/profiles', label: '模型管理', icon: IconProfiles, t: 'var(--t-profiles)', c: 'var(--c-profiles)', adminOnly: true },
+      { path: '/admin/users', label: '账号', icon: IconUsers, t: 'var(--t-users)', c: 'var(--c-users)', adminOnly: true },
     ],
   },
 ]
+
+/** 普通成员不渲染管理分组；管理端账号保留全部入口。 */
+const visibleNavGroups = computed(() => navGroups
+  .map((group) => ({
+    ...group,
+    items: group.items.filter((item) => !('adminOnly' in item && item.adminOnly) || auth.user?.role === 'admin'),
+  }))
+  .filter((group) => group.items.length > 0))
 
 /** 当前路由激活状态匹配判定 */
 function isRouteActive(itemPath: string): boolean {
@@ -833,22 +842,6 @@ async function submitChangePassword() {
 .data-source-badge.mock {
   color: var(--accent-warning);
   background: rgba(245, 158, 11, 0.1);
-}
-
-.topbar-icon-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-main);
-  color: var(--text-secondary);
-  display: grid;
-  place-items: center;
-  transition: all 0.15s ease;
-}
-.topbar-icon-btn:hover {
-  border-color: var(--text-tertiary);
-  color: var(--text-primary);
 }
 
 .content {

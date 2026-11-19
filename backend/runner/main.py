@@ -18,8 +18,9 @@ bash 执行体从 api 容器迁出：本服务在容器内直接执行命令（`
 - ``GET /executions``：发现本次启动的实例代次。
 - ``POST /executions``：按 execution_id 幂等派发，body 增加 session_id/turn_id/call_id。
 - ``GET /executions/{id}``、``POST /executions/{id}/cancel``：查询与幂等取消。
-  新接口均需 Bearer RUNNER_INTERNAL_TOKEN；除代次发现外还需
-  X-Runner-Instance-ID。RUNNER_CGROUP_ROOT 须指向可写 cgroup v2 委派；
+  所有可执行端点（含 ``/run``/``/run/stream``/``/probe``）统一要求
+  Bearer RUNNER_INTERNAL_TOKEN，未配置令牌即 fail-closed；``/executions*``
+  除代次发现外还需 X-Runner-Instance-ID。RUNNER_CGROUP_ROOT 须指向可写 cgroup v2 委派；
   无委派在启动前拒绝，缺少整树停止证据则返回 outcome_unknown。
 
 日志脱敏：不打印命令原文/参数（红色红线 X-A4）。
@@ -245,6 +246,10 @@ class _SandboxHandler(BaseHTTPRequestHandler):
         if self.path == "/executions" or self.path.startswith("/executions/"):
             self._handle_execution()
         elif self.path in {"/run", "/run/stream", "/probe"}:
+            # 旧端点与 /executions 共用同一令牌边界：未配置即 fail-closed，
+            # 避免仅靠 compose 网络隔离充当唯一防线。
+            if not self._require_internal_auth():
+                return
             if not self._acquire_slot():
                 self._send_busy()
                 return
@@ -304,14 +309,24 @@ class _SandboxHandler(BaseHTTPRequestHandler):
         return dict(cmd=command, sandbox_dir=sandbox_dir, mode=mode, timeout_s=timeout_s,
                     limits=limits, max_output_chars=max_output)
 
-    def _handle_execution(self) -> None:
-        """仅令牌认证的内网客户端可操作新接口；认证和实例围栏先于执行。"""
+    def _require_internal_auth(self) -> bool:
+        """统一校验内部 Bearer 令牌；未配置时 fail-closed，返回 False 已写好响应。
+
+        所有可执行命令的端点（``/run``、``/run/stream``、``/probe``、
+        ``/executions*``）都必须先过这一关，禁止把网络隔离当作唯一防线。
+        """
         if not INTERNAL_TOKEN:
             self._send(503, {"error": {"code": "VALIDATION", "message": "Runner 内部认证未配置"}})
-            return
+            return False
         supplied = self.headers.get("Authorization", "")
         if not secrets.compare_digest(supplied, f"Bearer {INTERNAL_TOKEN}"):
             self._send(401, {"error": {"code": "UNAUTHORIZED", "message": "Runner 内部认证失败"}})
+            return False
+        return True
+
+    def _handle_execution(self) -> None:
+        """仅令牌认证的内网客户端可操作新接口；认证和实例围栏先于执行。"""
+        if not self._require_internal_auth():
             return
         registry = EXECUTIONS
         if self.path == "/executions" and self.command == "GET":

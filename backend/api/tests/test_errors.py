@@ -3,8 +3,8 @@
 from app.errors import _CODE_STATUS, ErrorCode
 
 
-def test_error_code_enum_has_ten_codes():
-    # PRD 5.5 / API V1.0 §1.3 定义的十个错误码 + F5/G6 新增 DENIED（拒写升档源）
+def test_error_code_enum_matches_contract():
+    # PRD 5.5 / API V1.0 §1.3 基础十码 + F5/G6 的 DENIED + 登录限流的 RATE_LIMITED
     expected = {
         "UNAUTHORIZED",
         "VALIDATION",
@@ -17,6 +17,7 @@ def test_error_code_enum_has_ten_codes():
         "TIMEOUT",
         "INTERNAL",
         "DENIED",
+        "RATE_LIMITED",
     }
     assert {c.value for c in ErrorCode} == expected
 
@@ -33,6 +34,7 @@ def test_error_code_default_status_mapping():
     assert _CODE_STATUS[ErrorCode.TIMEOUT] == 504
     assert _CODE_STATUS[ErrorCode.INTERNAL] == 500
     assert _CODE_STATUS[ErrorCode.DENIED] == 403  # F5/G6：只读拒写（授权语义）
+    assert _CODE_STATUS[ErrorCode.RATE_LIMITED] == 429  # 登录失败限流
 
 
 def test_unknown_route_returns_unified_error_body(client):

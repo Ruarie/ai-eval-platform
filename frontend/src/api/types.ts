@@ -3,7 +3,7 @@
  * 契约依据：docs/AI测试与评估平台-API.md (V1.5) 与 docs/AI测试与评估平台-PRD.md (V1.6.5)
  */
 
-// 10 大标准业务错误码
+// 10 大标准业务错误码 + DENIED（bash 只读拒写）+ RATE_LIMITED（登录限流）
 export enum ErrorCode {
   UNAUTHORIZED = 'UNAUTHORIZED',
   VALIDATION = 'VALIDATION',
@@ -15,6 +15,8 @@ export enum ErrorCode {
   UPSTREAM = 'UPSTREAM',
   TIMEOUT = 'TIMEOUT',
   INTERNAL = 'INTERNAL',
+  DENIED = 'DENIED',
+  RATE_LIMITED = 'RATE_LIMITED',
 }
 
 // 错误码中文映射表（规范 §7.3）
@@ -30,6 +32,8 @@ export const ERROR_MESSAGES: Record<ErrorCode | string, string> = {
   [ErrorCode.UPSTREAM]: '操作未完成，详见提示',
   [ErrorCode.TIMEOUT]: '操作未完成，详见提示',
   [ErrorCode.INTERNAL]: '操作未完成，详见提示',
+  [ErrorCode.DENIED]: '操作未完成，详见提示',
+  [ErrorCode.RATE_LIMITED]: '操作过于频繁，请稍后再试',
 }
 
 // 用户角色（PRD 2.1 冻结为单一角色 member，全员同权）
@@ -133,6 +137,12 @@ export interface Profile {
   max_output_tokens?: number // Agent 单回合模型输出上限 (max_tokens)
   reasoning_effort?: ProfileEffort
   tool_call_mode?: ToolCallMode
+  /** 平台公共模型 / 成员私有模型；个人模型仅属主与管理端可见。 */
+  visibility?: 'platform' | 'personal'
+  owner_id?: string | null
+  owner_username?: string | null
+  /** 当前账号是否可编辑/删除该模型。 */
+  can_manage?: boolean
   created_at: string
   updated_at?: string
 }
@@ -156,6 +166,8 @@ export interface ProfileCreateIn {
   max_output_tokens?: number
   tool_call_mode?: ToolCallMode
   reasoning_template_id?: string
+  /** 管理端可显式选择归属；普通成员只能创建个人模型。 */
+  visibility?: 'platform' | 'personal'
 }
 
 export interface ProfileUpdateIn {

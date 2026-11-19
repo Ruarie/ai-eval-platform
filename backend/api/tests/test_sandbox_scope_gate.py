@@ -77,7 +77,11 @@ class TestScopeGateSerial:
         monkeypatch.setattr(
             sandbox_mod,
             "settings",
-            SimpleNamespace(sandbox_bash_gate_timeout_s=0.05, sandbox_runner_url="http://runner:8001"),
+            SimpleNamespace(
+                sandbox_bash_gate_timeout_s=0.05,
+                sandbox_runner_url="http://runner:8001",
+                runner_internal_token="test-token",
+            ),
         )
 
         def fake_urlopen(*_args: object, **_kwargs: object):
@@ -100,7 +104,11 @@ class TestScopeGateSerial:
         monkeypatch.setattr(
             sandbox_mod,
             "settings",
-            SimpleNamespace(sandbox_bash_gate_timeout_s=30.0, sandbox_runner_url="http://runner:8001"),
+            SimpleNamespace(
+                sandbox_bash_gate_timeout_s=30.0,
+                sandbox_runner_url="http://runner:8001",
+                runner_internal_token="test-token",
+            ),
         )
 
         def fake_urlopen(*_args: object, **_kwargs: object):

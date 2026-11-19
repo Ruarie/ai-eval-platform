@@ -21,6 +21,15 @@ from ..llm.providers.reasoning_templates import (
     list_templates,
 )
 from ..models import AuditLog, ProtocolProfile, Setting, User
+from ..profile_access import (
+    PERSONAL,
+    PLATFORM,
+    assert_create_scope,
+    can_manage_profile,
+    require_manageable_profile,
+    require_visible_profile,
+    visible_profiles_query,
+)
 from ..profile_check import check_model_connection
 from ..profile_env import (
     ProfileEnvSnapshot,
@@ -91,6 +100,11 @@ def _same_endpoint(left: str | None, right: str | None) -> bool:
     return left.strip().rstrip("/").lower() == right.strip().rstrip("/").lower()
 
 
+def _alias_allowed(profile: ProtocolProfile) -> bool:
+    """只有平台模型可继承部署级 LLM_* 别名；个人模型不得借用平台凭据。"""
+    return (getattr(profile, "visibility", None) or PLATFORM) == PLATFORM
+
+
 def _profile_connection(
     profile: ProtocolProfile,
     *,
@@ -159,7 +173,13 @@ def _migrate_profile_to_env(profile: ProtocolProfile) -> ProfileEnvSnapshot | No
     return snapshot
 
 
-def _profile_out(profile: ProtocolProfile, connection: tuple[str, str, str | None] | None = None) -> ProfileOut:
+def _profile_out(
+    profile: ProtocolProfile,
+    connection: tuple[str, str, str | None] | None = None,
+    *,
+    db: Session | None = None,
+    user: User | None = None,
+) -> ProfileOut:
     """构造永不回显 Key 的协议档响应，连接参数以环境文件为准。"""
     try:
         base_url, model, api_key = connection or _profile_connection(profile)
@@ -197,6 +217,12 @@ def _profile_out(profile: ProtocolProfile, connection: tuple[str, str, str | Non
         tool_status = "unverified"
     elif tool_status in {"passed", "failed"} and tool_probe.get("effort") not in reasoning["allowed_efforts"]:
         tool_status = "unverified"
+    owner_id = getattr(profile, "owner_id", None)
+    owner_username = None
+    if owner_id and db is not None:
+        owner = db.get(User, owner_id)
+        owner_username = owner.username if owner else None
+    visibility = getattr(profile, "visibility", PLATFORM) or PLATFORM
     return ProfileOut(
         **reasoning,
         full_url=env_values.full_url,
@@ -221,6 +247,10 @@ def _profile_out(profile: ProtocolProfile, connection: tuple[str, str, str | Non
         reasoning_probe_status=probe_status,
         tool_probe_status=tool_status,
         tool_call_mode=getattr(profile, "tool_call_mode", "native") or "native",
+        visibility=visibility,
+        owner_id=owner_id,
+        owner_username=owner_username,
+        can_manage=can_manage_profile(profile, user),
         created_at=profile.created_at,
         updated_at=profile.updated_at,
     )
@@ -231,8 +261,12 @@ def list_profiles(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """列出协议档，并将旧数据库参数一次性迁移到环境文件。"""
-    rows = db.query(ProtocolProfile).order_by(ProtocolProfile.created_at.desc()).all()
+    """列出当前账号可见的协议档：平台模型 + 本人私有模型（管理端可见全部）。"""
+    rows = (
+        visible_profiles_query(db, user)
+        .order_by(ProtocolProfile.created_at.desc())
+        .all()
+    )
     snapshots: list[ProfileEnvSnapshot] = []
     db_changed = False
     try:
@@ -250,7 +284,10 @@ def list_profiles(
             restore_snapshot(snapshot)
         raise AppError(ErrorCode.INTERNAL, "协议档环境配置读写失败") from exc
     return {
-        "items": [_profile_out(row).model_dump(mode="json") for row in rows],
+        "items": [
+            _profile_out(row, db=db, user=user).model_dump(mode="json")
+            for row in rows
+        ],
         "total": len(rows),
     }
 
@@ -353,10 +390,8 @@ def get_profile(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """读取单个协议档，仍不返回 API Key。"""
-    profile = db.query(ProtocolProfile).filter(ProtocolProfile.id == profile_id).first()
-    if not profile:
-        raise AppError(ErrorCode.NOT_FOUND, "协议档不存在")
+    """读取单个协议档，仍不返回 API Key；不可见按不存在处理。"""
+    profile = require_visible_profile(db, profile_id, user)
     snapshot = None
     had_legacy_key = bool(profile.encrypted_key)
     try:
@@ -368,7 +403,7 @@ def get_profile(
         if snapshot:
             restore_snapshot(snapshot)
         raise AppError(ErrorCode.INTERNAL, "协议档环境配置读写失败") from exc
-    return _profile_out(profile)
+    return _profile_out(profile, db=db, user=user)
 
 
 def _create_profile(
@@ -381,6 +416,7 @@ def _create_profile(
 ):
     """创建协议档并把 URL、模型 ID、API Key 写入受控环境文件。"""
     _validate_profile_url(body.base_url, body.protocol, body.full_url)
+    visibility = assert_create_scope(user, body.visibility)
     profile = ProtocolProfile(
         name=body.name,
         protocol=body.protocol,
@@ -396,6 +432,8 @@ def _create_profile(
         reasoning_template_id=body.reasoning_template_id,
         reasoning_probe=reasoning_probe,
         reasoning_config_version=1,
+        visibility=visibility,
+        owner_id=user.id if visibility == PERSONAL else None,
         created_by=user.id,
     )
     db.add(profile)
@@ -419,7 +457,8 @@ def _create_profile(
             reranker_model=body.reranker_model,
             reranker_api_key=body.reranker_api_key or None,
             protocol=body.protocol,
-            write_global_aliases=True,
+            # 只有平台模型才同步全局别名；个人模型绝不能覆盖平台默认端点与密钥。
+            write_global_aliases=visibility == PLATFORM,
         )
         db.add(
             AuditLog(
@@ -433,6 +472,7 @@ def _create_profile(
                 target_id=profile.id,
                 detail={
                     "name": profile.name,
+                    "visibility": visibility,
                     "has_api_key": bool(body.api_key),
                     "has_embedding_api_key": bool(body.embedding_api_key),
                     "has_reranker_api_key": bool(body.reranker_api_key),
@@ -449,7 +489,7 @@ def _create_profile(
         if snapshot:
             restore_snapshot(snapshot)
         raise AppError(ErrorCode.INTERNAL, "协议档环境配置写入失败") from exc
-    return _profile_out(profile)
+    return _profile_out(profile, db=db, user=user)
 
 
 @router.post("", response_model=ProfileOut, status_code=201)
@@ -491,10 +531,10 @@ def _update_profile(
     reasoning_probe: dict[str, object] | None = None,
 ):
     """更新协议档并安全刷新环境文件中的 URL、模型 ID、API Key。"""
-    profile = db.query(ProtocolProfile).filter(ProtocolProfile.id == profile_id).first()
-    if not profile:
-        raise AppError(ErrorCode.NOT_FOUND, "协议档不存在")
+    profile = require_manageable_profile(db, profile_id, user)
     values = body.model_dump(exclude_unset=True)
+    # 归属创建后不可变：改档不能把个人模型抬成平台模型（或反向降级）。
+    values.pop("visibility", None)
     api_key = values.pop("api_key", None)
     embedding_api_key = values.pop("embedding_api_key", None)
     reranker_api_key = values.pop("reranker_api_key", None)
@@ -506,7 +546,9 @@ def _update_profile(
     full_url = values.pop("full_url", None)
     full_url = current_env.full_url if full_url is None else full_url
     # 编辑旧单模型环境配置时允许从全局别名读取一次，随后固化为本 profile 变量。
-    current_base_url, current_model, current_api_key = _profile_connection(profile, allow_global_alias=True)
+    current_base_url, current_model, current_api_key = _profile_connection(
+        profile, allow_global_alias=_alias_allowed(profile)
+    )
     next_base_url = current_base_url
     next_model = current_model
     if values.get("base_url") is not None:
@@ -568,7 +610,8 @@ def _update_profile(
             reranker_model=next_reranker_model,
             reranker_api_key=next_reranker_api_key,
             protocol=profile.protocol,
-            write_global_aliases=True,
+            # 个人模型不写平台全局别名，避免覆盖其他成员的默认模型与密钥。
+            write_global_aliases=getattr(profile, "visibility", PLATFORM) == PLATFORM,
         )
         db.add(
             AuditLog(
@@ -594,7 +637,7 @@ def _update_profile(
         if snapshot:
             restore_snapshot(snapshot)
         raise AppError(ErrorCode.INTERNAL, "协议档环境配置写入失败") from exc
-    return _profile_out(profile)
+    return _profile_out(profile, db=db, user=user)
 
 
 @router.put("/{profile_id}", response_model=ProfileOut)
@@ -620,10 +663,10 @@ def probe_update_profile(
     user: User = Depends(get_current_user),
 ):
     """用完整的拟更新配置验证模板，失败时不改动已保存的协议档。"""
-    profile = db.query(ProtocolProfile).filter(ProtocolProfile.id == profile_id).first()
-    if not profile:
-        raise AppError(ErrorCode.NOT_FOUND, "协议档不存在")
-    current_base_url, _model, current_api_key = _profile_connection(profile, allow_global_alias=True)
+    profile = require_manageable_profile(db, profile_id, user)
+    current_base_url, _model, current_api_key = _profile_connection(
+        profile, allow_global_alias=_alias_allowed(profile)
+    )
     api_key = _reuse_api_key(current_base_url, body.base_url, current_api_key, body.api_key)
     probe = _probe_model_config(body, api_key=api_key)
     message = _probe_message(probe)
@@ -641,9 +684,7 @@ def delete_profile(
     user: User = Depends(get_current_user),
 ):
     """删除未被 Agent 默认配置引用的协议档（API §3.6：被引用的协议档禁止删除）。"""
-    profile = db.query(ProtocolProfile).filter(ProtocolProfile.id == profile_id).first()
-    if not profile:
-        raise AppError(ErrorCode.NOT_FOUND, "协议档不存在")
+    profile = require_manageable_profile(db, profile_id, user)
     # Agent 核心驱动档不允许直接删除：需先在系统设置中解除 agent_profile_id 引用
     setting_row = db.query(Setting).filter(Setting.key == "agent_profile_id").first()
     if setting_row and setting_row.value == profile_id:
@@ -678,12 +719,12 @@ def get_profile_models(
     user: User = Depends(get_current_user),
 ):
     """根据已有协议档 ID 直接获取该目标端点可用模型列表。"""
-    profile = db.query(ProtocolProfile).filter(ProtocolProfile.id == profile_id).first()
-    if not profile:
-        raise AppError(ErrorCode.NOT_FOUND, "协议档不存在")
+    profile = require_visible_profile(db, profile_id, user)
     if read_profile_env(profile.id).full_url:
         raise AppError(ErrorCode.VALIDATION, "完整 URL 模式请手动填写模型标识")
-    env_base_url, _model, env_api_key = _profile_connection(profile, allow_global_alias=True)
+    env_base_url, _model, env_api_key = _profile_connection(
+        profile, allow_global_alias=_alias_allowed(profile)
+    )
     base_url = env_base_url or resolve_env_base_url(profile.protocol)
     if not base_url:
         raise AppError(ErrorCode.VALIDATION, "该协议档未配置目标服务的 Base URL")
@@ -713,14 +754,14 @@ def fetch_models(
     anthropic_version = body.anthropic_version
 
     if body.profile_id:
-        profile = db.query(ProtocolProfile).filter(ProtocolProfile.id == body.profile_id).first()
-        if not profile:
-            raise AppError(ErrorCode.NOT_FOUND, "协议档不存在")
+        profile = require_visible_profile(db, body.profile_id, user)
         if body.full_url is None and read_profile_env(profile.id).full_url:
             raise AppError(ErrorCode.VALIDATION, "完整 URL 模式请手动填写模型标识")
         protocol = profile.protocol
         # 兼容旧单模型环境；若该 profile 已有任一独立变量，则不会串用全局 Key。
-        env_base_url, _model, env_api_key = _profile_connection(profile, allow_global_alias=True)
+        env_base_url, _model, env_api_key = _profile_connection(
+            profile, allow_global_alias=_alias_allowed(profile)
+        )
         if not base_url:
             base_url = env_base_url
         anthropic_version = profile.anthropic_version
@@ -753,11 +794,11 @@ def check_profile(
     user: User = Depends(get_current_user),
 ):
     """以已保存模板及默认档位执行流式探活，参数与实际对话同源。"""
-    profile = db.query(ProtocolProfile).filter(ProtocolProfile.id == profile_id).first()
-    if not profile:
-        raise AppError(ErrorCode.NOT_FOUND, "协议档不存在")
+    profile = require_visible_profile(db, profile_id, user)
     # 旧单模型部署可直接用服务器 LLM_* 别名探活；已配置 profile 变量时优先 profile。
-    base_url, model, api_key = _profile_connection(profile, allow_global_alias=True)
+    base_url, model, api_key = _profile_connection(
+        profile, allow_global_alias=_alias_allowed(profile)
+    )
     if not api_key:
         raise AppError(ErrorCode.VALIDATION, "协议档未配置 API Key")
     full_url = read_profile_env(profile.id).full_url

@@ -14,6 +14,7 @@ import json
 import os
 import threading
 from http.server import ThreadingHTTPServer
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
@@ -38,6 +39,12 @@ class _Server:
         self.thread.join(timeout=5)
 
 
+@pytest.fixture(autouse=True)
+def _runner_token(monkeypatch):
+    """可执行端点统一要求内部令牌：测试注入固定值，避免复刻部署密钥。"""
+    monkeypatch.setattr(main, "INTERNAL_TOKEN", "test-runner-token")
+
+
 @pytest.fixture
 def server() -> _Server:
     instance = _Server()
@@ -55,15 +62,24 @@ def ws(tmp_path, monkeypatch):
     return root
 
 
-def _post(url: str, payload: dict) -> tuple[int, dict]:
+def _post(url: str, payload: dict, *, token: str | None = "test-runner-token") -> tuple[int, dict]:
+    """发送 JSON 请求；``token=None`` 时故意不带鉴权头，用于验证 fail-closed。"""
+    headers = {"Content-Type": "application/json"}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
     req = Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
-    with urlopen(req, timeout=5) as resp:
-        return resp.status, json.loads(resp.read().decode("utf-8"))
+    try:
+        response = urlopen(req, timeout=5)
+    except HTTPError as exc:
+        # 鉴权失败是预期内的 HTTP 错误响应，需保留状态码与错误码供断言
+        response = exc
+    with response:
+        return response.status, json.loads(response.read().decode("utf-8"))
 
 
 def _run_payload(ws, *, workspace_root: str | None = None, **overrides: object) -> dict:
@@ -226,7 +242,10 @@ def test_run_stream_forwards_chunks_then_result(server: _Server, ws, monkeypatch
     req = Request(
         server.url("/run/stream"),
         data=json.dumps(_run_payload(ws)).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer test-runner-token",
+        },
         method="POST",
     )
     with urlopen(req, timeout=5) as response:
@@ -270,7 +289,10 @@ def test_run_stream_busy_returns_ndjson_result_frame(server: _Server, ws, monkey
         req = Request(
             server.url("/run/stream"),
             data=json.dumps(_run_payload(ws)).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer test-runner-token",
+            },
             method="POST",
         )
         with urlopen(req, timeout=5) as response:
@@ -369,9 +391,24 @@ def test_probe(server: _Server, monkeypatch) -> None:
     assert body == {"ok": True}
 
 
-def test_unknown_endpoint_404(server: _Server) -> None:
-    from urllib.error import HTTPError
+def test_run_requires_internal_token(server: _Server, ws) -> None:
+    """缺少鉴权头时必须 401，且不得进入执行分支。"""
+    status, body = _post(server.url("/run"), _run_payload(ws), token=None)
+    assert status == 401
+    assert body["error"]["code"] == "UNAUTHORIZED"
 
+
+def test_run_fails_closed_when_token_unconfigured(
+    server: _Server, ws, monkeypatch
+) -> None:
+    """部署未注入令牌时 503：宁可不可用，也不接受匿名执行命令。"""
+    monkeypatch.setattr(main, "INTERNAL_TOKEN", "")
+    status, body = _post(server.url("/run"), _run_payload(ws))
+    assert status == 503
+    assert body["error"]["code"] == "VALIDATION"
+
+
+def test_unknown_endpoint_404(server: _Server) -> None:
     req = Request(
         server.url("/nope"),
         data=b"{}",

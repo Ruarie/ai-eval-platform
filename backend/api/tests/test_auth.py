@@ -4,14 +4,28 @@
 登录失败路径用最小 DB 替身验证审计写入；密码策略为纯函数单测。
 """
 
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.db import get_db
 from app.errors import AppError, ErrorCode
 from app.main import app
-from app.routers.auth import COOKIE_NAME, _validate_password
+from app.routers.auth import (
+    COOKIE_NAME,
+    _reset_login_rate_limits,
+    _validate_password,
+)
 from app.security import hash_password
+
+
+@pytest.fixture(autouse=True)
+def _clear_login_limits():
+    """每个用例前后清空登录限流状态，避免用例之间相互锁定。"""
+    _reset_login_rate_limits()
+    yield
+    _reset_login_rate_limits()
 
 
 class _FakeDb:
@@ -47,11 +61,17 @@ def _fake_user(**overrides):
     values = {
         "id": "u-1",
         "username": "alice",
+        "display_name": "alice",
+        "email": None,
         "password_hash": hash_password("abcd1234"),
         "auth_version": 1,
+        "role": "member",
         "disabled": False,
+        "must_change_password": False,
         "last_login_at": None,
         "last_login_ip": None,
+        # 成功登录路径要经过 UserOut 序列化，created_at 为必填字段
+        "created_at": datetime.now(UTC),
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -128,3 +148,27 @@ def test_logout_clears_cookie() -> None:
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
     assert COOKIE_NAME in resp.headers.get("set-cookie", "")
+
+
+class TestLoginRateLimit:
+    """登录失败限流：同账号 + 同 IP 连续失败达阈值后锁定。"""
+
+    def test_locks_after_repeated_failures(self) -> None:
+        """第 6 次即使密码正确也返回 429，且不写入登录审计。"""
+        for _ in range(5):
+            resp, _ = _login_with(None)
+            assert resp.status_code == 401
+        resp, fake = _login_with(_fake_user())
+        assert resp.status_code == 429
+        assert resp.json()["code"] == "RATE_LIMITED"
+        assert fake.added == []
+
+    def test_success_clears_failure_window(self) -> None:
+        """成功登录后失败计数清零，不会把后续正常重试也锁死。"""
+        for _ in range(4):
+            _login_with(None)
+        ok, _ = _login_with(_fake_user())
+        assert ok.status_code == 200
+        for _ in range(4):
+            resp, _ = _login_with(None)
+            assert resp.status_code == 401

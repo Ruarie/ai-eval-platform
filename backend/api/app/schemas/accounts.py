@@ -71,7 +71,7 @@ class UserOut(OrmOut):
     username: str
     display_name: str | None = None
     email: str | None = None
-    role: Literal["member"] = "member"
+    role: Literal["member", "admin", "engineer", "readonly"] = "member"
     disabled: bool
     must_change_password: bool
     last_login_at: Any | None = None
@@ -103,6 +103,8 @@ class ProfileCreate(ApiModel):
         default="native", description="Agent 工具调用模式：原生 ToolCall（默认）或受控 JSON 回退"
     )
     reasoning_template_id: str | None = Field(default=None, min_length=1, max_length=128)
+    # 归属：管理端可显式选择平台/个人；普通成员只能落为个人模型。
+    visibility: Literal["platform", "personal"] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -196,6 +198,11 @@ class ProfileOut(OrmOut):
     # 工具往返结果与思考档位独立；历史配置不默认宣称工具可用。
     tool_probe_status: Literal["unverified", "passed", "failed", "skipped"] = "unverified"
     tool_call_mode: Literal["native", "legacy"] = "native"
+    # 模型归属与操作权：个人模型只回显属主用户名，不返回任何账户凭据。
+    visibility: Literal["platform", "personal"] = "platform"
+    owner_id: str | None = None
+    owner_username: str | None = None
+    can_manage: bool = False
     created_at: Any
     updated_at: Any
 

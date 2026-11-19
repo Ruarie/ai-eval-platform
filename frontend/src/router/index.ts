@@ -11,6 +11,8 @@ declare module 'vue-router' {
     public?: boolean
     /** 能力中心复用同一组件，用 kind 区分 Agent / Skill / Script / Rule。 */
     resourceKind?: 'agent' | 'skill' | 'script' | 'rule' | 'rag'
+    /** 管理端路由：仅 role=admin 可进入，路由守卫统一拦截。 */
+    adminOnly?: boolean
   }
 }
 
@@ -53,12 +55,13 @@ const routes: RouteRecordRaw[] = [
       // F1（工作区与沙箱设计方案 G1）：用户工作区——PRD 5.8 增补随 F1 契约修订登记
       { path: 'workspaces', component: () => import('../views/UserWorkspaces.vue'), meta: { title: '我的工作区' } },
       { path: 'memories', component: () => import('../views/UserMemories.vue'), meta: { title: '我的记忆' } },
+      { path: 'my-models', component: () => import('../views/MyModels.vue'), meta: { title: '我的模型' } },
       // 管理后台：概览聚合、审计查询、资源治理；账号与协议档沿用既有页面。
-      { path: 'admin', component: () => import('../views/AdminOverview.vue'), meta: { title: '平台概览' } },
-      { path: 'admin/audit', component: () => import('../views/AdminAudit.vue'), meta: { title: '审计日志' } },
-      { path: 'admin/resources', component: () => import('../views/AdminResources.vue'), meta: { title: '资源治理' } },
-      { path: 'admin/profiles', component: () => import('../views/AdminProfiles.vue'), meta: { title: '协议档' } },
-      { path: 'admin/users', component: () => import('../views/AdminUsers.vue'), meta: { title: '账号' } },
+      { path: 'admin', component: () => import('../views/AdminOverview.vue'), meta: { title: '平台概览', adminOnly: true } },
+      { path: 'admin/audit', component: () => import('../views/AdminAudit.vue'), meta: { title: '审计日志', adminOnly: true } },
+      { path: 'admin/resources', component: () => import('../views/AdminResources.vue'), meta: { title: '资源治理', adminOnly: true } },
+      { path: 'admin/profiles', component: () => import('../views/AdminProfiles.vue'), meta: { title: '模型管理', adminOnly: true } },
+      { path: 'admin/users', component: () => import('../views/AdminUsers.vue'), meta: { title: '账号', adminOnly: true } },
       // 兜底放在布局内：未知地址不再白屏，且保留侧边导航便于回到正常页面。
       {
         path: ':pathMatch(.*)*',
@@ -115,6 +118,11 @@ router.beforeEach(async (to) => {
   // 受保护路由：未登录跳 /login
   if (!auth.user) {
     return '/login'
+  }
+
+  // 管理端页面仅 admin 可见；普通成员访问时回到对话页，不暴露管理导航。
+  if (to.meta.adminOnly && auth.user.role !== 'admin') {
+    return '/agent'
   }
 
   return true

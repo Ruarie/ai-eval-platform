@@ -4,7 +4,7 @@
     preset="card"
     :trap-focus="false"
     :auto-focus="false"
-    :title="isEdit ? '编辑模型协议档' : '新增模型协议档'"
+    :title="modalTitle"
     style="width: 620px; max-width: 95vw"
     @update:show="$emit('update:show', $event)"
   >
@@ -12,6 +12,17 @@
       <div class="field">
         <label class="field-label">协议档名称 <span class="req">*</span></label>
         <n-input v-model:value="form.name" placeholder="例如：DeepSeek 日常助手" />
+      </div>
+
+      <!-- 管理端新建时可选择平台公共模型或个人私有模型；成员只能建私有模型。 -->
+      <div v-if="props.allowScopeChoice && !isEdit" class="field">
+        <label class="field-label">模型归属 <span class="req">*</span></label>
+        <n-radio-group v-model:value="form.visibility">
+          <n-space :size="16">
+            <n-radio value="platform">平台公共模型（全员可用）</n-radio>
+            <n-radio value="personal">我的私有模型（仅自己可用）</n-radio>
+          </n-space>
+        </n-radio-group>
       </div>
 
       <!-- 供应商快捷分类预设选择 -->
@@ -242,6 +253,12 @@ import FetchModelsModal from './FetchModelsModal.vue'
 const props = defineProps<{
   show: boolean
   profile?: Profile | null
+  /** 新建时的默认归属；管理端可选平台，成员页固定 personal。 */
+  scope?: 'platform' | 'personal'
+  /** 仅管理端页面展示归属选择。 */
+  allowScopeChoice?: boolean
+  /** 新建时的默认用途；「我的模型」默认勾选 agent，创建后即可在对话中选用。 */
+  defaultUsages?: ProfileUsage[]
   initialData?: {
     vendorKey?: string
     base_url?: string
@@ -305,6 +322,7 @@ const form = ref<{
   max_output_tokens: number
   tool_call_mode: ToolCallMode
   reasoning_template_id: string
+  visibility: 'platform' | 'personal'
 }>({
   name: '',
   protocol: 'openai_chat',
@@ -318,6 +336,12 @@ const form = ref<{
   tool_call_mode: 'native',
   full_url: false,
   reasoning_template_id: '',
+  visibility: 'platform',
+})
+
+const modalTitle = computed(() => {
+  if (isEdit.value) return '编辑模型协议档'
+  return form.value.visibility === 'personal' ? '新增我的私有模型' : '新增平台模型'
 })
 
 const ALL_PROTOCOL_OPTIONS: Array<{ label: string; value: ProtocolType }> = [
@@ -549,6 +573,7 @@ async function onBatchCreate(modelIds: string[]) {
         max_output_tokens: form.value.max_output_tokens,
         tool_call_mode: form.value.tool_call_mode,
         reasoning_template_id: templateId,
+        visibility: form.value.visibility,
       })
       if (!result.ok) {
         if (count) emit('success')
@@ -594,6 +619,7 @@ watch(
           tool_call_mode: profileVal.tool_call_mode || 'native',
           full_url: profileVal.full_url ?? false,
           reasoning_template_id: profileVal.reasoning_template_id || '',
+          visibility: profileVal.visibility || props.scope || 'platform',
         }
       } else if (props.initialData) {
         form.value = {
@@ -603,12 +629,13 @@ watch(
           model: '',
           api_key: '',
           anthropic_version: '2023-06-01',
-          usages: ['target'],
+          usages: props.defaultUsages ? [...props.defaultUsages] : ['target'],
           context_window: 200000,
           max_output_tokens: 8192,
           tool_call_mode: 'native',
           full_url: props.initialData.full_url ?? false,
           reasoning_template_id: '',
+          visibility: props.scope || 'platform',
         }
       } else {
         form.value = {
@@ -618,12 +645,13 @@ watch(
           model: '',
           api_key: '',
           anthropic_version: '2023-06-01',
-          usages: ['target'],
+          usages: props.defaultUsages ? [...props.defaultUsages] : ['target'],
           context_window: 200000,
           max_output_tokens: 8192,
           tool_call_mode: 'native',
           full_url: false,
           reasoning_template_id: '',
+          visibility: props.scope || 'platform',
         }
       }
       void loadReasoningTemplates()
@@ -694,6 +722,7 @@ async function handleSave() {
         max_output_tokens: form.value.max_output_tokens,
         tool_call_mode: form.value.tool_call_mode,
         reasoning_template_id: form.value.reasoning_template_id,
+        visibility: form.value.visibility,
       }
       const result = await api.profiles.probeCreate(payload)
       if (!result.ok) {

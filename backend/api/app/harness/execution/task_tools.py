@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from app.errors import AppError, ErrorCode
+from app.profile_access import require_profile_usable
 from app.task_policy import (
     assert_task_creation_allowed,
     enforce_task_quota,
@@ -67,7 +68,7 @@ def prepare_task_request(db, arguments: Mapping[str, object], context: object) -
     配额拒绝审计仅添加到当前事务，是否提交由外层决定。
     """
     from app.harness.memory.episodic import get_active_tasks
-    from app.models import Dataset, DatasetVersion, ProtocolProfile, Task
+    from app.models import Dataset, DatasetVersion, Task
     from app.session_access import require_visible_session
 
     session_id, user_id = _context_ids(context)
@@ -93,16 +94,13 @@ def prepare_task_request(db, arguments: Mapping[str, object], context: object) -
         if kind == "stress" and (parent.status != "succeeded" or parent.kind not in {"benchmark", "rag"}):
             raise AppError(ErrorCode.VALIDATION, "压测任务须由已成功的质量任务派生")
 
-    # 协议档目录按平台“全员同权”口径共享；created_by 仅用于审计，不能把
-    # 创建者字段误当作使用 ACL，否则 Agent 工具会与 REST 创建任务的行为分叉。
+    # 协议档按归属授权：平台模型全员可用，个人模型仅属主或管理端可用。
     # 凭据本身仍只由服务端的协议档受控环境变量读取，不回传给调用者。
     profile_ids = set(task_spec.profile_ids)
     if task_spec.run and task_spec.run.judge_profile_id:
         profile_ids.add(task_spec.run.judge_profile_id)
     for profile_id in sorted(profile_ids):
-        profile = db.get(ProtocolProfile, profile_id)
-        if not profile:
-            raise AppError(ErrorCode.NOT_FOUND, "关联模型协议档不存在")
+        require_profile_usable(db, profile_id, user_id)
     if task_spec.case_source and task_spec.case_source.file_id:
         require_owned_source_file(db, task_spec.case_source.file_id, user_id)
 

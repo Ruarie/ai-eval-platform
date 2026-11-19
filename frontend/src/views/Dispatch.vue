@@ -1388,6 +1388,43 @@ onBeforeUnmount(() => {
   height: 7px;
   border-radius: 50%;
 }
+
+/* 星图缩放控件：原先只在 WorkflowDesigner 内定义，调度页按钮因此退化成原生灰底 */
+.zoom-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  height: 30px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-main);
+}
+.zoom-btn {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.zoom-btn:hover {
+  background: var(--row-hover);
+  color: var(--text-primary);
+}
+.zoom-btn.mono {
+  min-width: 46px;
+  font-family: var(--font-mono);
+}
+
 @media (max-width: 1024px) {
   .kpi-grid {
     grid-template-columns: repeat(3, 1fr);

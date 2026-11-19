@@ -34,6 +34,8 @@ def resolve_agent_profile(db: Session) -> ProtocolProfile:
         raise AppError(ErrorCode.VALIDATION, "Agent 协议档不存在")
     if "agent" not in (profile.usages or []):
         raise AppError(ErrorCode.VALIDATION, "协议档未启用 agent 用途")
+    if getattr(profile, "visibility", "platform") != "platform":
+        raise AppError(ErrorCode.VALIDATION, "平台默认模型不能使用个人模型")
     return profile
 
 
