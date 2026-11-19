@@ -22,6 +22,8 @@
 
 > V2.64（2026-11-17）：`GET /api/kb/{id}/graph` 增加**空库短路**（§3.9）。库内 0 篇文档时直接返回 `200` + 空 `nodes` / `edges`，不调用 LightRAG；库内有文档但引擎不可用时仍为 `UPSTREAM`(502)。字段、`limit` 与错误码均不变，仅避免把「还没上传文档」误报成引擎故障。
 
+> V2.66（2026-11-19）：`400 VALIDATION` 的 `fields` 不再只覆盖业务错误——FastAPI 请求体校验（原 422）归一为 400 时，也会带回 `{字段名: 校验信息}`，前端据此把红字标到具体表单项（§1.3 契约本就要求如此，此前实现只返回通用文案）。同时 `POST /api/users` 的调用方不再传 `role`：全员同权，服务端恒写 `member`，契约外字段会被 `extra="forbid"` 拒绝。前端 `/workspaces` 对远程（`kind=ssh`）工作区收口写入口：新建/重命名/上传/下载原文件改为禁用并说明原因，与 V2.48「远程工作区 upload/files/rename/files/raw 返回 VALIDATION」保持一致。
+>
 > V2.62（2026-11-16）：`POST /api/case-sets/ai-generate`、`/ai-compare`、`/{id}/ai-review` 改为 `202`，响应 `{job_id, status:"queued"}`。结果用 `GET /api/case-sets/ai-jobs/{job_id}` 取回：`succeeded` 时 `result` 为原先的同步响应体，`failed` 时带 `error.code/message`。Worker 领取执行，候选仍不落库；评审仍写入 `checks` 与 `case_review_runs`。`POST /api/workspaces/{id}/exec/{approval_id}/confirm` 改为 `202 {status:"running", timeout_s}`，执行在请求线程之外；`GET /api/workspaces/{id}/exec/{approval_id}` 取回 `exit_code/stdout/stderr` 或 `failed`。审批单在配置了 Redis 时跨副本共享，否则仍是进程内存。`ssh_host` 白名单口径与 V2.48 一致：留空不限制主机，非空才收紧。远程文件路径上的符号链接直接 `VALIDATION`。
 
 > V2.46（2026-11-02）：知识库接入真实 LightRAG 引擎（§3.9）。**不新增平台 REST/WS 路径与字段**，仅明确既有语义：上传响应与文档列表的 `status` 由引擎异步建索引决定（`indexing | indexed | failed`），`indexing` 会在列表查询时向 LightRAG 回读并收敛；`DELETE` 文档/知识库改为「先删引擎索引、再删库内记录」，引擎已配置但删除失败返回 `UPSTREAM`；Playground 的 `similarity` 允许为 `null`（LightRAG 只给排序不给分数），前端显示占位符而不伪造 0；检索降级口径收紧为「仅不可达/服务端错误才回退本地关键词」，引擎可用但召回为空仍记 `lightrag`。删除与状态回读在服务端按批执行（删除 ≤50/批、状态 ≤200/批），对调用方仍是一次请求；`indexing`/`failed` 文档的删除不强制引擎成功，避免引擎不可用时无法清理。适配服务内部契约（`/documents/index`、`/documents/status`、`/documents/delete`、`/query`）属容器内网，不属于本契约范围，见《AI测试与评估平台-LightRAG接入技术方案.md》。

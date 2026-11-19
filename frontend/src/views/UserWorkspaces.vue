@@ -87,9 +87,10 @@
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
             </svg>
             <span>文件资源管理器</span>
+            <span v-if="isRemoteWorkspace && currentWorkspace && !currentWorkspace.deleted" class="readonly-pill">只读</span>
           </div>
           <div class="explorer-actions">
-            <button class="icon-btn" title="新建文件" :disabled="!currentWorkspace || currentWorkspace.deleted" @click="promptCreate('file')">
+            <button class="icon-btn" :title="writeGuardTitle || '新建文件'" :disabled="!canWriteFiles" @click="promptCreate('file')">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                 <polyline points="14 2 14 8 20 8" />
@@ -97,7 +98,7 @@
                 <line x1="9" y1="15" x2="15" y2="15" />
               </svg>
             </button>
-            <button class="icon-btn" title="新建文件夹" :disabled="!currentWorkspace || currentWorkspace.deleted" @click="promptCreate('dir')">
+            <button class="icon-btn" :title="writeGuardTitle || '新建文件夹'" :disabled="!canWriteFiles" @click="promptCreate('dir')">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 <line x1="12" y1="11" x2="12" y2="17" />
@@ -184,7 +185,9 @@
         >
           <div v-if="uploading" class="tree-loading">正在上传文件…</div>
           <div v-else-if="treeLoading" class="tree-loading">加载文件树…</div>
-          <div v-else-if="!fileTree.length" class="tree-empty">暂无文件，点击上方新建或拖拽文件上传。</div>
+          <div v-else-if="!fileTree.length" class="tree-empty">
+            {{ isRemoteWorkspace ? '远端目录为空；远程工作区仅支持浏览。' : '暂无文件，点击上方新建或拖拽文件上传。' }}
+          </div>
           <div v-else class="tree-nodes">
             <template v-for="node in filteredTree" :key="node.path">
               <div
@@ -217,8 +220,8 @@
                 <div class="node-hover-actions">
                   <button
                     class="node-act-btn"
-                    title="重命名"
-                    :disabled="!currentWorkspace || currentWorkspace.deleted"
+                    :title="writeGuardTitle || '重命名'"
+                    :disabled="!canWriteFiles"
                     @click.stop="openRenamePathModal(node)"
                   >
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -278,8 +281,8 @@
             <div class="quick-create-strip">
               <button
                 class="btn btn-sm"
-                :disabled="!currentWorkspace || currentWorkspace.deleted"
-                :title="!currentWorkspace ? '请先新建或选择工作区' : currentWorkspace.deleted ? '工作区已注销，无法新建文件' : '新建 Python 脚本'"
+                :disabled="!canWriteFiles"
+                :title="writeGuardTitle || '新建 Python 脚本'"
                 @click="quickCreateCode"
               >
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -290,8 +293,8 @@
               </button>
               <button
                 class="btn btn-sm"
-                :disabled="!currentWorkspace || currentWorkspace.deleted"
-                :title="!currentWorkspace ? '请先新建或选择工作区' : currentWorkspace.deleted ? '工作区已注销，无法新建文件' : '新建 Markdown 报告'"
+                :disabled="!canWriteFiles"
+                :title="writeGuardTitle || '新建 Markdown 报告'"
                 @click="quickCreateMarkdown"
               >
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -843,6 +846,14 @@ const currentWorkspace = computed(() => {
 
 /** 远程工作区：命令走 SFTP/SSH，本地专属操作（上传/新建）不展示。 */
 const isRemoteWorkspace = computed(() => currentWorkspace.value?.kind === 'ssh')
+// 远程（SSH）工作区本轮只做浏览：新建/重命名/上传/下载原文件在后端都被 _require_local 拦截，
+// 这里统一收口，避免按钮可点但必然失败。
+const canWriteFiles = computed(() => !!currentWorkspace.value && !currentWorkspace.value.deleted && !isRemoteWorkspace.value)
+const writeGuardTitle = computed(() =>
+  !currentWorkspace.value ? '请先新建或选择工作区'
+    : currentWorkspace.value.deleted ? '工作区已注销，无法写入'
+    : isRemoteWorkspace.value ? '远程工作区仅支持浏览，不能写入' : '',
+)
 
 /** 当前工作区是否走"临时密码"认证（密码在 sessionStorage，不落库）。 */
 const needsSshPassword = computed(
@@ -1302,6 +1313,10 @@ function closeActiveFile(force = false): void {
 // 下载当前文件
 async function downloadActiveFile(): Promise<void> {
   if (!selectedWorkspaceId.value || !activeFile.value) return
+  if (isRemoteWorkspace.value) {
+    message.warning('远程工作区仅支持浏览，暂不支持下载原文件')
+    return
+  }
   // 交给浏览器流式下载，避免大视频在前端重复占用整个文件大小的内存。
   const link = document.createElement('a')
   link.href = api.workspaces.getRawFileUrl(selectedWorkspaceId.value, activeFile.value.path, true)
@@ -1385,6 +1400,10 @@ async function handleFileInputChange(e: Event): Promise<void> {
 async function handleDropUpload(e: DragEvent): Promise<void> {
   isDraggingOver.value = false
   if (!selectedWorkspaceId.value || !e.dataTransfer?.files?.length) return
+  if (isRemoteWorkspace.value) {
+    message.warning('远程工作区仅支持浏览，不能上传文件')
+    return
+  }
   await uploadFilesList(Array.from(e.dataTransfer.files))
 }
 
@@ -1967,6 +1986,14 @@ onBeforeUnmount(() => {
   color: #34d399;
 }
 
+.readonly-pill {
+  margin-left: 6px;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+}
 .explorer-actions {
   display: flex;
   align-items: center;
