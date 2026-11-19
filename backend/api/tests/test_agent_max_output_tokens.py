@@ -52,6 +52,8 @@ def _agent_profile(profile_id: str, *, max_output_tokens=None) -> ProtocolProfil
         model="gpt-test",
         usages=["agent"],
         max_output_tokens=max_output_tokens,
+        # 平台默认模型只能是平台档：新增校验后，测试桩必须与真实默认档同形。
+        visibility="platform",
     )
 
 
