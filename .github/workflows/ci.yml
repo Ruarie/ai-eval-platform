@@ -1,7 +1,9 @@
 name: CI
 
 on:
-  # 额度治理：功能分支与 Pull Request 不运行 Actions，仅 main 推送后校验。
+  # 额度治理：功能分支与 Pull Request 默认不运行 Actions，仅 main 推送后校验。
+  # 唯一例外是迁移目录：多个 head 只会在合并后才爆炸，必须提前到 PR 阶段查，
+  # 因此 migration-heads 作业单独挂 pull_request 且按 paths 过滤（改动迁移才跑，约 10 秒）。
   push:
     branches: [main]
     # 纯说明文档不消耗 Runner；运行时 SKILL.md 等提示词仍需验证。
@@ -9,8 +11,24 @@ on:
       - 'docs/**'
       - '*.md'
       - '**/README.md'
+  pull_request:
+    paths:
+      - 'backend/api/migrations/**'
+      - 'tools/check_migration_heads.py'
+      - '.github/workflows/ci.yml'
 
 jobs:
+  # 迁移链守卫：恰好一个 head，且不存在重复 revision。
+  # 纯标准库脚本，不装依赖；PR 改动迁移时必跑，main 推送后也跑一次。
+  migration-heads:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Alembic single head
+        run: python3 tools/check_migration_heads.py
+
   deploy-scripts:
     runs-on: ubuntu-latest
     steps:

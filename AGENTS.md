@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.50 ｜ 审查日期：2026-11-19（迁移链守卫：新增 `tools/check_migration_heads.py`（纯标准库，解析 `revision`/`down_revision`，含 merge 元组），要求恰好一个 head。接入三处：① CI 新增 `migration-heads` 作业，并为此单独开 `pull_request` 触发（按 paths 只筛迁移目录与脚本，约 10 秒，属额度治理的例外）；② `deploy/deploy.sh` 同步代码后、规划镜像前做 preflight，多 head 直接停止部署；③ `deploy/tests` 5 条用例锁判定。起因：#373 与另一条 PR 的迁移接在同一父节点，main 出现三个 head，CI 迁移作业失败、部署连续 skipped。门禁：deploy 测试 32 通过、脚本在真实迁移目录上输出唯一 head。）
+>
 > 版本：V2.49 ｜ 审查日期：2026-11-19（补 `DELETE /api/case-sets/{id}` 软删除：用例集此前只能建不能删，「废弃」仅改状态、条目仍占列表。实现为 `deleted_at` 标记 + 列表/详情过滤，行数据与版本快照保留供审计；前端右键菜单新增「删除用例集」，草稿与已入库文案区分。门禁：api 2547 passed/97 skipped（+3）、ruff 通过、单测 168/168、e2e 167/167（+2）。）
 >
 > 版本：V2.48 ｜ 审查日期：2026-11-19（协议档归属与账号隔离：`protocol_profiles` 增量 `visibility`/`owner_id`（迁移 `b3d8e1f6a2c4`），存量回填平台模型；平台模型全员可用、仅 admin 可改删，个人模型仅属主与管理端可见可用，个人模型不写全局 LLM 别名、不能借用平台凭据；新增 `GET/POST/PUT/DELETE /api/profiles` 的归属裁剪与 `profile_access.py` 守卫，Agent 回合、任务建单、用例对比均按归属复核；admin 角色落地，`/api/admin/*` 与成员开停/重置/活跃统计收口为 admin，前端新增 `/my-models` 并隐藏成员管理入口。契约见 API V2.68、PRD V1.69。）

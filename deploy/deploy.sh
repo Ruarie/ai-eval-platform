@@ -136,6 +136,13 @@ export BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 
+# 迁移链必须是唯一 head：多个 head 会让 `alembic upgrade head` 在生产直接失败，
+# 而这类问题往往来自两条 PR 各自把迁移接在同一个父节点上，越早拦住越好。
+if ! python3 tools/check_migration_heads.py backend/api/migrations/versions; then
+    echo "错误：迁移链存在多个 head，已停止部署（先合并迁移再重新部署）" >&2
+    exit 1
+fi
+
 # 先判断部署差异：纯文档/测试提交同步 Git 后即可结束，不访问 Docker 或清理镜像。
 # CI 与服务器共用计划，避免拉取 CI 未构建的目标标签。
 DEPLOY_PLAN=$(python3 deploy/plan_services.py --base "$DEPLOY_BASE_COMMIT" --target "$DEPLOY_COMMIT")
