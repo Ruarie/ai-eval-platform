@@ -339,6 +339,26 @@ const IconRag = () =>
     h('path', { d: 'm18.2 16.2 2.3 2.3' }),
   ])
 
+// 概览：仪表盘。
+const IconOverview = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { d: 'M4 19V9M10 19V5M16 19v-6M22 19H2' }),
+  ])
+
+// 审计：带勾的清单文档。
+const IconAudit = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { d: 'M6 3h9l4 4v14H6z' }),
+    h('path', { d: 'M9 12h6M9 16h4' }),
+  ])
+
+// 治理：盾牌。
+const IconGovern = () =>
+  h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+    h('path', { d: 'M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z' }),
+    h('path', { d: 'm9 12 2 2 4-4' }),
+  ])
+
 const navGroups = [
   {
     title: '工作台',
@@ -386,6 +406,9 @@ const navGroups = [
   {
     title: '管理',
     items: [
+      { path: '/admin', label: '平台概览', icon: IconOverview, t: 'var(--t-reports)', c: 'var(--c-reports)' },
+      { path: '/admin/audit', label: '审计日志', icon: IconAudit, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)' },
+      { path: '/admin/resources', label: '资源治理', icon: IconGovern, t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
       { path: '/admin/profiles', label: '协议档', icon: IconProfiles, t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
       { path: '/admin/users', label: '账号', icon: IconUsers, t: 'var(--t-users)', c: 'var(--c-users)' },
     ],
@@ -396,6 +419,10 @@ const navGroups = [
 function isRouteActive(itemPath: string): boolean {
   if (itemPath === '/agent') {
     return route.path === '/agent' || route.path.startsWith('/agent/')
+  }
+  // 管理后台的父级路由不做前缀匹配，否则 /admin/audit 会把「平台概览」也点亮。
+  if (itemPath === '/admin') {
+    return route.path === '/admin'
   }
   return route.path === itemPath || route.path.startsWith(itemPath + '/')
 }

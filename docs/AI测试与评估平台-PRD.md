@@ -523,6 +523,9 @@ V1 压测内核：**go-stress-testing**（Apache-2.0）扩展，独立 `stress` 
 | `/rag` | RAG 中心 | 把知识库与检索口径（mode / Top-K）存成可复用资源；详情内可用该口径直接试检索 | 成员 |
 | `/mcp` | MCP 中心 | 只读展示平台已注册的工具通道与工具清单、健康检查结果；不接受浏览器指定第三方 MCP 地址 | 成员 |
 | `/kb` | 知识库与切块检索 | 文档分块预览、2D 向量投影散点图、Top-K 相似度召回连线与重排前后位次对比 (Rerank Delta)、黄金 QA 维护 | 成员 |
+| `/admin` | 平台概览 | 管理后台首屏：成员/会话/任务/资源/存储/审计六组计数、资源与任务分布、审计热点与最近操作 | 成员 |
+| `/admin/audit` | 审计日志 | 写操作全量留痕查询：按日期与动作过滤、分页加载、对象与 IP 展示；只读 | 成员 |
+| `/admin/resources` | 资源治理 | 能力中心全量资源（含他人私有）：切换团队/私有可见性、下架删除，改动写入审计 | 成员 |
 | `/admin/profiles` | 协议档治理 | 三类协议（`openai_chat`、`openai_responses`、`anthropic_messages`）及可选 Embedding / Reranker 端点维护、Key 只写不回显、连通性检查 | 成员 |
 | `/admin/stress` | 历史压测配置 | 现有配置与历史数据按保留的页面展示；不触发新的压测 | 成员 |
 | `/admin/users` | 账号协同 | 成员开户、停用、重置密码（系统安全保底：不可停用最后一名正常账号） | 成员 |
@@ -543,6 +546,7 @@ V1 压测内核：**go-stress-testing**（Apache-2.0）扩展，独立 `stress` 
 `CRUD /api/kb` `POST /api/kb/{id}/docs` `CRUD /api/gold-qa`  
 `POST /api/tasks` `GET /api/tasks` `GET /api/tasks/{id}` `POST /api/tasks/{id}/cancel` `POST /api/tasks/{id}/rerun`  
 `GET /api/reports/{id}` `POST /api/reports/{id}/share`
+`GET /api/admin/overview`（后台聚合）
 `CRUD /api/resources` `POST /api/resources/{id}/use` `POST /api/resources/{id}/clone` `GET /api/resources/plaza`（能力中心，四类资源共用）  
 `GET /api/admin/settings` `PUT /api/admin/settings`  
 `POST /api/auth/ws-ticket` `GET /ws/agent?ticket=`
