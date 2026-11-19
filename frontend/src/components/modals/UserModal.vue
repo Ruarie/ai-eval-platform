@@ -9,7 +9,13 @@
     <div class="user-form">
       <div class="field">
         <label class="field-label">用户名 <span class="req">*</span></label>
-        <n-input v-model:value="form.username" placeholder="输入成员账号名称" />
+        <n-input
+          v-model:value="form.username"
+          placeholder="输入成员账号名称"
+          :status="fieldErrors.username ? 'error' : undefined"
+          @update:value="clearFieldError('username')"
+        />
+        <span v-if="fieldErrors.username" class="field-error">{{ fieldErrors.username }}</span>
       </div>
 
       <div class="field">
@@ -19,7 +25,15 @@
           type="password"
           show-password-on="click"
           placeholder="至少 8 位，包含字母与数字"
+          :status="fieldErrors.password ? 'error' : undefined"
+          @update:value="clearFieldError('password')"
         />
+        <span v-if="fieldErrors.password" class="field-error">{{ fieldErrors.password }}</span>
+      </div>
+
+      <div class="field">
+        <label class="field-label">显示名</label>
+        <n-input v-model:value="form.displayName" placeholder="例如：张三（可留空）" />
       </div>
 
       <div class="field">
@@ -53,12 +67,16 @@ const emit = defineEmits<{
 
 const message = useMessage()
 const saving = ref(false)
-const form = ref({ username: '', password: '' })
+const form = ref({ username: '', password: '', displayName: '' })
+const fieldErrors = ref<Record<string, string>>({})
 
 watch(
   () => props.show,
   (val) => {
-    if (val) form.value = { username: '', password: '' }
+    if (val) {
+      form.value = { username: '', password: '', displayName: '' }
+      fieldErrors.value = {}
+    }
   },
 )
 
@@ -73,15 +91,36 @@ async function handleSave() {
   }
 
   saving.value = true
+  fieldErrors.value = {}
   try {
-    await api.users.create({ username: form.value.username, password: form.value.password, role: 'member' })
+    // 全员同权：服务端恒写 member，契约外字段会被 extra=forbid 拒绝，不能带 role。
+    await api.users.create({
+      username: form.value.username.trim(),
+      password: form.value.password,
+      display_name: form.value.displayName.trim() || undefined,
+    })
     message.success('成员账号已开通')
     emit('update:show', false)
     emit('success')
   } catch (err: any) {
-    message.error(err.message || '开通账号失败')
+    const fields = err?.fields
+    if (fields && typeof fields === 'object') {
+      fieldErrors.value = fields
+      message.error('请按提示修正标红项')
+    } else {
+      message.error(err?.message || '开通账号失败')
+    }
   } finally {
     saving.value = false
+  }
+}
+
+/** 用户开始修改某个字段时清掉它的错误，避免旧提示一直挂着。 */
+function clearFieldError(key: string) {
+  if (fieldErrors.value[key]) {
+    const next = { ...fieldErrors.value }
+    delete next[key]
+    fieldErrors.value = next
   }
 }
 </script>
@@ -103,6 +142,10 @@ async function handleSave() {
   color: var(--text-secondary);
 }
 .field-label .req {
+  color: var(--accent-error);
+}
+.field-error {
+  font-size: 12px;
   color: var(--accent-error);
 }
 </style>

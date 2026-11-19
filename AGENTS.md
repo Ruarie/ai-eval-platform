@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.46 ｜ 审查日期：2026-11-19（修两个 UI 测试暴露的缺陷：① `UserModal.vue` 建成员时多传 `role`，被 `extra="forbid"` 判 422 → 归一为 400 且无字段信息，表现为「开通新成员必失败」；已去掉 `role`、补 `display_name`，并把请求体校验错误按 §1.3 补上 `fields` 映射到表单项。② 远程（`kind=ssh`）工作区的写入口（新建文件/文件夹、快捷脚本、重命名、上传、下载原文件）后端本就 `_require_local` 拒绝，前端改为统一禁用并给出原因，拖拽上传直接提示不发请求。门禁：api 2541 passed/97 skipped、ruff 通过、前端 typecheck/build、单测 162/162、e2e 162/162（新增 4 项：成员开通 2、工作区只读 2）。）
+>
 > 版本：V2.45 ｜ 审查日期：2026-11-19（新增管理后台三页：`/admin` 平台概览、`/admin/audit` 审计日志、`/admin/resources` 资源治理。后端新增 `GET /api/admin/overview`：一次聚合成员/会话/任务/资源/存储/审计六组计数，口径为「会话不计软删除、任务只看近 7 天、资源按 kind 分组、审计近 24h + Top5 动作」；前端不二次聚合。资源治理复用 `/api/resources` 的 PATCH/DELETE（服务端已允许管理员），切换可见性与下架都会落 AuditLog。门禁：api 2539 passed/97 skipped、ruff 通过、前端 typecheck/build、单测 162/162、e2e 158/158。）
 >
 > 版本：V2.44 ｜ 审查日期：2026-11-19（下线无调用方的常驻服务：① `stress` 压测引擎从 `docker-compose.yml` 移除——任务中心的压测入口要求父任务为 benchmark/rag，两类新建入口已停用，容器常驻无实际调用；`deploy/plan_services.py` 与 `deploy/deploy.sh` 同步移除该服务，`backend/stress` 代码与 `GET /api/tasks/{id}/stress-series` 历史查询保留。② 清理宿主机上 compose 之外的残留 `api-pytest` 容器（自带 restart 策略反复拉起，常驻约 85MB）。部署计划单测 25 项通过；下线后 `docker ps` 只剩 web/api/worker/runner/lightrag/media-mcp/https + postgres/redis。）

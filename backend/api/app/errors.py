@@ -91,10 +91,26 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _validation_error_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        # FastAPI 自动校验默认 422，按 API V1.0 归一为 400 + VALIDATION
+        """FastAPI 自动校验默认 422，按 API V1.0 归一为 400 + VALIDATION。
+
+        额外带上 ``fields``（字段名 + 原始校验信息）：前端据此把错误标到具体表单项，
+        而不是只给一句「请检查标红字段」。保留 message 原文以兼容既有客户端。
+        """
+        fields: dict[str, str] = {}
+        for error in exc.errors():
+            loc = [part for part in error.get("loc", ()) if isinstance(part, str)]
+            field = loc[-1] if loc else ""
+            if not field or field in {"body", "query", "path"}:
+                continue
+            # 同字段多条错误保留第一条，避免前端标红文案来回跳。
+            fields.setdefault(field, str(error.get("msg", "校验失败")))
         return JSONResponse(
             status_code=400,
-            content={"code": ErrorCode.VALIDATION.value, "message": "请检查标红字段"},
+            content={
+                "code": ErrorCode.VALIDATION.value,
+                "message": "请检查标红字段",
+                "fields": fields,
+            },
         )
 
     @app.exception_handler(Exception)

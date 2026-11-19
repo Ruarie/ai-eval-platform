@@ -373,7 +373,7 @@ export const api = {
         throw e
       }
     },
-    async create(payload: { username: string; password?: string; role?: string }): Promise<AuthUser> {
+    async create(payload: { username: string; password?: string; display_name?: string }): Promise<AuthUser> {
       if (getDataMode() === 'mock') {
         const u: AuthUser = {
           id: 'u-' + Date.now(),

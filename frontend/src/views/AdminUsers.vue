@@ -134,10 +134,10 @@
             <button class="link-btn" @click="loadActivity">重试</button>
           </div>
           <div v-else class="section-gap" style="gap: 8px">
-            <div class="row-between small"><span class="tertiary">活跃成员</span><b class="num">{{ kpiText(activity?.kpis.active_members) }}</b></div>
-            <div class="row-between small"><span class="tertiary">新开通</span><b class="num">{{ kpiText(activity?.kpis.new_members) }}</b></div>
-            <div class="row-between small"><span class="tertiary">新建任务</span><b class="num">{{ kpiText(activity?.kpis.total_tasks) }}</b></div>
-            <div class="row-between small"><span class="tertiary">已停用</span><b class="num">{{ kpiText(activity?.kpis.disabled_members) }}</b></div>
+            <div class="row-between small"><span class="tertiary">活跃成员</span><b class="num">{{ kpiText(activity?.kpis?.active_members) }}</b></div>
+            <div class="row-between small"><span class="tertiary">新开通</span><b class="num">{{ kpiText(activity?.kpis?.new_members) }}</b></div>
+            <div class="row-between small"><span class="tertiary">新建任务</span><b class="num">{{ kpiText(activity?.kpis?.total_tasks) }}</b></div>
+            <div class="row-between small"><span class="tertiary">已停用</span><b class="num">{{ kpiText(activity?.kpis?.disabled_members) }}</b></div>
           </div>
         </div>
 
@@ -162,8 +162,8 @@
             </rect>
           </svg>
           <div class="row-between small">
-            <span class="tertiary">登录成功 <b class="num" style="color: var(--c-agent)">{{ kpiText(activity?.kpis.login_count) }} 次</b></span>
-            <span class="tertiary">登录失败 <b class="num" style="color: var(--accent-error)">{{ kpiText(activity?.kpis.login_failed) }} 次</b></span>
+            <span class="tertiary">登录成功 <b class="num" style="color: var(--c-agent)">{{ kpiText(activity?.kpis?.login_count) }} 次</b></span>
+            <span class="tertiary">登录失败 <b class="num" style="color: var(--accent-error)">{{ kpiText(activity?.kpis?.login_failed) }} 次</b></span>
           </div>
         </div>
 
@@ -265,7 +265,7 @@ function kpiText(value: number | undefined): string {
   return value === undefined || Number.isNaN(value) ? '—' : String(value)
 }
 
-const activeMembersText = computed(() => kpiText(activity.value?.kpis.active_members))
+const activeMembersText = computed(() => kpiText(activity.value?.kpis?.active_members))
 
 /** 把登录桶画进 280×72 视窗；柱数随区间小时数变化。 */
 const loginBars = computed(() => {
