@@ -778,7 +778,7 @@ def test_compare_returns_both_sides_when_one_model_fails(cases_db, monkeypatch):
         SimpleNamespace(id="right", name="乙", model="m-b", protocol="openai_chat", base_url="http://b",
                         usages=["agent"], anthropic_version=None, encrypted_key="secret"),
     ]
-    monkeypatch.setattr(routes, "_load_compare_profiles", lambda _db, _ids: profiles)
+    monkeypatch.setattr(routes, "_load_compare_profiles", lambda *_a, **_k: profiles)
 
     def fake(profile, *_args, **_kwargs):
         if profile.id == "right":

@@ -49,6 +49,8 @@ def _fake_profile() -> MagicMock:
     p.anthropic_version = None
     p.max_output_tokens = 8192
     p.tool_call_mode = "native"
+    # 平台默认档的归属校验（V2.48 起）：个人档不能当平台默认模型。
+    p.visibility = "platform"
     return p
 
 
