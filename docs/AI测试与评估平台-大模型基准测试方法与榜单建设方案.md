@@ -1016,7 +1016,7 @@ Worker/统计模块计算所有数字和有效性，报告模板渲染表格与�
 | 模块 | 作用 |
 | --- | --- |
 | 数据目录、导入与 DatasetVersion | 场景任务中间表示、来源组、用途/切分和冻结 manifest |
-| `backend/api/app/schemas.py` 与任务创建服务 | 套件/计划配置、模型快照与合法性校验 |
+| `backend/api/app/schemas/` 与任务创建服务 | 套件/计划配置、模型快照与合法性校验 |
 | `backend/worker/app/benchmark.py` 及执行流水线 | 按 manifest 执行、分片、多次生成与分离失败状态 |
 | `backend/worker/app/scoring.py` 与专用评分器 | 题型判定、指标实现与配置有效性 |
 | `backend/worker/app/judge.py` | rubric、结构输出、校准与复核 |

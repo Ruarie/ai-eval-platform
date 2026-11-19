@@ -6,11 +6,13 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V2.65 |
-| 本轮审查日期 | 2026-11-19（新增 `GET /api/admin/overview` 后台聚合与 `/admin`、`/admin/audit`、`/admin/resources` 三个后台页；口径与 §3.12 审计一致） |
-| 上一轮审查 | 2026-11-18（§3.14 能力中心补充 `rag` 类型：绑定知识库并固化检索口径，试检索复用 `/api/kb/{id}/query`；MCP 中心为只读目录，复用既有 `/api/mcp/all-tools` 与 `/api/mcp/health-check`） |
+| 文档版本 | V2.67 |
+| 本轮审查日期 | 2026-11-19（个人记忆语义召回接线：查询向量 1.5s 上限、0.55 阈值与关键词融合；失败降级关键词；不新增端点与字段） |
+| 上一轮审查 | 2026-11-19（个人记忆自动抽取：`MemoryOut` 新增 `source`，新增 `POST /api/agent/memories/reindex`；迁移 `c7a1e93d2f60` 解除向量列固定 1536 维） |
+| 上上轮审查 | 2026-11-19（新增 `GET /api/admin/overview` 后台聚合与 `/admin`、`/admin/audit`、`/admin/resources` 三个后台页；口径与 §3.12 审计一致） |
+| 更早审查 | 2026-11-18（§3.14 能力中心补充 `rag` 类型：绑定知识库并固化检索口径，试检索复用 `/api/kb/{id}/query`；MCP 中心为只读目录，复用既有 `/api/mcp/all-tools` 与 `/api/mcp/health-check`） |
 | WS v2 修订日期 | 2026-09-26（§4A，摘要安全用量元数据与 v2.3 目录） |
-| 对应 PRD | V1.68（功能唯一权威） |
+| 对应 PRD | V1.70（功能唯一权威） |
 | 对应设计规范 | V1.12（错误码文案、确认卡字段名、调度中心规范） |
 | 对应 Agent 说明书 | `AI测试与评估平台-Agent开发文档.md` V1.7.15（AgentLoop 单入口；JSON 仍以本文为准） |
 | 对应前端计划 | AgentLoop 前端计划 V0.5 |
@@ -19,6 +21,10 @@
 | 本轮修订 | 2026-09-26：V2.28 个人长期记忆的主动保存、查看、更正、撤回与私有主会话召回；复用既有 PostgreSQL 记忆表，暂不接向量或自动抽取。 |
 | 最近修订 | 2026-09-03：V1.67 混合引擎执行落地（H2 Workflow DAG / H3 Agent TAOR）：恢复持久事件 `tool_call` / `tool_result`（payload 见 §4.3，ToolCard 只渲染脱敏摘要，观察全文不进任何事件）；`response.completed` 的 `engine` 从「分流结论」升级为「真实执行引擎」——`workflow`（H2，W0–W7 硬编码 DAG）与 `agent`（H3，plan→discover→orchestrator⇄tools 单图内 TAOR）均已真实执行，`agent_id` 审计随 Worker 目录（§3.6.3）供归属核验；`thought` / `tool_progress` / `tool_output_delta` / `confirm` / `clarify` 仍不产生。历史 `ws_events` 中的旧工具事件仍不重放。 |2026-09-03：V1.66 混合引擎 H1 Router 审计契约：`response.completed` payload 新增可选 `engine` / `router_confidence` / `router_reason`（仅 `hybrid_engine_enabled=true` 时出现，旧客户端忽略未知字段即可）；新增 `GET /api/agents` Worker 只读目录（§3.6.3）。本版不新增 WS 事件名、不恢复 `thought` / `tool_*`；`workflow` / `agent` 引擎在 H1 阶段降级按 `chat` 执行，`engine` 如实记录分流结论并经 `router_reason` 标注降级。2026-09-02：V1.65 工具契约加固（T1–T3）：JSON Schema 子集新增 `minItems`/`maxItems` 并为 8 处数组参数补上限；`output_schema` 从装饰字段升级为强制契约（注册期拒绝未声明，运行期按声明比对展示投影）；`platform.tasks` 三工具补全 `output_schema`；移除 `/api/mcp/tools/{name}/code` 端点与 `code_snippet` 字段。2026-08-28：V1.53 `web_fetch` 直抓路径接入 trafilatura 正文提取：可读性算法识别文章主体，保留标题层级/链接/图片/表格，未安装或提取失败降级回内置 `_TextExtractor`；提取真实产出 Markdown 时才声明 `format=markdown`（§4.3.1）。V1.52 优化 `web_fetch` 长文完整性与卡片预览：模型正文预算 8,000→60,000 字符，卡片预览与 `read` 同源对齐 `TOOL_PREVIEW_MAX_CHARS` 并随 `web.preview_limit_chars` 下发，直接抓取字节窗口 256KB→1MB（§4.3.1）。2026-08-27：V1.51 新增持久事件 `session_title`（§4.3）与会话标题 AI 生成契约（§4.3.2）：默认标题会话首条消息后由 Agent 协议档弱结构化生成标题并落库广播，修复标题不持久化问题。V1.50 统一 Agent 文本附件 staging 与 `read` 的 20MB 边界；`read` 模型窗口为 2,000 行 / 600,000 字符。V1.49 协议档新增 `max_output_tokens`（256–131072，默认 8192），创建/更新/列表/详情均支持；Agent 模型调用从协议档读取输出上限，长文档总结/导出类任务可调大避免回答被截断。2026-08-26：V1.48 同轮多调用默认串行，灰度开启后仅 `read`/`web_search`/`web_fetch` 可并行，回填按原始 `call_id`。V1.47 新增 `GET /api/agent/metrics`，不含正文/参数，不新增 WS 事件。V1.46 明确 native 一次 ToolCall 结束当前上游响应，结果回填后再请求，不新增事件名。V1.45 思考链只下发可展示摘要，隐藏 CoT（`Here's a thinking process` / `Analyze User Input`）由服务端替换，不原样推给前端。V1.44 ToolCall 在执行前持久化，新增瞬态 `tool_progress` / `tool_output_delta`，并冻结原生工具的输出 Schema、权限边界和失败恢复字段。V1.43 思考增量允许合并下发；有思考链时 `think_final` 在 `response.completed` 之前。V1.42 Direct `/help`、未知斜杠与图内防御提示在业务事件后必须再发 `response.completed`（成功 `stop`，校验/防御 `error`），结束整轮生成态。V1.41 确认卡预填与 `confirm_ack` 入队前丢掉已删除的协议档/数据集/知识库 ID，避免 Worker 再报「协议档不存在或已删除」。V1.40 `/cancel` 与 `/stress` 按 §4.4 解禁（仍走 `user_message`）：`/cancel` 取消本会话非终态任务，`/stress` 发出质量任务确认卡且 `with_stress=true`，禁止 `kind=stress`。V1.39 原生工具卡片收起态副标题统一为 `ToolCall`，不在卡片摘要区回显文件路径、命令或写入内容；详细参数仍在展开区展示。V1.38 明确原生基础 ToolCall 卡片使用英文工具名，展开区统一显示 `ToolCall` 与 `输出`，文件、命令和代码/文档结果使用行号展示；MCP/平台短工具仍按下方中文名映射。2026-08-24：V1.24 修复 Agent 附件上下文链路：服务端校验文件归属并在模型窗口解析文本、PDF、DOCX、XLSX，图片按三协议图文内容块发送；历史消息附件补齐安全元数据，前端可在刷新后继续预览。同步调整输入框内附件按钮与用户消息附件位序。V1.23 扩展 Agent 附件契约，支持图片、Word 文档与多附件拖拽上传；保留 `POST /api/files` 后再以既有 `file_id` 引用的消息链路，补充图片缩略图、PDF/文本预览与 Office 文件打开/下载说明。V1.22 修复 V1.21 遗留：§4.4 标题「仅此三条」改「仅此四条」、§9 禁止清单「第四种」改「第五种」并补四类上行事件枚举、§4.3 `tool_result.source` 语义对齐 M7 `Observation.source`（溯源标识字符串，非 short\|long 枚举）、§4.3 共享流规则补 clarify/plan/confirm 持久化广播说明、§4.4 clarify 多副本限制注明、§9 Ask/Plan 补注非 Harness plan 事件；V1.20 及更早版本沿用历史修订记录。 |
 | 适用范围 | V1.0：浏览器 `web/` ↔ `api`；全域 REST + WS 接口规范 |
+
+> V2.67（2026-11-19）：个人记忆**语义召回接线**（§V2.28「私有主运行召回」）。开启 `AGENT_MEMORY_SEMANTIC_ENABLED` 后，私有主会话每次请求对最新用户输入取查询向量（1.5s 上限），与本人已回填向量做余弦；融合分 `0.65×余弦 + 0.35×关键词归一`，余弦 <0.55 且无关键词命中的 `fact` 不入选，`preference` 仍始终保留。Embedding 未配置、超时、失败或维度不一致一律降级关键词。召回在线程池执行，不阻塞事件循环；不新增 REST/WS 路径与字段，`MemoryOut.embedding` 仍不回显。
+
+> V2.66（2026-11-19）：个人记忆增加**自动抽取来源**与向量回填。`MemoryOut` 新增 `source: "manual" | "auto"`；自动记录以 `source_id=auto:{id}` 落库，与手动记录同权列表、更正、撤回与召回。新增 `POST /api/agent/memories/reindex`（`{force?,limit?}` → `{embedded,candidates,remaining}`），语义未启用返回 `VALIDATION`(400)。抽取默认关闭（`AGENT_MEMORY_AUTO_EXTRACT_ENABLED`），仅本人私有会话回合结束异步执行，失败不影响对话；`POST/PUT/DELETE` 契约不变。
 
 > V2.64（2026-11-17）：`GET /api/kb/{id}/graph` 增加**空库短路**（§3.9）。库内 0 篇文档时直接返回 `200` + 空 `nodes` / `edges`，不调用 LightRAG；库内有文档但引擎不可用时仍为 `UPSTREAM`(502)。字段、`limit` 与错误码均不变，仅避免把「还没上传文档」误报成引擎故障。
 
@@ -2859,7 +2865,7 @@ Qwen Image 通过与 `audio.voiceclone` 相同的 Agent 内部短工具链路执
 
 | 文件 | 作用 |
 | :--- | :--- |
-| `backend/api/app/schemas.py` | 增加 Embedding / Reranker 的 URL、模型标识与 API Key 输入字段；响应只返回配置公开值和密钥存在性布尔值 |
+| `backend/api/app/schemas/` | 增加 Embedding / Reranker 的 URL、模型标识与 API Key 输入字段；响应只返回配置公开值和密钥存在性布尔值 |
 | `backend/api/app/profile_env.py` | 为两类附加模型生成隔离环境变量，沿用加锁、fsync、回滚和只写不回显规则 |
 | `backend/api/app/routers/profiles.py` | CRUD 写入和读取两类附加端点配置，更新时保留未提交的既有密钥 |
 | `backend/worker/app/profile_env.py` | Worker 只读解析 Embedding / Reranker 环境变量 |
@@ -3130,7 +3136,7 @@ LangGraph `reflect` 在规划 `delivery=confirm` 且复核通过后发出确认�
 | 文件 | 作用 |
 | :--- | :--- |
 | `backend/shared/models.py` / `migrations/versions/e7a1c3f52b48_*.py` | `protocol_profiles.max_output_tokens` 列与迁移 |
-| `backend/api/app/schemas.py` / `app/routers/profiles.py` | 创建/更新/响应支持新字段 |
+| `backend/api/app/schemas/` / `app/routers/profiles.py` | 创建/更新/响应支持新字段 |
 | `backend/api/app/routers/ws.py` | Agent 模型配置从协议档读取输出上限 |
 | `frontend/src/components/modals/ProfileModal.vue` / `src/api/types.ts` | 协议档表单与类型支持新字段 |
 
@@ -3210,7 +3216,7 @@ Markdown 输出与 Firecrawl 对齐。提取真实产出 Markdown 时才声明 `
 | `backend/api/app/routers/datasets.py` | staging 表格读写和已发布数据集的不变性保护 |
 | `backend/worker/app/dataset_import.py`、`backend/worker/app/main.py` | 独立导入领取、租约回收、受控下载/解析、staging 写入 |
 | `backend/api/app/routers/tasks.py`、`backend/worker/app/benchmark.py` | 任务版本冻结与正式版本读取 |
-| `backend/api/app/schemas.py`、`backend/api/app/main.py` | V1.55 请求模型和路由注册 |
+| `backend/api/app/schemas/`、`backend/api/app/main.py` | V1.55 请求模型和路由注册 |
 
 **V1.56（2026-08-29）— 收紧 staging 审核与发布质量门禁**
 
@@ -3236,7 +3242,7 @@ staging 保存改为仅允许非提报成员执行，并写入最小审核审计
 
 | 实际修改文件 | 作用 |
 | :--- | :--- |
-| `backend/api/app/routers/workspaces.py` | 列表分页 / 过滤 / 聚合与 `_match_session`、`_paginate_entries` 纯函数；新增 `/stats` 磁盘总字节端点 |
+| `backend/api/app/routers/user_workspaces.py` | 列表分页 / 过滤 / 聚合与 `_match_session`、`_paginate_entries` 纯函数；新增 `/stats` 磁盘总字节端点 |
 | `backend/api/tests/test_admin_workspaces.py` | 过滤与分页切片单测、未登录 401 回归 |
 | `frontend/src/api/types.ts` | `WorkspaceOverview` 增加 `total/offset/limit/stats`，新增 `WorkspaceStats` |
 | `frontend/src/api/http.ts` | `admin.listWorkspaces` 透传分页与过滤参数，新增 `admin.workspaceStats` |
@@ -3402,7 +3408,7 @@ Composer 上方抽屉；点击确认或取消即收回，消息流只保留关�
 
 | 实际修改文件 | 作用 |
 | :--- | :--- |
-| `backend/api/app/routers/workspaces.py` | 删除（管理端 `/api/admin/workspaces` 路由整文件下线） |
+| `backend/api/app/routers/user_workspaces.py` | 删除（管理端 `/api/admin/workspaces` 路由整文件下线） |
 | `backend/api/app/main.py` | 移除 `workspaces.router` 注册与导入 |
 | `backend/api/app/workspace_service.py` | 删除 `orphan_direct_children`，头注同步 |
 | `backend/api/tests/test_admin_workspaces.py` | 删除（随路由下线） |
@@ -3432,7 +3438,7 @@ Composer 上方抽屉；点击确认或取消即收回，消息流只保留关�
 | 实际修改文件 | 作用 |
 | :--- | :--- |
 | `backend/shared/models.py` | User.must_change_password 默认值 true → false（列保留） |
-| `backend/api/app/schemas.py` | UserCreate.must_change_password 默认 true → false（字段保留兼容） |
+| `backend/api/app/schemas/` | UserCreate.must_change_password 默认 true → false（字段保留兼容） |
 | `backend/api/app/routers/users.py` | 开户恒 false；reset-password 不再置 true |
 | `backend/api/app/routers/auth.py` / `app/main.py` | change-password 不再维护标记；bootstrap 恒 false |
 | `frontend/src/views/Login.vue` | 删除强制改密弹窗/状态/拦截分支/提交函数 |
@@ -4111,22 +4117,29 @@ v2 `task.create` 在用户确认、规格复验并成功入队的同一事务中
 | `POST /api/agent/memories` | `{title,content,category?,workspace_id?}` | `MemoryOut` |
 | `PUT /api/agent/memories/{id}` | `{title,content,category,workspace_id,version}`；完整替换可编辑字段 | `MemoryOut`，版本递增 |
 | `DELETE /api/agent/memories/{id}?version=N` | 读取时取得的正整数版本 | HTTP 204 |
+| `POST /api/agent/memories/reindex` | `{force?:boolean, limit?:1–200}`；仅本人记忆，`force` 时重算已有向量 | `{embedded,candidates,remaining}`；语义未启用返回 `VALIDATION`(400)，审计与响应不含正文 |
 
-`MemoryOut={id,title,content,category,workspace_id,workspace_name,version,source_id,created_at,updated_at}`。标题去除首尾空白后 1–80 字符、正文 1–2000 字符；`category` 为 `preference`（常用偏好）或 `fact`（用户保存的事实资料，默认）；范围为 null（本人全局）或本人活跃工作区 ID。列表按更新时间及 ID 稳定排序，搜索对标题／正文作转义子串匹配，不把 `%` 和 `_` 当作通配符。失效工作区记录仍可由本人管理，`workspace_name=null`；运行时不得将其退化为全局记忆。
+`MemoryOut={id,title,content,category,workspace_id,workspace_name,version,source,source_id,created_at,updated_at}`。`source` 为 `manual`（成员手动保存）或 `auto`（回合结束自动抽取，默认关闭）；`source_id` 分别是 `manual:{id}` / `auto:{id}`，只作内部来源标识，不套用会话证据语义。标题去除首尾空白后 1–80 字符、正文 1–2000 字符；`category` 为 `preference`（常用偏好）或 `fact`（用户保存的事实资料，默认）；范围为 null（本人全局）或本人活跃工作区 ID。列表按更新时间及 ID 稳定排序，搜索对标题／正文作转义子串匹配，不把 `%` 和 `_` 当作通配符。失效工作区记录仍可由本人管理，`workspace_name=null`；运行时不得将其退化为全局记忆。
 
 越权 ID、其他记忆类型、已撤回记录或写入时不可用的工作区统一 `NOT_FOUND`；版本冲突 `CONCURRENCY`；空正文、超长、非法类别及数量超限使用 `VALIDATION`。新增返回 HTTP 201，更新返回 200，删除返回 204。每人至多 200 条有效记录，写入在用户行锁下校验数量与版本；绑定工作区时先锁工作区，再锁用户与目标记忆，避免与工作区清理锁序冲突。已知凭据值不能写入，错误和审计不含提交正文；普通的 token 预算等词语不应被当作凭据拒绝。
 
 ### 存储、来源与撤回
 
-复用既有 `KnowledgeMemory`：`tenant_id=personal:<登录用户ID>` 是内部个人命名空间，`acl=private`、`acl_user_ids=[该用户]`；`meta` 包含 `kind=personal_memory`、`schema_version=1`、标题、类别和工作区范围。`source_id=manual:<记忆ID>` 表示用户主动保存，`source_version` 对应公开版本，`embedding=null`。不读取旧宽范围知识记录，不把手动输入伪装为某条对话或工具的已验证结论；无需新增模型或数据库迁移。
+复用既有 `KnowledgeMemory`：`tenant_id=personal:<登录用户ID>` 是内部个人命名空间，`acl=private`、`acl_user_ids=[该用户]`；`meta` 包含 `kind=personal_memory`、`schema_version=1`、标题、类别和工作区范围。`source_id=manual:<记忆ID>` 表示用户主动保存，`source_id=auto:<记忆ID>` 表示默认关闭的回合结束自动抽取；两者共用 `source_version` 公开版本。`embedding` 默认 null，仅在开启语义开关并成功生成时写入。不读取旧宽范围知识记录，不把手动输入伪装为某条对话或工具的已验证结论。
 
 创建为版本 1，更正递增；删除置 `memory_revoked=true` 并清空正文和标题、递增版本。以后检索排除撤回记录，重新保存需新建；审计只记录标识和版本等元数据。撤回不删除原始会话事实、已生成回答或既有请求审计，已经发出的请求不可追溯撤回。
 
+### 自动抽取（V2.66，默认关闭）
+
+仅当服务端开启 `AGENT_MEMORY_AUTO_EXTRACT_ENABLED` 时生效：回合结束后由后台任务读取本轮用户/助手文本，调用 Agent 协议档抽取最多 3 条候选；只处理本人私有会话，团队共享、他人会话、停用账号、空文本或疑似凭据一律跳过。候选经代码侧长度/枚举校验、精确文本去重、可选向量去重（余弦 ≥0.92）与 200 条配额后落库，工作区不属于本人时回落全局。抽取失败只记日志，不改变会话、任务或回答状态；同一助手消息进程内只处理一次。语义开关 `AGENT_MEMORY_SEMANTIC_ENABLED` 关闭时只做精确去重，不调用 Embedding 端点。
+
+`POST /api/agent/memories/reindex` 用于开关打开后为历史记忆补齐向量：只处理本人有效记录，单行写入失败不影响其余行；语义未启用直接 `VALIDATION`(400)，不使用全零/随机向量冒充。返回 `{embedded,candidates,remaining}`，审计只记录动作与计数。
+
 ### 私有主运行召回
 
-每次实际模型请求均重新获取最新有效记录，不缓存旧正文或旧版本。仅本人拥有的私有主会话可用，子运行和团队共享会话不加载。个人全局记录可用于本人私有会话；工作区记录必须与当前绑定一致且工作区仍属于本人、未注销。SQL 先过滤个人命名空间、私有 ACL、类型与撤回状态，再从最多 200 条本人候选中进行有界关键词评分。
+每次实际模型请求均重新获取最新有效记录，不缓存旧正文或旧版本。仅本人拥有的私有主会话可用，子运行和团队共享会话不加载。个人全局记录可用于本人私有会话；工作区记录必须与当前绑定一致且工作区仍属于本人、未注销。SQL 先过滤个人命名空间、私有 ACL、类型与撤回状态，再从最多 200 条本人候选中做有界评分。
 
-`preference` 可作为默认建议，`fact` 必须匹配当前最新用户输入的关键词；匹配采用英文词和中文双字，不发额外模型请求，不使用向量或 LightRAG。按相关度／更新时间／ID 稳定选择，最多五条完整记录、共用 2048 估算 token，超预算整条跳过。以非缓存系统资料段注入，包含 ID、版本和手动来源，明确不覆盖当前指令、不改变权限、不证明任务成功。旧对话中的历史引用不是本次有效召回。
+`preference` 可作为默认建议，`fact` 必须匹配当前最新用户输入的关键词或达到语义阈值。语义开关（`AGENT_MEMORY_SEMANTIC_ENABLED`）关闭时：关键词采用英文词和中文双字，不发额外请求，不使用向量或 LightRAG。开启时：对最新用户输入取一次查询向量（1.5s 上限），与本行已回填向量计算余弦；融合分 `0.65 × 余弦 + 0.35 × 关键词归一`，余弦低于 `0.55` 且关键词无命中的 `fact` 不入选；未回填向量的旧记录按余弦 0 处理，仍可被关键词命中。Embedding 未配置、超时、HTTP 失败或维度不一致时整体降级为关键词，不抛错、不阻断回合；召回在线程池执行，事件循环与 `/stop` 不被阻塞。按融合分／更新时间／ID 稳定选择，最多五条完整记录、共用 2048 估算 token，超预算整条跳过。以非缓存系统资料段注入，包含 ID、版本和来源，明确不覆盖当前指令、不改变权限、不证明任务成功。旧对话中的历史引用不是本次有效召回。
 
 配置偏好和长期记忆在同一私有范围复验与审计事务中准备，双方读取及使用标记提交成功后才发布新请求段；失败不能沿用之前的缓存。摘要网络等待结束后再次读取最新资料，重建已提交摘要请求并复验硬预算；刷新后超限返回 `BUDGET_EXCEEDED`，不启动第二轮摘要循环。实际长期记忆段纳入上下文 `memory_files` 类别和硬输入预算。沿用 V2.27：已消费个人上下文的会话不能改为团队共享。
 
@@ -4263,7 +4276,7 @@ Excel 导入在本批缓存已写入但尚未 flush 的用例，重复编号按�
 ### 修改代码文件与作用清单
 
 - `backend/api/app/routers/admin.py`：探活目标的同源密钥复用、SSRF 前置校验、失败响应脱敏。
-- `backend/api/app/routers/users.py`、`backend/api/app/schemas.py`：重置他人密码的本人密码二次确认与审计标记。
+- `backend/api/app/routers/users.py`、`backend/api/app/schemas/`：重置他人密码的本人密码二次确认与审计标记。
 - `frontend/src/api/http.ts`、`frontend/src/components/modals/ResetPasswordModal.vue`：透传 `current_password`，重置他人时要求输入。
 - `backend/api/tests/test_security_hardening.py`：覆盖密钥不外发、同源复用、内网拒绝、失败脱敏、非 http(s) 拒绝及重置密码四种分支。
 
@@ -4301,7 +4314,7 @@ Excel 导入在本批缓存已写入但尚未 flush 的用例，重复编号按�
 - `backend/shared/casegen.py`：新增 `clip_source` / `normalize_case` / 别名表 / `rebalance_with_stats`；`selfcheck` 支持配比。
 - `backend/worker/app/testcase.py`：来源与裁剪留痕、按配比自检、裁剪统计事件。
 - `backend/api/app/routers/cases.py`：候选返回 `checks`/`source_truncated`/`dropped`，超时对齐，编辑自检降级为 warning。
-- `backend/api/app/schemas.py`：移除 `complexity`。
+- `backend/api/app/schemas/`：移除 `complexity`。
 - `frontend/src/api/{http.ts,types.ts}`、`frontend/src/views/Cases.vue`：候选结果结构、超时、步骤 2 的截断/裁剪/自检提示。
 - `backend/api/tests/test_casegen.py`：新增截断、枚举归一、按配比自检、裁剪统计四组断言。
 
@@ -4370,7 +4383,7 @@ Excel 导入在本批缓存已写入但尚未 flush 的用例，重复编号按�
 
 - `backend/shared/case_compare.py`：本轮结构分、功能点拆分和结论文案。
 - `backend/api/app/llm_client.py`：抽出按指定协议档调用，当前 Agent 档仍走原入口。
-- `backend/api/app/schemas.py`、`routers/cases.py`：对比请求与并行生成。
+- `backend/api/app/schemas/`、`routers/cases.py`：对比请求与并行生成。
 - `backend/api/tests/test_case_compare.py`、`test_cases_audit.py`：分数口径，以及单侧失败仍返回另一侧。
 - `frontend/src/api/types.ts`、`http.ts`、`views/Cases.vue`：对比入口、结果和采用某一侧候选。
 - `docs/AI测试与评估平台-API.md`：登记 `ai-compare`。
@@ -4523,7 +4536,7 @@ Excel 导入在本批缓存已写入但尚未 flush 的用例，重复编号按�
 
 - `backend/shared/requirements.py`：需求抽取、相似度、自动关联与覆盖率纯函数。
 - `backend/shared/models.py`、`backend/api/app/models.py`：基线/条目/关联模型与用例集绑定列。
-- `backend/api/app/schemas.py`：需求、覆盖率、自动关联与搜索契约。
+- `backend/api/app/schemas/`：需求、覆盖率、自动关联与搜索契约。
 - `backend/api/app/routers/requirements.py`、`routers/search.py`、`app/main.py`：需求域/搜索域路由注册。
 - `backend/api/migrations/versions/a9d4e6f2b8c1_需求基线与用例覆盖.py`：三张新表与绑定列。
 - `backend/api/tests/test_requirements.py`、`test_requirements_route.py`、`test_search.py`：纯函数、路由、权限与空查询回归。

@@ -678,7 +678,7 @@ Worker：HTTPS/重定向/私网地址检查 → SHA-256 → 固定 JSONL/CSV par
 | `backend/worker/app/dataset_import.py` | 独立队列领取、租约回收、受控下载、哈希校验、JSONL/CSV 解析、筛选、staging 写入与安全失败收束 |
 | `backend/worker/app/main.py` | 在既有评测队列外调度独立 DatasetImport 队列，避免跨 Session 传递 ORM 实体 |
 | `backend/api/app/routers/tasks.py`、`backend/worker/app/benchmark.py` | 创建任务时冻结已发布数据集版本，benchmark 执行只读取冻结版本行 |
-| `backend/api/app/schemas.py`、`backend/api/app/main.py` | 新增目录/导入/staging/发布契约模型并注册 API 路由 |
+| `backend/api/app/schemas/`、`backend/api/app/main.py` | 新增目录/导入/staging/发布契约模型并注册 API 路由 |
 | `backend/worker/tests/test_dataset_import.py` | 覆盖 JSONL 解析、冻结筛选和私网来源拒绝的离线回归测试 |
 | `docs/AI测试与评估平台-社媒平台内容抓取适配技术方案.md` | 已删除；其功能范围已被本数据集与黄金集方案取代 |
 

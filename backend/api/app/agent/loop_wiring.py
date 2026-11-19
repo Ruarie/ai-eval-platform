@@ -594,13 +594,17 @@ async def _build_dependencies(service, entry, actor_id: str, data: dict, resourc
                 personal_segments = tuple(selected_segments)
 
     async def request_factory(messages, _effort):
-        """资料随实际请求刷新；摘要网络等待之后再复验一次，避免使用等待前的旧版本。"""
-        refresh_personal_context(messages)
+        """资料随实际请求刷新；摘要网络等待之后再复验一次，避免使用等待前的旧版本。
+
+        语义召回可能发起 Embedding 请求（1.5s 上限），必须放到线程池：
+        同步执行会阻塞事件循环，令 /stop 与其它会话收包一起等待。
+        """
+        await asyncio.to_thread(refresh_personal_context, messages)
         previous_calls = compactor.calls
         request = await compactor.prepare(messages)
         if not is_subagent and compactor.calls > previous_calls:
             try:
-                refresh_personal_context(messages)
+                await asyncio.to_thread(refresh_personal_context, messages)
                 # 只重建已提交的摘要，不因资料更新再启动一轮摘要网络调用。
                 request = compactor.preflight(messages)
                 if _prompt_tokens(request) > context_window - request.max_tokens - STEP_NOTICE_TOKEN_RESERVE:

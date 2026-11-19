@@ -257,3 +257,81 @@ def test_disabled_member_cannot_recall_or_write(memory_case):
         with pytest.raises(AppError) as exc:
             personal.create_personal_memory(db, "owner", title="x", content="x")
         assert exc.value.code == ErrorCode.UNAUTHORIZED
+
+
+def test_reindex_requires_semantic_switch(memory_case, monkeypatch):
+    """语义未启用时不写占位向量，显式 400。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "agent_memory_semantic_enabled", False)
+    response = memory_case.client.post("/api/agent/memories/reindex", json={})
+    assert response.status_code == 400 and response.json()["code"] == "VALIDATION"
+
+
+def test_reindex_endpoint_returns_counts_without_body(memory_case, monkeypatch):
+    """回填只返回计数；请求与响应都不含记忆正文。"""
+    from app.config import settings
+
+    _save(memory_case)
+    monkeypatch.setattr(settings, "agent_memory_semantic_enabled", True)
+    monkeypatch.setattr(personal, "_embed_texts", lambda texts: [[0.1, 0.2] for _ in texts])
+    monkeypatch.setattr(personal, "_apply_vector", lambda db, row, vector: True)
+    response = memory_case.client.post("/api/agent/memories/reindex", json={"limit": 10})
+    assert response.status_code == 200
+    assert response.json() == {"embedded": 1, "candidates": 1, "remaining": 1}
+    assert "请先给结论" not in response.text
+
+
+def test_semantic_recall_matches_embedding_without_keyword(memory_case, monkeypatch):
+    """开启语义后，向量相似度达标的事实无关键词也能召回。"""
+    from app.config import settings
+
+    with memory_case.factory.begin() as db:
+        row = _seed(db, content="订单服务由支付组维护", embedding="[1.0,0.0]",
+                    meta={"kind": "personal_memory", "schema_version": 1, "title": "订单模块",
+                          "category": "fact", "workspace_id": None})
+        memory_id = row.id
+    monkeypatch.setattr(settings, "agent_memory_semantic_enabled", True)
+    monkeypatch.setattr(personal, "_embed_texts", lambda texts, *, timeout_s=3.0: [[1.0, 0.0]])
+    with memory_case.factory() as db:
+        items = personal.recall_personal_memories(db, "owner", None, "完全无关的检索词")
+    assert [item["id"] for item in items] == [memory_id]
+
+
+def test_semantic_recall_rejects_low_similarity_and_falls_back(memory_case, monkeypatch):
+    """语义低于阈值不召回；Embedding 失败降级关键词，不阻断回合。"""
+    from app.config import settings
+
+    with memory_case.factory.begin() as db:
+        row = _seed(db, embedding="[1.0,0.0]")
+        memory_id = row.id
+    monkeypatch.setattr(settings, "agent_memory_semantic_enabled", True)
+    monkeypatch.setattr(personal, "_embed_texts", lambda texts, *, timeout_s=3.0: [[0.0, 1.0]])
+    with memory_case.factory() as db:
+        assert personal.recall_personal_memories(db, "owner", None, "无关检索词") == []
+
+    monkeypatch.setattr(personal, "_embed_texts", lambda texts, *, timeout_s=3.0: [None])
+    with memory_case.factory() as db:
+        items = personal.recall_personal_memories(db, "owner", None, "gcc")
+    assert [item["id"] for item in items] == [memory_id]
+
+
+def test_semantic_recall_skips_embedding_when_disabled(memory_case, monkeypatch):
+    """开关关闭时不发 Embedding 请求，行为保持纯关键词。"""
+    from app.config import settings
+
+    with memory_case.factory.begin() as db:
+        row = _seed(db)
+        memory_id = row.id
+    calls = []
+    monkeypatch.setattr(settings, "agent_memory_semantic_enabled", False)
+
+    def fake_embed(texts, *, timeout_s=3.0):
+        calls.append(texts)
+        return [[1.0, 0.0]]
+
+    monkeypatch.setattr(personal, "_embed_texts", fake_embed)
+    with memory_case.factory() as db:
+        assert [item["id"] for item in personal.recall_personal_memories(db, "owner", None, "无关")] == []
+        assert [item["id"] for item in personal.recall_personal_memories(db, "owner", None, "gcc")] == [memory_id]
+    assert calls == []

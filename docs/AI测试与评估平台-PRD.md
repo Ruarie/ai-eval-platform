@@ -6,11 +6,11 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.68 |
-| 本轮审查日期 | 2026-11-09（新增 Token 用量中心 MVP；按天/模型/成员聚合，未配置单价不做费用估算） |
+| 文档版本 | V1.70 |
+| 本轮审查日期 | 2026-11-19（个人记忆语义召回接线：开关开启后用查询向量与已存向量余弦融合排序，阈值 0.55；Embedding 超时降级关键词，召回放线程池不阻塞事件循环） |
 | 文档状态 | V1.31 已实现三类准备专家与受控草稿；V1.30 的完整计划/报告连接仍待实现，后台恢复与专家通讯仍待 P2/P3 |
 | 撰写日期 | 2026-08-17 |
-| 本轮修订 | 2026-09-26：V1.47 新增“我的记忆”，支持个人／个人工作区范围的主动保存、更正、撤回及私有主会话按预算召回；语义向量检索和自动抽取仍未交付。 |
+| 本轮修订 | 2026-11-19：V1.70 个人记忆语义召回接线：开启 `AGENT_MEMORY_SEMANTIC_ENABLED` 后，召回对查询取 1.5s 上限的向量，与已回填向量做余弦并按 0.55 阈值与关键词融合排序；Embedding 未配置、超时或失败一律降级关键词，不阻断模型请求；召回调到线程池执行，避免阻塞事件循环。未回填向量的旧记录仍可被关键词命中。2026-11-18：V1.69 个人记忆自动抽取 MVP：默认关闭，仅本人私有会话回合结束异步抽取，候选经代码侧校验、精确与向量去重、200 条配额后以 `auto:` 来源落库；新增 `source` 字段与 `POST /api/agent/memories/reindex`。 |
 | 最近修订 | 2026-08-31：V1.17 增加危险 bash 的 LangGraph 人在回路：风险命令必须弹出确认卡，原发起成员确认后才进入 bwrap 沙箱；拒绝不执行。思考卡只呈现过程摘要，禁止显示会与工具真实结果冲突的原始推理。2026-08-30：V1.16 增加受控 Agent 技能文件与协议档专属补充提示词管理；技能正文遵循渐进式披露，核心安全提示词不可覆盖。2026-08-28：V1.15 统一基准目录治理、独立导入队列、staging 并发发布、成员同权双人复核与 M3 里程碑；冻结任务必须锁定数据集/黄金集版本。2026-08-28：V1.14 新增基准数据集目录、异步导入、staging 表格和发布门禁；下载/解析仅由 Worker 执行，未审核行不得评测。2026-08-24：补充 Agent 多附件交互：支持图片（PNG/JPG/JPEG/WEBP/GIF）、Markdown/TXT/HTML/JSON/YAML、PDF、Word（DOC/DOCX）、Excel（XLS/XLSX）、CSV/JSONL 与音频；输入区支持文件选择和拖拽上传，图片显示缩略图，PDF/文本支持预览，Office 文件显示类型卡片并可打开/下载。2026-08-23：补齐 Gemini OpenAI 兼容端点的思考摘要请求与增量归一化；增加 Agent 思考摘要开关与思考强度设置；将用户回显固定为 `user_message`，将完成信号固定为 `response.completed`，明确 `thought` 不承载助手正文；协议档增加可选 Embedding / Reranker 独立端点配置，三类 Key 均按 profile 写入受控环境文件 |
 | 适用版本 | 平台 V1.0 |
 | 技术栈 | Vue3 + Naive UI、Python FastAPI、PostgreSQL、WebSocket、Docker Compose、go-stress-testing |
@@ -52,6 +52,8 @@
 | V1.66 | 2026-11-09 | 站内通知中心 MVP：任务生成完成/失败、评审指派/结论通知；顶栏未读徽标与通知列表；不做邮件/Webhook 外发 |
 | V1.67 | 2026-11-09 | Agent 历史轨迹查询 MVP：按回合聚合计时/工具/模型/token，事件级脱敏展示；只读已持久化 AgentEvent，不新增结构化轨迹表 |
 | V1.68 | 2026-11-09 | Token 用量中心 MVP：按天/模型/成员聚合 assistant 消息 turn_stats 用量；未配置逐模型单价，不展示费用 |
+| V1.69 | 2026-11-18 | 个人记忆自动抽取 MVP：默认关闭；仅本人私有会话回合结束异步抽取，代码侧强校验/去重/配额后以 `auto:` 来源落库；记忆列表新增 `source`；生产语义召回仍未接线 |
+| V1.70 | 2026-11-19 | 个人记忆语义召回接线：开关开启后查询向量与已存向量余弦融合（阈值 0.55）；1.5s 超时与 Embedding 失败降级关键词；召回调到线程池，不阻塞事件循环 |
 
 ---
 
@@ -505,11 +507,13 @@ V1 压测内核：**go-stress-testing**（Apache-2.0）扩展，独立 `stress` 
 | --- | --- | --- | --- |
 | `/login` | 登录 | 居中登录卡、统一错误提示（不区分用户或密码）（V1.19 起不再首登强制改密） | 成员（全员） |
 | `/agent` | 智能体 | 会话列表、对话流式交互、过程摘要卡、工具卡、危险 bash 确认卡、TaskSpec 确认卡、底部吸附进度坞、内嵌迷你调度视图 | 成员 |
-| `/memories` | 我的记忆 | 本人主动保存的常用偏好与事实资料；搜索、查看、更正、删除和个人工作区范围管理 | 成员（仅本人数据） |
+| `/memories` | 我的记忆 | 本人主动保存与回合结束自动整理的常用偏好、事实资料；搜索、查看、更正、删除、来源标识和个人工作区范围管理 | 成员（仅本人数据） |
+| `/workspaces` | 我的工作区 | 本地/远程工作区目录、文件读写与上传、媒体预览；远程命令需二次确认 | 成员 |
 | `/dispatch` | 调度中心 | 调度内核雷达、分发策略切换、并发容量滑块、Task 队列 → Worker 节点平滑三次贝塞尔连线拓扑、调度日志流 | 成员 |
 | `/tasks` | 任务中心 | 六态徽章、24h 吞吐面积图与状态分布分段条、多维筛选、AI 智能编排、任务详情抽屉与事件时间线 | 成员 |
 | `/reports` `/reports/:id` | 历史报告中心 | 已有 Benchmark、RAG 与压测报告只读查询及导出；不提供新的分享或基线修改 | 成员 |
 | `/datasets` | 数据集工作台 | 目录树结构管理、自定义列管理（+新增列）、单元格行内即点即改、多行/JSON 弹窗编辑器、AI 智能合成新数据与补全缺失行 | 成员 |
+| `/model-compare` | 历史模型对比 | 只读历史 benchmark 任务的逐样本结果；页面不创建任务，评测入口已停用 | 成员 |
 | `/cases` | 用例工作台 | 用例集目录树、6 大测试策略分布与自检、AI 从 PRD 生成候选、草稿编辑与人工审核、72h 倒计时及导出；旧评测映射停用 | 成员 |
 | `/case-quality` | 用例质量看板 | 按 7/30/90 天聚合生成运行、采纳率、成功率、AI 评分、按天/模型/模块分布与最近运行明细 | 成员 |
 | `/case-assets` | 用例资产库 | 已确认用例的跨集合资产检索、模块/策略/优先级/标签筛选、文本查重与历史回填 | 成员 |
@@ -752,7 +756,7 @@ testcase-tools：只对齐，不进镜像。LightRAG：MIT，锁 tag。go-stress
 
 | 文件 | 作用 |
 | --- | --- |
-| `backend/api/app/schemas.py` / `backend/api/app/profile_env.py` | 定义附加端点字段及按 profile 隔离的环境变量写入契约 |
+| `backend/api/app/schemas/` / `backend/api/app/profile_env.py` | 定义附加端点字段及按 profile 隔离的环境变量写入契约 |
 | `backend/api/app/routers/profiles.py` / `backend/worker/app/profile_env.py` | CRUD 保存、脱敏返回与 Worker 只读解析 |
 | `frontend/src/components/modals/ProfileModal.vue` / `frontend/src/views/AdminProfiles.vue` | 配置表单和协议档列表标识 |
 
@@ -819,7 +823,7 @@ testcase-tools：只对齐，不进镜像。LightRAG：MIT，锁 tag。go-stress
 
 - `backend/api/app/llm/providers/reasoning_templates.py`、`llm/loop_contracts.py`：供应商方言与受控参数。
 - `backend/api/app/profile_probe.py`、`profile_reasoning.py`：证据、超时、重复档位去重与版本生效范围。
-- `backend/api/app/schemas.py`、`routers/profiles.py`、`routers/sessions.py`：能力展示契约。
+- `backend/api/app/schemas/`、`routers/profiles.py`、`routers/sessions.py`：能力展示契约。
 - `frontend/src/api/types.ts`、`api/agentLoopTypes.ts`、`components/agent/loop/ThinkingControl.vue`、`AgentComposer.vue`、`components/modals/ProfileModal.vue`：模式文案及逐模型推荐。
 - `backend/api/tests/test_reasoning_templates.py`、`test_loop_profile_selection.py`：自动化回归。
 
@@ -1214,7 +1218,7 @@ Excel 同一批次内的重复用例编号按最后一条更新，不重复创�
 
 ### 修改代码文件与作用清单
 
-- `backend/api/app/routers/{cases,tasks}.py`、`backend/api/app/schemas.py`、`backend/shared/models.py` 及迁移：用例修订号、审核门禁与取消联动。
+- `backend/api/app/routers/{cases,tasks}.py`、`backend/api/app/schemas/`、`backend/shared/models.py` 及迁移：用例修订号、审核门禁与取消联动。
 - `backend/api/app/main.py`、`backend/api/app/seed.py`：停止伪造历史评测与压测任务。
 - `backend/worker/app/{task_state,stress}.py`、`backend/stress/main.go`：旧压测停止失败的重试，并拒绝旧 Worker 迟到的发压请求。
 - `frontend/src/views/{Cases,Tasks,Report}.vue` 与 API 类型：修订冲突、废弃态和历史只读界面。
@@ -1362,7 +1366,7 @@ Excel 同一批次内的重复用例编号按最后一条更新，不重复创�
 
 - `backend/shared/requirements.py`：编号抽取、中英文相似度、自动关联候选、覆盖率纯函数。
 - `backend/shared/models.py`、`backend/api/app/models.py`：三张新表与 `case_sets.requirement_baseline_id`。
-- `backend/api/app/schemas.py`、`routers/requirements.py`、`main.py`：需求域契约与路由注册。
+- `backend/api/app/schemas/`、`routers/requirements.py`、`main.py`：需求域契约与路由注册。
 - `backend/api/migrations/versions/a9d4e6f2b8c1_需求基线与用例覆盖.py`：三张新表与绑定列。
 - `backend/api/tests/test_requirements.py`、`test_requirements_route.py`：抽取、去重、相似度、自动关联与覆盖率回归。
 - `frontend/src/api/types.ts`、`api/http.ts`、`components/drawers/RequirementCoverageDrawer.vue`、`views/Cases.vue`：需求覆盖抽屉与客户端。
@@ -1397,7 +1401,7 @@ Excel 同一批次内的重复用例编号按最后一条更新，不重复创�
 ### 修改代码文件与作用清单
 
 - `backend/api/app/routers/search.py`、`app/main.py`：`GET /api/search` 与路由注册。
-- `backend/api/app/schemas.py`：`SearchItemOut/SearchGroupOut/SearchResultOut`。
+- `backend/api/app/schemas/`：`SearchItemOut/SearchGroupOut/SearchResultOut`。
 - `backend/api/tests/test_search.py`：八类实体、权限、类型筛选、空查询与 URL 回归。
 - `frontend/src/components/search/GlobalSearch.vue`：命令面板、键盘操作、最近搜索与高亮。
 - `frontend/src/layouts/MainLayout.vue`：顶栏搜索入口与 `Ctrl/Cmd+K` 注册。
@@ -1703,3 +1707,79 @@ Agent 会话顶栏新增「历史轨迹」：读取已持久化的 `agent_events
 - `backend/api/tests/test_usage.py`：聚合、兜底、权限与参数边界回归。
 - `frontend/src/views/UsageCenter.vue`、`router/index.ts`、`layouts/MainLayout.vue`：用量页、路由与导航。
 - `frontend/src/api/types.ts`、`api/http.ts`：用量类型与客户端。
+
+## V1.69 个人记忆自动抽取（MVP，2026-11-18）
+
+### 范围
+
+补齐 V1.47 遗留的「自动抽取」：回合结束后从本人私有会话中抽取稳定的偏好与事实，经代码侧校验后写入个人记忆；默认关闭，由 `AGENT_MEMORY_AUTO_EXTRACT_ENABLED` 控制。
+
+本期**不做**：跨会话通用事实库、模型自主写入工具、语义生产召回接线、后台续跑。语义向量只用于抽取去重与离线评测，召回仍按关键词。
+
+### 功能需求
+
+| 编号 | 功能 | 优先级 | 说明 |
+| --- | --- | --- | --- |
+| F-MEM-01 | 回合结束抽取 | P0 | 仅本人私有会话；后台任务，不阻塞对话、不影响已完成的回答 |
+| F-MEM-02 | 前置过滤 | P0 | 团队共享、他人会话、停用账号、空文本或疑似凭据直接跳过 |
+| F-MEM-03 | 强校验 | P0 | 模型只提供候选；条数 ≤3、标题 ≤20 字、正文 ≤200 字、类别仅 preference/fact |
+| F-MEM-04 | 去重 | P0 | 精确文本始终去重；开启语义开关时按余弦 ≥0.92 去重，模型重复输出不刷屏 |
+| F-MEM-05 | 配额与 ACL | P0 | 复用 200 条上限与 `private` ACL；不属于本人的工作区回落全局，不越权绑定 |
+| F-MEM-06 | 来源可辨 | P0 | 自动记录以 `auto:` 来源落库，列表返回 `source=manual/auto`，可像手动记忆一样更正与撤回 |
+| F-MEM-07 | 向量回填 | P1 | `POST /api/agent/memories/reindex`：开关开启后为本人历史记忆补齐向量；单行失败不影响其余行，未启用返回 400 |
+
+### 业务规则
+
+- 抽取失败只记录类型，不回写会话、不影响任务状态；同一助手消息在进程内只处理一次。
+- 任意一侧出现凭据形态时，不送入模型、不落库。
+- 自动记录与手动记录同权管理；撤回后清空正文并不再召回。
+- 向量写入失败（维度不符、引擎不可用）只丢弃该行向量，记忆正文仍保存。
+- 语义召回的生产查询仍未接线；`similarity` 不能冒充已生效能力。
+
+### 修改代码文件与作用清单
+
+- `backend/api/app/config.py`：`agent_memory_auto_extract_enabled`、`agent_memory_auto_extract_max_items`、`agent_memory_semantic_enabled`。
+- `backend/api/app/harness/memory/extract.py`：提示词、解析、前置过滤与 fire-and-forget 调度。
+- `backend/api/app/harness/memory/personal.py`：`auto:` 来源、`store_extracted_memories`、`reindex_personal_memories`、`source` 投影。
+- `backend/api/app/agent/loop_service.py`：回合收尾调度抽取。
+- `backend/api/app/routers/agent_memories.py`：`MemoryOut.source`。
+- `backend/api/migrations/versions/c7a1e93d2f60_记忆向量列解除固定维度.py`：向量列不再固定 1536 维。
+- `backend/api/tests/test_personal_memory_extract.py`：解析、去重、配额、凭据、来源、回填与钩子回归。
+- `frontend/src/api/agentMemories.ts`、`views/UserMemories.vue`：`source` 类型与来源文案。
+
+## V1.70 个人记忆语义召回接线（MVP，2026-11-19）
+
+### 范围
+
+在 V1.69 的向量基座上补齐**生产召回**：开启 `AGENT_MEMORY_SEMANTIC_ENABLED` 后，每次模型请求的私有主会话召回会对当前用户输入取查询向量，与本人已回填向量做余弦相似度，并按「语义 0.65 + 关键词 0.35」融合排序；未达 `0.55` 且无关键词命中的事实不进入上下文。
+
+本期不做：pgvector ANN 索引、LightRAG 融合、跨用户召回、按语义改写记忆正文。关闭开关时行为与 V1.69 完全一致（纯关键词、不调用 Embedding）。
+
+### 功能需求
+
+| 编号 | 功能 | 优先级 | 说明 |
+| --- | --- | --- | --- |
+| F-SEM-01 | 查询向量 | P0 | 仅在语义开关开启且查询非空时调用 Embedding；单次上限 1.5s |
+| F-SEM-02 | 融合排序 | P0 | `0.65 × 余弦 + 0.35 × 关键词归一`；候选仍限 200 条、最多 5 条、2048 token |
+| F-SEM-03 | 候选阈值 | P0 | 余弦 <0.55 且关键词无命中不入选；`preference` 仍始终保留 |
+| F-SEM-04 | 降级 | P0 | 未配置、超时、上游失败或维度不一致 → 纯关键词，不抛错、不阻断回合 |
+| F-SEM-05 | 未回填记录 | P0 | `embedding` 为空的旧记录相似度按 0 处理，只能被关键词命中 |
+| F-SEM-06 | 线程池执行 | P0 | 召回含网络等待，必须在线程池执行；事件循环与 `/stop` 不被阻塞 |
+
+### 业务规则
+
+- 召回只读：不写记忆、不改版本、不写审计；使用标记仍由既有事务提交。
+- 相似度分数只用于本次排序，不写入数据库、不进入响应。
+- 查询向量请求不携带记忆正文；日志只记录异常类型与错误码。
+- 语义开启不改变 ACL、工作区范围、版本与撤回过滤。
+- 维度不一致视为脏向量（余弦 0），不降级整条记忆的正文。
+- 召回失败不改变任务状态与会话可见性；对话回答可正常生成。
+- 召回仍持有既有会话行锁；1.5s 上限把最坏等待限制在单次请求内，超时后立即降级关键词。
+
+### 修改代码文件与作用清单
+
+- `backend/api/app/harness/memory/personal.py`：查询向量、融合排序、候选判定与 1.5s 超时降级。
+- `backend/api/app/harness/memory/semantic.py`：模块职责说明与纯函数复用（阈值/权重不变）。
+- `backend/api/app/agent/loop_wiring.py`：上下文刷新改 `asyncio.to_thread`，避免同步 Embedding 阻塞事件循环。
+- `backend/api/tests/test_personal_memory.py`：语义命中、低相似度拒绝、失败降级、开关关闭不发请求。
+- `AGENTS.md`、`docs/AI测试与评估平台-API.md`：实现状态与召回契约登记。

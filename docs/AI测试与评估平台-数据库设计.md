@@ -231,7 +231,7 @@ Worker 将质量任务从 `running` 置为 `succeeded` 且需要压测时，必�
 | `backend/api/app/profile_env.py` | 协议档环境变量命名、挂载文件加锁刷新、删除与事务回滚 |
 | `backend/api/app/routers/profiles.py` | CRUD 不再写入 API Key，运行时以环境文件为准，并迁移旧密文 |
 | `backend/worker/app/profile_env.py` | Worker 只读 API 写入的多供应商环境变量 |
-| `backend/api/app/schemas.py` / `frontend/src/api/types.ts` | 增加 Embedding / Reranker 配置字段与脱敏状态字段 |
+| `backend/api/app/schemas/` / `frontend/src/api/types.ts` | 增加 Embedding / Reranker 配置字段与脱敏状态字段 |
 | `frontend/src/components/modals/ProfileModal.vue` / `frontend/src/views/AdminProfiles.vue` | 协议档附加模型配置表单与列表标识 |
 | `docker-compose.yml` | `.env` 以 API 可写、Worker 只读方式挂载 |
 

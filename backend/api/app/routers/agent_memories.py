@@ -12,7 +12,7 @@ from app.db import get_db
 from app.deps import get_current_user
 from app.errors import AppError, ErrorCode
 from app.harness.memory import personal
-from app.models import User
+from app.models import AuditLog, User
 from app.schemas import ApiModel
 
 router = APIRouter(prefix="/api/agent/memories", tags=["agent"])
@@ -40,7 +40,7 @@ class MemoryUpdate(MemoryCreate):
 
 
 class MemoryOut(ApiModel):
-    """可管理记忆的公开字段；来源仅表示当前用户手动保存。"""
+    """可管理记忆的公开字段；来源区分手动保存与自动抽取。"""
 
     id: str
     title: str
@@ -49,6 +49,7 @@ class MemoryOut(ApiModel):
     workspace_id: str | None
     workspace_name: str | None
     version: int
+    source: Literal["manual", "auto"]
     source_id: str
     created_at: str
     updated_at: str
@@ -59,6 +60,21 @@ class MemoryList(ApiModel):
 
     items: list[MemoryOut]
     total: int
+
+
+class MemoryReindex(ApiModel):
+    """语义向量回填参数；force 时重算已有向量。"""
+
+    force: bool = False
+    limit: int = Field(default=200, ge=1, le=200)
+
+
+class MemoryReindexOut(ApiModel):
+    """本次回填结果；remaining 为仍需回填的本人记忆数。"""
+
+    embedded: int
+    candidates: int
+    remaining: int
 
 
 @contextmanager
@@ -87,6 +103,18 @@ def create_memory(body: MemoryCreate, user: User = Depends(get_current_user), db
     """主动保存记忆及无正文审计；不会从对话自动提取。"""
     with _database_guard(db):
         result = personal.create_personal_memory(db, user.id, **body.model_dump())
+        db.commit()
+        return result
+
+
+@router.post("/reindex", response_model=MemoryReindexOut)
+def reindex_memories(body: MemoryReindex, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
+    """为本人记忆补齐语义向量；未启用语义时返回 400，不写占位向量。"""
+    with _database_guard(db):
+        result = personal.reindex_personal_memories(db, user.id, limit=body.limit, force=body.force)
+        db.add(AuditLog(user_id=user.id, action="agent_memory_reindex",
+                        target_type="personal_memory", target_id=user.id, detail=result))
         db.commit()
         return result
 

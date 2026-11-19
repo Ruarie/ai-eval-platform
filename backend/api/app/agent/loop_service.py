@@ -585,6 +585,7 @@ class LoopService:
         except Exception as exc:
             logger.warning("回合等待失败 type=%s", type(exc).__name__)
         finally:
+            self._maybe_schedule_memory_extract(entry)
             try:
                 await self._close_resources(resources)
             finally:
@@ -595,6 +596,16 @@ class LoopService:
                 entry.controller_client_id = None
                 if not entry.runtime.running:
                     self._release_writer(entry)
+
+    @staticmethod
+    def _maybe_schedule_memory_extract(entry: _Entry) -> None:
+        """回合结束后异步抽取个人记忆；开关关闭或缺少身份时不排队。"""
+        from app.harness.memory.extract import schedule_extraction
+
+        try:
+            schedule_extraction(entry.log.session_id, entry.log.actor_id or "")
+        except Exception as exc:  # 调度失败不得影响回合收尾
+            logger.warning("memory extract schedule failed type=%s", type(exc).__name__)
 
     @staticmethod
     def _release_writer(entry: _Entry) -> None:

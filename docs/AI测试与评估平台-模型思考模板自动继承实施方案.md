@@ -176,7 +176,7 @@ P2 同时清点旧适配器调用方，未迁移的路径保持原有行为并�
 | 位置 | 拟议作用 |
 | --- | --- |
 | `backend/shared/models.py`、`backend/api/migrations/versions/941e807cfafa_协议档增加思考模板验证字段.py` | 保存模板 ID、非敏感探测结果、配置修订号及迁移 |
-| `backend/api/app/schemas.py`、`routers/profiles.py`、`profile_probe.py` | 模板目录、测试并添加、测试并更新、脱敏探测结果与审计 |
+| `backend/api/app/schemas/`、`routers/profiles.py`、`profile_probe.py` | 模板目录、测试并添加、测试并更新、脱敏探测结果与审计 |
 | `backend/api/app/profile_reasoning.py` | 模板优先、探测结果限制与 legacy 回退的能力入口 |
 | `backend/api/app/llm/contracts.py`、`loop_contracts.py`、`resolver.py`、`providers/reasoning_templates.py`、`providers/options.py` | 受控模板注册表、请求快照、强度限制和 SDK 参数一致性 |
 | `backend/api/app/agent/loop_wiring.py`、`routers/sessions.py` | Agent 授权与能力说明只使用探测已通过的档位 |

@@ -678,5 +678,5 @@ benchmark、rag、stress 技能和工作流停止选择与执行；持久卷中�
 
 - `backend/api/app/harness/execution/registry.py`、`harness/orchestration/{confirm,confirm_spec}.py`、`agent/workflow_nodes.py`：工具参数及确认卡传递和验证。
 - `backend/api/app/agent/expert_prompts/testcase_agent.md`、`harness/skills/files/skill-testcase/SKILL.md`：用例专家与技能按明确参数下单。
-- `backend/api/app/schemas.py`、`backend/worker/app/testcase.py`、`backend/shared/casegen.py`：任务快照、Worker 执行和共同生成规则。
+- `backend/api/app/schemas/`、`backend/worker/app/testcase.py`、`backend/shared/casegen.py`：任务快照、Worker 执行和共同生成规则。
 - 对应 Agent、API 与 Worker 测试：参数边界、确认卡和执行配比回归。

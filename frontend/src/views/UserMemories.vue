@@ -44,7 +44,7 @@
           <div class="memory-meta">
             <span>{{ scopeLabel(item) }}</span>
             <span>更新于 {{ formatDate(item.updated_at) }}</span>
-            <span class="memory-source">来源 {{ item.source_id }}</span>
+            <span class="memory-source">来源 {{ sourceLabel(item.source) }}</span>
           </div>
         </article>
       </n-spin>
@@ -161,6 +161,8 @@ function isNotFound(error: unknown): boolean { return error instanceof ApiError 
 function categoryLabel(category: MemoryCategory): string { return category === 'preference' ? '常用偏好' : '事实资料' }
 /** 已失效范围继续显示工作区归属，不显示为全局。 */
 function scopeLabel(item: AgentMemory): string { return item.workspace_id ? `工作区：${item.workspace_name || '已不可用'}` : '全局 · 本人私有对话' }
+/** 自动抽取是提醒性来源说明，不表示模型可自主写入或修改。 */
+function sourceLabel(source: 'manual' | 'auto'): string { return source === 'auto' ? '对话自动整理' : '手动保存' }
 /** 缺失或异常时间保留占位，不显示 Invalid Date。 */
 function formatDate(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { hour12: false }) }
 

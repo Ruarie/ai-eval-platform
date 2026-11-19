@@ -248,7 +248,7 @@ export interface ContextMeterData {
 | 文件路径 | 模块 | 修改作用说明 |
 | :--- | :--- | :--- |
 | `backend/api/app/models.py` | 后端模型 | `Profile` 模型增加 `context_window` 字段 |
-| `backend/api/app/schemas.py` | 后端契约 | `ProfileCreate` / `ProfileUpdate` / `ProfileOut` 增加 `context_window` |
+| `backend/api/app/schemas/` | 后端契约 | `ProfileCreate` / `ProfileUpdate` / `ProfileOut` 增加 `context_window` |
 | `backend/api/app/routers/sessions.py` | 后端路由 | 聚合当前会话的 Token 统计与上下文容量百分比 |
 | `backend/api/migrations/versions/*_add_profile_context_window.py` | 数据库迁移 | Alembic 新增 `context_window` 字段迁移脚本 |
 | `frontend/src/api/types.ts` | 前端类型 | 更新 `Profile` 与 `ContextMeterData` 类型定义 |

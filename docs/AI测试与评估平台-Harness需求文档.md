@@ -479,7 +479,7 @@ P0-LG 阶段引入新依赖时须同步更新 `backend/api/requirements.txt`；P
 | `app/harness/memory/preference.py` | 新增 | 层 3 | MEM-4 |
 | `app/harness/context/compact.py` | 新增 | 层 2 | CX-6 |
 | `app/harness/context/meter.py` | 新增 | 层 2 | CX-7 |
-| `backend/api/migrations/versions/xxxx_add_checkpointer_tables.py` | 新增 | 迁移 | §2.4 检查点表经 Alembic 建表 |
+| `backend/api/migrations/versions/`（checkpointer 表迁移，示意文件名） | 新增 | 迁移 | §2.4 检查点表经 Alembic 建表 |
 | `backend/api/requirements.txt` | 修改 | 依赖 | 新增 `langgraph-checkpoint-postgres` |
 
 **阶段 4（P1 / M1）：Plan-and-Solve + 确认卡入队 + reflect**

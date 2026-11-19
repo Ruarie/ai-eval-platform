@@ -3,7 +3,7 @@
 > 版本：V1.4 ｜ 审查日期：2026-11-09
 > 本目录保留 45 份文档（含本索引；数量以 `ls docs/*.md | wc -l` 为准，不在索引里硬编码）。**权威优先级**：根目录 `AGENTS.md`（实现状态地图）> 本目录核心契约 > 其他设计稿。
 > 含历史实现引用（`agent/react.py`、`plan_solve.py`、`reflect.py`、`clarify.py` 等已删除模块）的文档已在文首加维护标注，请以标注为准。
-> 引用路径失效检查：`python tools/check-doc-links.py`。
+> 引用路径失效检查：`python tools/check-doc-links.py`（`--strict` 在存在失效引用时退出非 0）。当前残留 38 处历史模块引用（`agent/react.py`、`plan_solve.py`、`think_stream.py` 与已删除的媒体/斜杠命令文件等），全部位于文首已加历史标注的文档，按「历史记录不改写」保留；新增引用必须指向现存路径，`schemas.py` 已统一更新为 `app/schemas/`。
 
 ## 核心契约（权威）
 

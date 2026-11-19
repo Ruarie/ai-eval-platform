@@ -1,6 +1,10 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.47 ｜ 审查日期：2026-11-19（个人记忆语义召回接线：`AGENT_MEMORY_SEMANTIC_ENABLED` 开启后对最新用户输入取查询向量（1.5s 上限），与本人已回填向量做余弦并按 `0.65×余弦 + 0.35×关键词` 融合；余弦 <0.55 且无关键词命中的 fact 不入选，preference 始终保留；Embedding 未配置/超时/失败/维度不一致降级关键词。`refresh_personal_context` 改为 `asyncio.to_thread`，事件循环与 `/stop` 不被阻塞。不新增端点与字段。门禁：记忆与回路相关 68+189 项通过、ruff 通过、前端 typecheck 通过。契约见 API V2.67、PRD V1.70。）
+>
+> 版本：V2.46 ｜ 审查日期：2026-11-19（个人记忆自动抽取 MVP：`agent_memory_auto_extract_enabled` 默认关闭；仅本人私有会话回合结束异步抽取，候选经条数/长度/枚举/凭据校验、精确与向量去重（余弦 ≥0.92）、200 条配额后以 `auto:` 来源落库；`MemoryOut` 增加 `source`，新增 `POST /api/agent/memories/reindex`；迁移 `c7a1e93d2f60` 把向量列解除固定 1536 维；语义召回生产查询仍未接线。门禁：记忆相关 47 项与全量 API 分批通过、ruff 改动文件通过、前端 typecheck 通过。契约见 API V2.66、PRD V1.69。）
+>
 > 版本：V2.45 ｜ 审查日期：2026-11-19（新增管理后台三页：`/admin` 平台概览、`/admin/audit` 审计日志、`/admin/resources` 资源治理。后端新增 `GET /api/admin/overview`：一次聚合成员/会话/任务/资源/存储/审计六组计数，口径为「会话不计软删除、任务只看近 7 天、资源按 kind 分组、审计近 24h + Top5 动作」；前端不二次聚合。资源治理复用 `/api/resources` 的 PATCH/DELETE（服务端已允许管理员），切换可见性与下架都会落 AuditLog。门禁：api 2539 passed/97 skipped、ruff 通过、前端 typecheck/build、单测 162/162、e2e 158/158。）
 >
 > 版本：V2.44 ｜ 审查日期：2026-11-19（下线无调用方的常驻服务：① `stress` 压测引擎从 `docker-compose.yml` 移除——任务中心的压测入口要求父任务为 benchmark/rag，两类新建入口已停用，容器常驻无实际调用；`deploy/plan_services.py` 与 `deploy/deploy.sh` 同步移除该服务，`backend/stress` 代码与 `GET /api/tasks/{id}/stress-series` 历史查询保留。② 清理宿主机上 compose 之外的残留 `api-pytest` 容器（自带 restart 策略反复拉起，常驻约 85MB）。部署计划单测 25 项通过；下线后 `docker ps` 只剩 web/api/worker/runner/lightrag/media-mcp/https + postgres/redis。）
@@ -178,6 +182,7 @@
 | 需求变更分析 | MVP 已交付：基线版本链、版本 diff、受影响用例集/用例；只读分析，不自动改用例 | `backend/api/app/requirement_change_service.py`、`frontend/src/components/drawers/RequirementCoverageDrawer.vue` |
 | 用例资产库 | MVP 已交付：确认物化、跨集合检索、标签、文本查重、历史回填；不做自动合并/复制 | `backend/api/app/case_asset_service.py`、`frontend/src/views/CaseAssets.vue` |
 | 站内通知 | MVP 已交付：任务生成/失败、评审指派/结论通知；顶栏未读与通知页；无外发渠道 | `backend/api/app/notification_service.py`、`frontend/src/components/notifications/NotificationBell.vue` |
+| 个人记忆（抽取 + 召回） | 自动抽取 MVP **默认关闭**：仅本人私有会话回合结束异步抽取，代码侧校验/去重/配额后以 `auto:` 来源落库。语义召回已接线（`agent_memory_semantic_enabled`，默认关闭）：查询向量 1.5s 上限，余弦 <0.55 且无关键词命中的 fact 不入选，失败降级关键词；召回在线程池执行。LightRAG 融合仍为演进项 | `backend/api/app/harness/memory/{extract,personal,semantic}.py`、`app/agent/{loop_service,loop_wiring}.py` |
 | 历史轨迹 | MVP 已交付：按回合聚合 AgentEvent，展示计时/工具/模型/token 与脱敏事件；无正文与工具结果 | `backend/api/app/routers/traces.py`、`frontend/src/components/drawers/TraceHistoryDrawer.vue` |
 | 用量中心 | MVP 已交付：按天/模型/成员聚合 token 与调用；只读、无费用估算 | `backend/api/app/routers/usage.py`、`frontend/src/views/UsageCenter.vue` |
 | 全局搜索 | MVP 已交付：八类实体只读检索，私有会话/工作区/记忆按属主过滤 | `backend/api/app/routers/search.py`、`frontend/src/components/search/GlobalSearch.vue` |

@@ -197,7 +197,7 @@ docker compose exec lightrag python -c "import urllib.request; print(urllib.requ
 | `backend/lightrag/conftest.py`、`backend/lightrag/tests/test_contract.py`、`tests/test_engine.py`（新增） | 适配层契约与引擎行为单测（不进镜像） |
 | `backend/shared/kb.py` | 新增 `index_document` / `delete_documents` / `document_statuses` / `engine_available` / `fetch_graph`；检索改为按知识库过滤并收紧降级口径；超时从 2s 提升为可配置 60s |
 | `backend/api/app/routers/kb.py` | 上传即受理建索引并落真实状态；列表回读引擎状态；文档/知识库删除先清引擎索引；新增 `GET /{id}/graph`（只读，仅 lightrag 库）；失败返回 `UPSTREAM` |
-| `backend/api/app/schemas.py` | 新增 `KbGraphOut` / `KbGraphNodeOut` / `KbGraphEdgeOut` |
+| `backend/api/app/schemas/` | 新增 `KbGraphOut` / `KbGraphNodeOut` / `KbGraphEdgeOut` |
 | `backend/api/tests/test_kb_lightrag.py`（新增） | 客户端契约单测：映射、降级口径、受理失败、删除与状态回读 |
 | `frontend/src/views/Kb.vue` | `similarity` 允许为空并显示占位符（不再用 0 冒充）；`indexing` 期间 5s 轮询状态，收敛后自动停止；顶部新增「知识图谱」入口 |
 | `frontend/src/components/drawers/KbGraphDrawer.vue`（新增） | 只读图谱抽屉：自实现力导向布局（无额外图表依赖）、按实体类型着色、点击节点看描述与来源文档、截断与空态提示 |

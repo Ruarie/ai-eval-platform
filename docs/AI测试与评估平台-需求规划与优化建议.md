@@ -1378,7 +1378,7 @@ PRD F-CM-05 曾规划终态、退化、会签通知，但从未交付。当前�
 | `frontend/src/views/Login.vue` | O-01：移除模拟 SSO/社交登录与相关样式 |
 | `frontend/src/layouts/MainLayout.vue` | O-02：四组导航，补齐历史数据集/模型对比/压测治理入口；N-07：顶栏搜索入口 |
 | `backend/shared/requirements.py`、`backend/api/app/routers/requirements.py` | N-01：需求抽取、覆盖率、自动关联候选与人工确认 |
-| `backend/shared/models.py`、`backend/api/app/schemas.py`、迁移 `a9d4e6f2b8c1` | N-01：三张新表、用例集绑定列与契约 |
+| `backend/shared/models.py`、`backend/api/app/schemas/`、迁移 `a9d4e6f2b8c1` | N-01：三张新表、用例集绑定列与契约 |
 | `backend/api/tests/test_requirements.py`、`test_requirements_route.py` | N-01：纯函数单测与路由回归 |
 | `backend/api/app/routers/search.py`、`tests/test_search.py`、`app/schemas.py` | N-07：八类实体搜索、权限过滤与空查询回归 |
 | `frontend/src/components/search/GlobalSearch.vue`、`views/Agent.vue`、`views/Kb.vue` | N-07：命令面板、会话/知识库直达 |

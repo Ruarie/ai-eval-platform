@@ -17,6 +17,8 @@ export interface AgentMemory extends MemoryInput {
   id: string
   workspace_name: string | null
   version: number
+  /** manual=成员手动保存；auto=回合结束自动抽取（默认关闭）。 */
+  source: 'manual' | 'auto'
   source_id: string
   created_at: string
   updated_at: string

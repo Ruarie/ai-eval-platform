@@ -198,7 +198,7 @@ def downgrade() -> None:
 | `app/runtime/__init__.py` | 阶段 3 | 修改（re-export） | — |
 | `app/runtime/checkpoint.py` | 阶段 3 | 新增 | R-1/R-6/R-7 |
 | `app/runtime/cleanup.py` | 阶段 3 | 新增 | R-3/R-4 |
-| `backend/api/migrations/versions/xxxx_add_checkpointer_tables.py` | 阶段 3 | 新增 | R-2 |
+| `backend/api/migrations/versions/`（checkpointer 表迁移，示意文件名） | 阶段 3 | 新增 | R-2 |
 | `backend/api/requirements.txt` | 阶段 3 | 修改 | R-5（新增 `langgraph-checkpoint-postgres`） |
 | `backend/api/tests/test_runtime_checkpoint.py` | 阶段 3 | 新增 | R-A1~R-A7 |
 

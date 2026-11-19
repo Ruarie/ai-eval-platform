@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     harness_memory_short_term_enabled: bool = False
     harness_memory_ttl_seconds: int = 86400
+    # 个人记忆自动抽取：默认关闭。开启后仅在本人私有会话回合结束时异步抽取，
+    # 失败只记 trace、不影响对话；候选落库前仍走代码侧强校验、去重与配额。
+    agent_memory_auto_extract_enabled: bool = False
+    agent_memory_auto_extract_max_items: int = 3
+    # 个人记忆语义向量：默认关闭。开启后才在抽取/回填时调用全局 Embedding 端点，
+    # 并在去重时比较余弦；向量不可用时回落关键词与精确文本，不阻塞记忆读写。
+    agent_memory_semantic_enabled: bool = False
     # 协议档连接参数写入的受控环境文件；生产通过 Compose 挂载宿主机 .env。
     profile_env_file: str = ".env"
     cookie_secure: bool = False
