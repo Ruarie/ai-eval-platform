@@ -12,7 +12,15 @@
     </header>
 
     <section class="aa-toolbar">
-      <n-date-picker v-model:value="range" type="daterange" clearable size="medium" style="width: 260px" />
+      <n-date-picker
+        v-model:value="range"
+        type="daterange"
+        clearable
+        size="medium"
+        start-placeholder="开始日期"
+        end-placeholder="结束日期"
+        style="width: 260px"
+      />
       <n-select v-model:value="action" :options="actionOptions" clearable placeholder="全部动作" style="width: 200px" filterable />
       <n-input v-model:value="keyword" clearable placeholder="筛选对象 ID" style="width: 200px" @keyup.enter="reload" />
       <n-button :loading="loading" @click="reload">查询</n-button>
@@ -97,11 +105,10 @@ const pages = ref(1)
 const paged = computed(() => filtered.value.slice(0, pageSize * Math.max(1, pages.value)))
 const hasMore = computed(() => paged.value.length < filtered.value.length)
 
-/** 后端只返回 actor_id；这里按 id 尾段展示，避免再拉一次用户表。 */
+/** 服务端已把操作人解析成展示名；缺失时退回 id 尾段，便于对日志。 */
 function actorName(row: AuditEntry): string {
-  const id = row.actor_id
-  if (!id) return '系统'
-  return '成员 ' + id.slice(0, 6)
+  if (row.actor_name) return row.actor_name
+  return row.actor_id ? '成员 ' + row.actor_id.slice(0, 6) : '系统'
 }
 
 function detailText(row: AuditEntry): string {

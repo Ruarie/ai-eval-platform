@@ -776,18 +776,27 @@ def get_audit_logs(
     if to_bound is not None:
         query = query.filter(AuditLog.ts < to_bound)
     total = query.count()
-    rows = query.order_by(AuditLog.ts.desc(), AuditLog.id.desc()).offset(offset).limit(limit).all()
+    rows = (
+        db.query(AuditLog, User.username, User.display_name)
+        .outerjoin(User, User.id == AuditLog.user_id)
+        .order_by(AuditLog.ts.desc(), AuditLog.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     return {
         "items": [
             {
                 "id": row.id,
                 "at": row.ts,
                 "actor_id": row.user_id,
+                # 审计页直接展示操作人，避免前端拿 id 去猜或再拉一次成员表。
+                "actor_name": display or username or "",
                 "action": row.action,
                 "target": {"type": row.target_type, "id": row.target_id},
                 "detail": row.detail,
             }
-            for row in rows
+            for row, username, display in rows
         ],
         "total": total,
     }
