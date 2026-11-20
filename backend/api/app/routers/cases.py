@@ -134,7 +134,7 @@ _XMIND_MEDIA_TYPE = "application/vnd.xmind.workbook"
 
 
 def _get_case_set_or_404(db: Session, set_id: str, *, lock: bool = False) -> CaseSet:
-    """读取用例集或抛出 NOT_FOUND。"""
+    """读取用例集或抛出 NOT_FOUND；软删的集按不存在处理。"""
     query = db.query(CaseSet).filter(CaseSet.id == set_id, CaseSet.deleted_at.is_(None))
     if lock:
         query = query.populate_existing().with_for_update()
