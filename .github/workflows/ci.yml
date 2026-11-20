@@ -1,9 +1,8 @@
 name: CI
 
 on:
-  # 额度治理：功能分支与 Pull Request 默认不运行 Actions，仅 main 推送后校验。
-  # 唯一例外是迁移目录：多个 head 只会在合并后才爆炸，必须提前到 PR 阶段查，
-  # 因此 migration-heads 作业单独挂 pull_request 且按 paths 过滤（改动迁移才跑，约 10 秒）。
+  # 额度治理：功能分支不跑 Actions；PR 先按改动区域分流，再决定跑哪些作业。
+  # 分流逻辑见 deploy/classify_changes.py（有单测），避免「改前端也跑 96 秒后端」。
   push:
     branches: [main]
     # 纯说明文档不消耗 Runner；运行时 SKILL.md 等提示词仍需验证。
@@ -12,15 +11,50 @@ on:
       - '*.md'
       - '**/README.md'
   pull_request:
+    # 只覆盖可能影响构建/测试的区域；纯文档 PR 不启动 workflow。
     paths:
-      - 'backend/api/migrations/**'
+      - 'backend/**'
+      - 'frontend/**'
+      - 'deploy/**'
+      - 'docker-compose.yml'
+      - '**/Dockerfile*'
       - 'tools/check_migration_heads.py'
       - '.github/workflows/ci.yml'
 
 jobs:
+  # PR 专用：按改动文件决定后面哪些作业要跑；push 时本作业跳过，各作业自行放行。
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      backend: ${{ steps.classify.outputs.backend }}
+      frontend: ${{ steps.classify.outputs.frontend }}
+      deploy: ${{ steps.classify.outputs.deploy }}
+      migrations: ${{ steps.classify.outputs.migrations }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed files
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" | python3 deploy/classify_changes.py >> "$GITHUB_OUTPUT"
+
+  # 注意：凡是 needs: changes 的作业，if 里必须带 always()。
+  # changes 在 push 时是 skipped，没有 always() 会连带把这些作业一起跳过，
+  # 表现就是「main 推送后 CI 全绿但什么都没跑」。
+  #
   # 迁移链守卫：恰好一个 head，且不存在重复 revision。
   # 纯标准库脚本，不装依赖；PR 改动迁移时必跑，main 推送后也跑一次。
   migration-heads:
+    needs: changes
+    if: always() && (github.event_name == 'push' || needs.changes.outputs.migrations == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,8 +64,9 @@ jobs:
         run: python3 tools/check_migration_heads.py
 
   deploy-scripts:
-    # PR 只跑迁移守卫；其余作业留在 main 推送后执行，避免 PR 消耗 Runner。
-    if: github.event_name == 'push'
+    needs: changes
+    # PR 时按改动区域放行；push 恒跑。
+    if: always() && (github.event_name == 'push' || needs.changes.outputs.deploy == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -46,8 +81,9 @@ jobs:
           python3 -m unittest discover -s deploy/tests -v
 
   backend:
-    # PR 只跑迁移守卫；其余作业留在 main 推送后执行，避免 PR 消耗 Runner。
-    if: github.event_name == 'push'
+    needs: changes
+    # PR 时按改动区域放行；push 恒跑。
+    if: always() && (github.event_name == 'push' || needs.changes.outputs.backend == 'true')
     runs-on: ubuntu-latest
     # 隔离临时 PG 运行真实事实/WS/文件闭环测试，绝不借用生产库。
     services:
@@ -179,8 +215,9 @@ jobs:
         run: PYTHONPATH=.:.. pytest
 
   frontend:
-    # PR 只跑迁移守卫；其余作业留在 main 推送后执行，避免 PR 消耗 Runner。
-    if: github.event_name == 'push'
+    needs: changes
+    # PR 时按改动区域放行；push 恒跑。
+    if: always() && (github.event_name == 'push' || needs.changes.outputs.frontend == 'true')
     # runner 已升级到 ubuntu-26.04，Playwright 1.58 不支持：
     # `playwright install --with-deps chromium` 会直接报 "does not support chromium on ubuntu26.04-x64"。
     # 固定到 24.04（Playwright 官方支持矩阵内的最新 LTS）。
