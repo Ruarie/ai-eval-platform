@@ -194,3 +194,38 @@ def test_overview_audit_section(overview_case):
     assert set(first) == {"id", "action", "target_type", "target_id", "user_name", "ip", "ts"}
     assert first["ts"]
     assert data["generated_at"]
+
+
+def test_audit_logs_filter_by_action_and_target(overview_case):
+    """动作与对象 ID 在服务端过滤，且分页总数随筛选变化、条目带 IP。"""
+    client = overview_case.client
+    resp = client.get("/api/admin/audit-logs", params={"action": "resource_create"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["total"] == 2
+    assert {item["action"] for item in data["items"]} == {"resource_create"}
+    assert data["items"][0]["ip"] == "10.0.0.1"
+
+    resp = client.get("/api/admin/audit-logs", params={"target_id": "r-9"})
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["items"][0]["action"] == "resource_delete"
+
+
+def test_audit_action_options_come_from_real_rows(overview_case):
+    """动作下拉取自真实审计行，次数按动作聚合。"""
+    resp = overview_case.client.get("/api/admin/audit-actions")
+    assert resp.status_code == 200, resp.text
+    counts = {item["action"]: item["count"] for item in resp.json()["items"]}
+    assert counts["resource_create"] == 2
+    assert counts["resource_delete"] == 1
+    assert counts["workspace_remote_exec"] == 1
+
+
+def test_resource_list_supports_visibility_filter(overview_case):
+    """资源治理可按可见性在服务端筛选，并返回筛选后的 total。"""
+    resp = overview_case.client.get("/api/resources", params={"visibility": "private"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["total"] == 1
+    assert [item["id"] for item in data["items"]] == ["r-2"]

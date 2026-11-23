@@ -11,22 +11,22 @@
 
     <section class="ar-toolbar">
       <n-input v-model:value="keyword" clearable placeholder="搜索名称或描述" style="width: 240px" @keyup.enter="reload" />
-      <n-select v-model:value="kind" :options="kindOptions" clearable placeholder="全部类型" style="width: 150px" />
-      <n-select v-model:value="visibility" :options="visibilityOptions" clearable placeholder="全部可见性" style="width: 150px" />
+      <n-select v-model:value="kind" :options="kindOptions" clearable placeholder="全部类型" style="width: 150px" @update:value="reload" />
+      <n-select v-model:value="visibility" :options="visibilityOptions" clearable placeholder="全部可见性" style="width: 150px" @update:value="reload" />
       <n-button :loading="loading" @click="reload">查询</n-button>
-      <span class="ar-total">共 {{ filtered.length }} 个</span>
+      <span class="ar-total">共 {{ total }} 个</span>
     </section>
 
     <n-alert v-if="error" type="error" :show-icon="false">{{ error }}</n-alert>
 
     <n-spin :show="loading">
-      <div v-if="filtered.length" class="ar-table-wrap">
+      <div v-if="rows.length" class="ar-table-wrap">
         <table class="ar-table">
           <thead>
             <tr><th>名称</th><th>类型</th><th>可见性</th><th>创建人</th><th>使用</th><th>更新时间</th><th>操作</th></tr>
           </thead>
           <tbody>
-            <tr v-for="item in filtered" :key="item.id">
+            <tr v-for="item in rows" :key="item.id">
               <td class="ar-name">
                 <b>{{ item.name }}</b>
                 <small>{{ item.summary || '（无描述）' }}</small>
@@ -47,6 +47,10 @@
             </tr>
           </tbody>
         </table>
+        <div class="ar-more">
+          <n-button v-if="hasMore" size="small" :loading="loading" @click="loadMore">加载更多</n-button>
+          <span v-else>已到末尾</span>
+        </div>
       </div>
       <n-empty v-else :description="error ? '暂时无法读取资源' : '没有匹配的资源'" />
     </n-spin>
@@ -64,12 +68,14 @@ import { resources, type ResourceItem, type ResourceKind } from '../api/resource
 
 const message = useMessage()
 const rows = ref<ResourceItem[]>([])
+const total = ref(0)
 const loading = ref(false)
 const error = ref('')
 const busy = ref('')
 const keyword = ref('')
 const kind = ref<ResourceKind | null>(null)
 const visibility = ref<'team' | 'private' | null>(null)
+const pageSize = 50
 
 const KIND_META: Record<string, { label: string; t: string; c: string }> = {
   agent: { label: 'Agent', t: 'var(--t-agent)', c: 'var(--c-agent)' },
@@ -88,14 +94,7 @@ const visibilityOptions = [
 const kindLabel = (value: string): string => KIND_META[value]?.label || value
 const kindStyle = (value: string) => ({ background: KIND_META[value]?.t, color: KIND_META[value]?.c })
 
-const filtered = computed(() => {
-  let list = rows.value
-  if (kind.value) list = list.filter((row) => row.kind === kind.value)
-  if (visibility.value) list = list.filter((row) => row.visibility === visibility.value)
-  const kw = keyword.value.trim()
-  if (kw) list = list.filter((row) => `${row.name}${row.summary}`.includes(kw))
-  return list
-})
+const hasMore = computed(() => rows.value.length < total.value)
 
 function fmt(value: string): string {
   if (!value) return '—'
@@ -105,18 +104,36 @@ function fmt(value: string): string {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
-async function reload(): Promise<void> {
+async function loadPage(reset: boolean): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const page = await resources.list({ limit: 100 })
-    rows.value = page.items
+    const page = await resources.list({
+      kind: kind.value || '',
+      visibility: visibility.value || '',
+      q: keyword.value.trim(),
+      offset: reset ? 0 : rows.value.length,
+      limit: pageSize,
+    })
+    rows.value = reset ? page.items : [...rows.value, ...page.items]
+    total.value = page.total
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载失败'
-    rows.value = []
+    if (reset) {
+      rows.value = []
+      total.value = 0
+    }
   } finally {
     loading.value = false
   }
+}
+
+function reload(): void {
+  void loadPage(true)
+}
+
+function loadMore(): void {
+  void loadPage(false)
 }
 
 async function toggleVisibility(item: ResourceItem): Promise<void> {
@@ -124,7 +141,13 @@ async function toggleVisibility(item: ResourceItem): Promise<void> {
   try {
     const next = item.visibility === 'team' ? 'private' : 'team'
     const updated = await resources.update(item.id, { visibility: next })
-    item.visibility = updated.visibility
+    if (visibility.value && updated.visibility !== visibility.value) {
+      // 当前按可见性筛选时，切换后不再命中筛选条件，直接移出当前列表。
+      rows.value = rows.value.filter((row) => row.id !== item.id)
+      total.value = Math.max(0, total.value - 1)
+    } else {
+      item.visibility = updated.visibility
+    }
     message.success(next === 'team' ? '已设为团队可见' : '已转为私有')
   } catch (err) {
     message.error(err instanceof Error ? err.message : '操作失败')
@@ -139,6 +162,7 @@ async function remove(item: ResourceItem): Promise<void> {
   try {
     await resources.remove(item.id)
     rows.value = rows.value.filter((row) => row.id !== item.id)
+    total.value = Math.max(0, total.value - 1)
     message.success('已删除')
   } catch (err) {
     message.error(err instanceof Error ? err.message : '删除失败')
@@ -147,7 +171,9 @@ async function remove(item: ResourceItem): Promise<void> {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  void loadPage(true)
+})
 </script>
 
 <style scoped>
@@ -159,6 +185,7 @@ onMounted(reload)
 
 .ar-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .ar-total { font-size: 12px; color: var(--text-tertiary); margin-left: auto; }
+.ar-more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-tertiary); }
 
 .ar-table-wrap { border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-card); overflow: hidden; }
 .ar-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }

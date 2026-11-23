@@ -767,27 +767,55 @@ def delete_whitelist(
     return {"ok": True}
 
 
+@router.get("/audit-actions")
+def list_audit_actions(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """返回审计库中真实出现过的动作及次数，供管理端筛选下拉使用。"""
+    rows = (
+        db.query(AuditLog.action, func.count(AuditLog.id))
+        .group_by(AuditLog.action)
+        .order_by(func.count(AuditLog.id).desc(), AuditLog.action.asc())
+        .all()
+    )
+    return {
+        "items": [
+            {"action": action, "count": int(count)}
+            for action, count in rows
+            if action
+        ]
+    }
+
+
 @router.get("/audit-logs")
 def get_audit_logs(
     from_ts: str | None = Query(default=None, alias="from"),
     to_ts: str | None = Query(default=None, alias="to"),
+    action: str | None = Query(default=None, max_length=64),
+    target_id: str | None = Query(default=None, max_length=64),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """按 API §3.12 契约过滤并分页返回合规审计事件（from/to 为 ISO 8601 时间）。"""
+    """按时间、动作与对象 ID 过滤并分页返回合规审计事件。"""
     to_bound = _parse_bound(to_ts, "to", None)
     from_bound = _parse_bound(from_ts, "from", None)
-    query = db.query(AuditLog)
+    conditions = []
     if from_bound is not None:
-        query = query.filter(AuditLog.ts >= from_bound)
+        conditions.append(AuditLog.ts >= from_bound)
     if to_bound is not None:
-        query = query.filter(AuditLog.ts < to_bound)
-    total = query.count()
+        conditions.append(AuditLog.ts < to_bound)
+    if action:
+        conditions.append(AuditLog.action == action)
+    if target_id:
+        conditions.append(AuditLog.target_id.contains(target_id, autoescape=True))
+    total = db.query(AuditLog).filter(*conditions).count()
     rows = (
         db.query(AuditLog, User.username, User.display_name)
         .outerjoin(User, User.id == AuditLog.user_id)
+        .filter(*conditions)
         .order_by(AuditLog.ts.desc(), AuditLog.id.desc())
         .offset(offset)
         .limit(limit)
@@ -803,6 +831,7 @@ def get_audit_logs(
                 "actor_name": display or username or "",
                 "action": row.action,
                 "target": {"type": row.target_type, "id": row.target_id},
+                "ip": row.ip,
                 "detail": row.detail,
             }
             for row, username, display in rows

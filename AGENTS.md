@@ -5,6 +5,8 @@
 >
 > 版本：V2.49 ｜ 审查日期：2026-11-19（补 `DELETE /api/case-sets/{id}` 软删除：用例集此前只能建不能删，「废弃」仅改状态、条目仍占列表。实现为 `deleted_at` 标记 + 列表/详情过滤，行数据与版本快照保留供审计；前端右键菜单新增「删除用例集」，草稿与已入库文案区分。门禁：api 2547 passed/97 skipped（+3）、ruff 通过、单测 168/168、e2e 167/167（+2）。）
 >
+> 版本：V2.49 ｜ 审查日期：2026-11-23（管理端收敛审计与资源治理：`GET /api/admin/audit-logs` 增量 `ip` 与 `action`/`target_id` 服务端过滤，新增 `GET /api/admin/audit-actions` 返回真实动作计数；审计页改为服务端分页与筛选，不再只筛最近 200 条。`GET /api/resources` 增量 `visibility` 过滤；资源治理改为服务端类型/可见性/关键词筛选 + 50 条分页加载，`total` 使用后端计数。审计动作中文映射统一到 `utils/auditActions.ts`。门禁：api 5 项管理端测试、前端 typecheck/build、单测 168/168、e2e 3/3。）
+>
 > 版本：V2.48 ｜ 审查日期：2026-11-19（协议档归属与账号隔离：`protocol_profiles` 增量 `visibility`/`owner_id`（迁移 `b3d8e1f6a2c4`），存量回填平台模型；平台模型全员可用、仅 admin 可改删，个人模型仅属主与管理端可见可用，个人模型不写全局 LLM 别名、不能借用平台凭据；新增 `GET/POST/PUT/DELETE /api/profiles` 的归属裁剪与 `profile_access.py` 守卫，Agent 回合、任务建单、用例对比均按归属复核；admin 角色落地，`/api/admin/*` 与成员开停/重置/活跃统计收口为 admin，前端新增 `/my-models` 并隐藏成员管理入口。契约见 API V2.68、PRD V1.69。）
 
 > 版本：V2.47 ｜ 审查日期：2026-11-19（工作区名称上限收紧到 60：`_NameBody.name` 改 `max_length=60`，前端输入框同步 `maxlength` + 字数提示 + 提交前兜底（粘贴可能绕过 maxlength）；工作区内文件/目录名仍为 255。门禁：api 2544 passed/97 skipped、前端 typecheck、单测 168/168、e2e 165/165（新增 3 项：60 字通过、61 字拒绝、文件名字段不受影响；前端新增 2 项：输入框截断与字数提示、绕过 maxlength 时提交被拦）。）

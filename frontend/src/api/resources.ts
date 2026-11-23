@@ -56,6 +56,7 @@ export const resources = {
   async list(params: {
     kind?: ResourceKind | ''
     scope?: 'all' | 'mine'
+    visibility?: ResourceVisibility | ''
     q?: string
     sort?: 'recent' | 'popular'
     offset?: number

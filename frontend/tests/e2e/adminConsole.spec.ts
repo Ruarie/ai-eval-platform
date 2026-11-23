@@ -60,7 +60,26 @@ async function mockAdmin(page: Page, store: { rows: Record<string, unknown>[]; p
     if (path === '/api/auth/me') return route.fulfill({ json: USER })
     if (path === '/api/notifications/unread-count') return route.fulfill({ json: { unread: 0 } })
     if (path === '/api/admin/overview') return route.fulfill({ json: OVERVIEW })
-    if (path === '/api/admin/audit-logs') return route.fulfill({ json: AUDIT })
+    if (path === '/api/admin/audit-actions') {
+      return route.fulfill({
+        json: {
+          items: [
+            { action: 'resource_create', count: 40 },
+            { action: 'resource_delete', count: 20 },
+          ],
+        },
+      })
+    }
+    if (path === '/api/admin/audit-logs') {
+      const url = new URL(req.url())
+      const action = url.searchParams.get('action')
+      const offset = Number(url.searchParams.get('offset') || 0)
+      const limit = Number(url.searchParams.get('limit') || 50)
+      const matched = action ? AUDIT.items.filter(item => item.action === action) : AUDIT.items
+      return route.fulfill({
+        json: { items: matched.slice(offset, offset + limit), total: matched.length },
+      })
+    }
     if (path === '/api/resources' && req.method() === 'GET') {
       return route.fulfill({ json: { items: store.rows, total: store.rows.length } })
     }
@@ -120,7 +139,7 @@ test('审计日志：默认分页、动作过滤与加载更多', async ({ page 
 
   // 按动作过滤：resource_delete 每 3 条一个 → 20 行
   await page.locator('.aa-toolbar .n-select').click()
-  await page.locator('.n-base-select-option', { hasText: 'resource_delete' }).click()
+  await page.locator('.n-base-select-option', { hasText: '删除资源' }).click()
   await expect(page.locator('.aa-table tbody tr')).toHaveCount(20)
 })
 

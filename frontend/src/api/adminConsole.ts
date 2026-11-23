@@ -49,6 +49,8 @@ export interface AuditEntry {
 
 export interface AuditPage { items: AuditEntry[]; total: number }
 
+export interface AuditActionOption { action: string; count: number }
+
 export const adminConsole = {
   /** 后台首屏：一次拿全部计数，前端不二次聚合。 */
   async overview(): Promise<AdminOverview> {
@@ -56,9 +58,22 @@ export const adminConsole = {
     return data
   },
 
-  /** 审计查询：from/to 为本地时间的 ISO 串，后端按半开区间过滤。 */
-  async audit(params: { from?: string; to?: string; offset?: number; limit?: number }): Promise<AuditPage> {
+  /** 审计查询：时间、动作与对象 ID 均由服务端过滤，避免只筛前 200 条。 */
+  async audit(params: {
+    from?: string
+    to?: string
+    action?: string
+    target_id?: string
+    offset?: number
+    limit?: number
+  }): Promise<AuditPage> {
     const { data } = await http.get<AuditPage>('/api/admin/audit-logs', { params })
     return data
+  },
+
+  /** 审计筛选下拉：返回数据库里真实出现过的动作，避免硬编码漏项。 */
+  async auditActions(): Promise<AuditActionOption[]> {
+    const { data } = await http.get<{ items: AuditActionOption[] }>('/api/admin/audit-actions')
+    return data.items || []
   },
 }

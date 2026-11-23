@@ -21,7 +21,7 @@
         end-placeholder="结束日期"
         style="width: 260px"
       />
-      <n-select v-model:value="action" :options="actionOptions" clearable placeholder="全部动作" style="width: 200px" filterable />
+      <n-select v-model:value="action" :options="actionOptions" clearable placeholder="全部动作" style="width: 200px" filterable @update:value="reload" />
       <n-input v-model:value="keyword" clearable placeholder="筛选对象 ID" style="width: 200px" @keyup.enter="reload" />
       <n-button :loading="loading" @click="reload">查询</n-button>
       <span class="aa-total">共 {{ total }} 条</span>
@@ -36,7 +36,7 @@
             <tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>IP</th><th>明细</th></tr>
           </thead>
           <tbody>
-            <tr v-for="row in paged" :key="row.id">
+            <tr v-for="row in rows" :key="row.id">
               <td class="aa-time">{{ fmt(row.at) }}</td>
               <td class="aa-actor">{{ actorName(row) }}</td>
               <td><code>{{ row.action }}</code></td>
@@ -64,14 +64,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { adminConsole, type AuditEntry } from '../api/adminConsole'
-
-const ACTIONS = [
-  'resource_create', 'resource_update', 'resource_delete', 'resource_clone',
-  'workspace_remote_exec', 'workspace_remote_write',
-  'user_create', 'user_disable', 'user_reset_password',
-  'profile_update', 'settings_update',
-]
+import { adminConsole, type AuditActionOption, type AuditEntry } from '../api/adminConsole'
+import { auditActionLabel } from '../utils/auditActions'
 
 const rows = ref<AuditEntry[]>([])
 const total = ref(0)
@@ -81,8 +75,14 @@ const range = ref<[number, number] | null>(null)
 const action = ref<string | null>(null)
 const keyword = ref('')
 const pageSize = 50
+const actionItems = ref<AuditActionOption[]>([])
 
-const actionOptions = ACTIONS.map((value) => ({ label: value, value }))
+const actionOptions = computed(() =>
+  actionItems.value.map((item) => ({
+    label: `${auditActionLabel(item.action)}（${item.count}）`,
+    value: item.action,
+  })),
+)
 
 /** 日期范围转 ISO；to 取当天 23:59:59，避免「当天查不到」的困惑。 */
 const rangeParams = () => {
@@ -93,17 +93,7 @@ const rangeParams = () => {
   return { from: new Date(from).toISOString(), to: end.toISOString() }
 }
 
-const filtered = computed(() => {
-  let list = rows.value
-  if (action.value) list = list.filter((row) => row.action === action.value)
-  const kw = keyword.value.trim()
-  if (kw) list = list.filter((row) => (row.target?.id || '').includes(kw))
-  return list
-})
-
-const pages = ref(1)
-const paged = computed(() => filtered.value.slice(0, pageSize * Math.max(1, pages.value)))
-const hasMore = computed(() => paged.value.length < filtered.value.length)
+const hasMore = computed(() => rows.value.length < total.value)
 
 /** 服务端已把操作人解析成展示名；缺失时退回 id 尾段，便于对日志。 */
 function actorName(row: AuditEntry): string {
@@ -126,28 +116,50 @@ function fmt(value?: string): string {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
-async function reload(): Promise<void> {
+async function loadPage(reset: boolean): Promise<void> {
   loading.value = true
   error.value = ''
-  pages.value = 1
   try {
-    const page = await adminConsole.audit({ ...rangeParams(), offset: 0, limit: 200 })
-    rows.value = page.items
+    const page = await adminConsole.audit({
+      ...rangeParams(),
+      action: action.value || undefined,
+      target_id: keyword.value.trim() || undefined,
+      offset: reset ? 0 : rows.value.length,
+      limit: pageSize,
+    })
+    rows.value = reset ? page.items : [...rows.value, ...page.items]
     total.value = page.total
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载失败'
-    rows.value = []
-    total.value = 0
+    if (reset) {
+      rows.value = []
+      total.value = 0
+    }
   } finally {
     loading.value = false
   }
 }
 
-function loadMore(): void {
-  pages.value += 1
+function reload(): void {
+  void loadPage(true)
 }
 
-onMounted(reload)
+function loadMore(): void {
+  void loadPage(false)
+}
+
+async function loadActions(): Promise<void> {
+  try {
+    actionItems.value = await adminConsole.auditActions()
+  } catch {
+    // 动作下拉失败不阻塞日志主体；仍可按键值手动查询。
+  }
+}
+
+onMounted(() => {
+  void loadActions()
+  void loadPage(true)
+})
 </script>
 
 <style scoped>

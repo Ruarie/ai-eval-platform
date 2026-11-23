@@ -138,6 +138,7 @@ def _normalize_rag(db: Session, content: dict) -> dict:
 def list_resources(
     kind: str = Query(default="", max_length=16),
     scope: str = Query(default="all", pattern="^(all|mine)$"),
+    visibility: str = Query(default="", pattern="^(|team|private)$"),
     q: str = Query(default="", max_length=80),
     sort: str = Query(default="recent", pattern="^(recent|popular)$"),
     offset: int = Query(default=0, ge=0),
@@ -152,6 +153,8 @@ def list_resources(
     query = db.query(Resource)
     if kind:
         query = query.filter(Resource.kind == kind)
+    if visibility:
+        query = query.filter(Resource.visibility == visibility)
     if scope == "mine":
         query = query.filter(Resource.owner_id == user.id)
     elif user.role != "admin":

@@ -22,6 +22,8 @@
 
 > V2.69（2026-11-19）：新增 `DELETE /api/case-sets/{set_id}`（204）。用例集此前只能建不能删——「废弃」只改状态、条目仍在列表里。本接口为**软删除**：写 `deleted_at`，列表与详情不再返回，`case_items`、版本快照、评审记录与 AI 作业全部保留供审计回溯；重复删除返回 404。审计动作 `case_set_delete`（含 name/status/confirmed_count）。前端入口在用例集右键菜单「删除用例集」，草稿提示不可恢复、已入库提示仅归档。
 >
+> V2.69（2026-11-23）：管理端审计与资源治理补齐服务端筛选。`GET /api/admin/audit-logs` 新增可选 `action`（精确匹配）与 `target_id`（包含匹配、自动转义）参数，响应条目补 `ip`；新增 `GET /api/admin/audit-actions` 返回 `{items:[{action,count}]}`，供筛选下拉使用。`GET /api/resources` 新增可选 `visibility`（`team|private`）过滤，与既有 `kind/q/scope/offset/limit` 一致，`total` 为过滤后的总数。类型/可见性/关键词与分页均在前端发起，不再只过滤首屏数据。
+>
 > V2.68（2026-11-19）：协议档增加归属与账号隔离。`protocol_profiles` 增量 `visibility`（`platform|personal`，默认 `platform`）与 `owner_id`（个人模型必填，平台模型为空）；`GET /api/profiles` 只返回平台模型 + 本人个人模型（admin 可见全部），`ProfileOut` 增量 `visibility/owner_id/owner_username/can_manage`。创建时 `visibility` 可选：admin 可建平台/个人，普通成员只能建个人模型（请求平台模型返回 `DENIED`）；平台模型仅 admin 可改删，个人模型仅属主与 admin 可改删；归属创建后不可变。个人模型不写 `LLM_*` 全局别名、不继承平台凭据。Agent 回合（`turn.submit` 的 `profile_id`）、Agent 任务建单与用例 AI 对比均按归属复核。账号侧：`admin` 引导账号角色提升为 `admin`；`/api/admin/*`、成员开户/停用/重置密码/活跃统计/成员审计收口为 admin（普通成员返回 `DENIED`），`GET /api/users` 保持登录可读用于协作指派。前端新增 `/my-models`「我的模型」，管理端「模型管理」与「账号」仅 admin 可见。存量协议档一律回填为平台模型（迁移 `b3d8e1f6a2c4`）。
 
 > V2.64（2026-11-17）：`GET /api/kb/{id}/graph` 增加**空库短路**（§3.9）。库内 0 篇文档时直接返回 `200` + 空 `nodes` / `edges`，不调用 LightRAG；库内有文档但引擎不可用时仍为 `UPSTREAM`(502)。字段、`limit` 与错误码均不变，仅避免把「还没上传文档」误报成引擎故障。

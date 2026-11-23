@@ -69,7 +69,7 @@
           <ul v-if="topActions.length" class="ao-rank">
             <li v-for="(item, index) in topActions" :key="item.action">
               <span class="ao-no">{{ index + 1 }}</span>
-              <span class="ao-rank-name">{{ actionLabel(item.action) }}</span>
+              <span class="ao-rank-name">{{ auditActionLabel(item.action) }}</span>
               <code>{{ item.action }}</code>
               <span class="ao-rank-value">{{ item.count }}</span>
             </li>
@@ -106,6 +106,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { adminConsole, type AdminOverview } from '../api/adminConsole'
+import { auditActionLabel } from '../utils/auditActions'
 
 const data = ref<AdminOverview | null>(null)
 const loading = ref(false)
@@ -127,22 +128,6 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
   cancelled: { label: '已取消', color: 'var(--text-tertiary)' },
   awaiting_case_confirm: { label: '待确认', color: 'var(--accent-warning)' },
 }
-
-const ACTION_LABELS: Record<string, string> = {
-  resource_create: '新建资源',
-  resource_update: '编辑资源',
-  resource_delete: '删除资源',
-  resource_clone: '克隆资源',
-  workspace_remote_exec: '远程执行',
-  workspace_remote_write: '远程写入',
-  user_create: '创建账号',
-  user_disable: '停用账号',
-  user_reset_password: '重置密码',
-  profile_update: '更新协议档',
-  settings_update: '更新设置',
-}
-
-const actionLabel = (action: string): string => ACTION_LABELS[action] || action
 
 interface OverviewCard { key: string; label: string; value: string | number; sub: string; color: string }
 
