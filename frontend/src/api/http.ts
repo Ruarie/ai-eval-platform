@@ -5,6 +5,11 @@
 import axios from 'axios'
 import { describeFieldErrors, GENERIC_VALIDATION_MESSAGE } from './fieldErrors'
 import {
+  clearAllSshPasswords,
+  purgeLegacySshPasswordStorage,
+  sshPasswordHeaderFor,
+} from '../utils/sshPasswordVault'
+import {
   ErrorCode,
   ERROR_MESSAGES,
   type AuditLogPage,
@@ -153,18 +158,16 @@ const REMOTE_SSH_TIMEOUT_MS = 60000
 // 上传走 SFTP 整文件传输，大文件需要更长预算（后端上限 20MB）。
 const REMOTE_SSH_UPLOAD_TIMEOUT_MS = 300000
 
-// 远程工作区的 SSH 密码只存在 sessionStorage（关闭标签即失效），由拦截器按
-// 工作区 ID 附加到请求头；服务端不落库、不写日志。
+// 远程工作区的 SSH 密码只保存在页面内存（utils/sshPasswordVault，刷新/关闭即失效，
+// 不落 Web Storage），由拦截器按工作区 ID 附加到请求头；服务端不落库、不写日志。
+// 升级前写入 sessionStorage 的旧密码在模块加载时一次性清理。
+purgeLegacySshPasswordStorage()
 http.interceptors.request.use(config => {
-  try {
-    const url = config.url || ''
-    const matched = url.match(/\/api\/workspaces\/([^/?]+)/)
-    if (matched) {
-      const encoded = window.sessionStorage.getItem(`ae_ws_ssh_pwd:${matched[1]}`)
-      if (encoded) config.headers['X-Workspace-SSH-Password'] = encoded
-    }
-  } catch {
-    // 非浏览器环境或 sessionStorage 不可用时忽略
+  const url = config.url || ''
+  const matched = url.match(/\/api\/workspaces\/([^/?]+)/)
+  if (matched) {
+    const encoded = sshPasswordHeaderFor(matched[1])
+    if (encoded) config.headers['X-Workspace-SSH-Password'] = encoded
   }
   return config
 })
@@ -320,6 +323,8 @@ export const api = {
     },
     async logout(): Promise<void> {
       localStorage.removeItem('ae_user')
+      // 登出即丢弃本页保存的远程工作区密码，避免换账号后被沿用。
+      clearAllSshPasswords()
       if (getDataMode() === 'mock') return
       await http.post('/api/auth/logout')
     },

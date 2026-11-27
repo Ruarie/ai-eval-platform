@@ -94,18 +94,24 @@ if [ ! -f "$APP_DIR/.env" ]; then
     # API ↔ Runner 共用的内部令牌：Runner 所有可执行端点都要求它，
     # 留空即 fail-closed（bash 沙箱不可用），首次部署必须生成随机值。
     RUNNER_INTERNAL_TOKEN=$(openssl rand -hex 24)
+    # 引导管理员口令随机生成：生产启动守卫会拒绝用 admin123 等公开口令创建管理员。
+    BOOTSTRAP_ADMIN_PASSWORD="Ae$(openssl rand -hex 8)9"
     KEY_ENCRYPTION_KEY=""
     if command -v python3 >/dev/null 2>&1; then
         KEY_ENCRYPTION_KEY=$(python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
     fi
     cat > "$APP_DIR/.env" <<EOF
+# 生产环境：启动安全守卫对默认签名密钥、弱引导口令 fail-fast。
+APP_ENV=production
 POSTGRES_USER=aieval
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 POSTGRES_DB=aieval
 SECRET_KEY=$SECRET_KEY
 BOOTSTRAP_ADMIN_USERNAME=admin
-BOOTSTRAP_ADMIN_PASSWORD=admin123
+BOOTSTRAP_ADMIN_PASSWORD=$BOOTSTRAP_ADMIN_PASSWORD
 KEY_ENCRYPTION_KEY=$KEY_ENCRYPTION_KEY
+# 仅全站 HTTPS 时置 true；同时保留 HTTP(80) 入口时保持 false，否则 HTTP 下无法登录。
+COOKIE_SECURE=false
 # Runner 内部令牌：缺失时 bash 沙箱端点一律 503（fail-closed）。
 RUNNER_INTERNAL_TOKEN=$RUNNER_INTERNAL_TOKEN
 ACCESS_TOKEN_EXPIRE_MINUTES=720
@@ -119,7 +125,8 @@ STRESS_PORT=19090
 EOF
     chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR/.env"
     chmod 600 "$APP_DIR/.env"
-    echo "已生成 $APP_DIR/.env（请修改 BOOTSTRAP_ADMIN_PASSWORD）"
+    echo "已生成 $APP_DIR/.env"
+    echo "引导管理员 admin 的初始口令已随机生成，见 $APP_DIR/.env 中的 BOOTSTRAP_ADMIN_PASSWORD；首次登录后请立即修改"
 else
     echo ".env 已存在，跳过生成"
     # 存量部署补齐 LightRAG 内部口令：空口令时索引、删除和检索会被适配层拒绝。

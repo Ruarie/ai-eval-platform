@@ -1,6 +1,8 @@
 # AI 测试与评估平台 — AI Agent 行为规范与工程指南 (AGENTS.md)
 
 > **最高指示**：本文件是面向所有参与本项目的 **AI Agent 与开发者** 的最高行动指南。在编写或修改代码前，**必须严格遵守本文档所规定的架构边界、开发契约与行为红线**。
+> 版本：V2.51 ｜ 审查日期：2026-11-27（安全 P0 加固，依据《代码质量报告》S1/S3/S4/S5/S8 与 D1：① 新增 `backend/api/app/startup_security.py` 启动安全守卫，`APP_ENV=production`（Compose 默认）下默认/短于 32 位的 `SECRET_KEY`、全新部署的弱引导口令直接阻止启动；KEK 为空、`COOKIE_SECURE=false`、存量管理员仍用默认口令只告警（避免破坏存量密文与 HTTP 入口），日志只输出检查项编码不回显密钥；`deploy/server-setup.sh` 改为随机生成引导口令。② Compose 注入 `COOKIE_SECURE`（默认 false）与 `FORWARDED_ALLOW_IPS`（默认本机+私有网段），uvicorn 显式 `--proxy-headers`，登录限流与审计改记真实客户端 IP；`API_BIND_HOST` 真正接入端口映射，默认只绑 127.0.0.1（**行为变化**：需从外部直连 :8000/Swagger 的环境须显式设 `0.0.0.0`）。③ web Nginx 新增 `security-headers.conf`（nosniff、SAMEORIGIN、Referrer-Policy、Permissions-Policy、最小 CSP `frame-ancestors/base-uri`）与 `server_tokens off`；未加 HSTS（生产保留 HTTP 入口且 443 被占用）。④ 远程工作区 SSH 密码改存页面内存（`utils/sshPasswordVault.ts`），不再写 sessionStorage，登出清空，升级时清理旧残留。⑤ README 对齐当前产品边界（用例生成 Agent，评测/压测停用）。不新增 REST/WS 路径与字段。门禁：api ruff 通过、pytest 2592 passed/89 skipped（含新增启动守卫 27 项）、前端 lint 0 error/typecheck/build 通过、单测 173/173、e2e 169/169、部署单测 39 项通过、Nginx `-t` 与安全头实测通过。）
+>
 > 版本：V2.50 ｜ 审查日期：2026-11-19（迁移链守卫：新增 `tools/check_migration_heads.py`（纯标准库，解析 `revision`/`down_revision`，含 merge 元组），要求恰好一个 head。接入三处：① CI 新增 `migration-heads` 作业，并为此单独开 `pull_request` 触发（按 paths 只筛迁移目录与脚本，约 10 秒，属额度治理的例外）；② `deploy/deploy.sh` 同步代码后、规划镜像前做 preflight，多 head 直接停止部署；③ `deploy/tests` 5 条用例锁判定。起因：#373 与另一条 PR 的迁移接在同一父节点，main 出现三个 head，CI 迁移作业失败、部署连续 skipped。门禁：deploy 测试 32 通过、脚本在真实迁移目录上输出唯一 head。）
 >
 > 版本：V2.49 ｜ 审查日期：2026-11-19（补 `DELETE /api/case-sets/{id}` 软删除：用例集此前只能建不能删，「废弃」仅改状态、条目仍占列表。实现为 `deleted_at` 标记 + 列表/详情过滤，行数据与版本快照保留供审计；前端右键菜单新增「删除用例集」，草稿与已入库文案区分。门禁：api 2547 passed/97 skipped（+3）、ruff 通过、单测 168/168、e2e 167/167（+2）。）
@@ -111,7 +113,7 @@
 | **RAG 引擎** | `lightrag` | 容器内 `9621` | LightRAG 混合检索；不映射宿主机，业务接口要求内部口令 |
 | ~~**压测引擎**~~ | ~~`stress`~~ | — | **已下线（2026-11-19）**：创建压测任务要求父任务为 benchmark/rag，而这两类新建入口早已停用；容器常驻只白占内存。`backend/stress` 代码与 `GET /api/tasks/{id}/stress-series` 历史查询仍保留。 |
 
-> 初始管理员：`admin / admin123`（由 `.env` 中 `BOOTSTRAP_ADMIN_PASSWORD` 注入）。
+> 初始管理员：用户名由 `.env` 的 `BOOTSTRAP_ADMIN_USERNAME` 注入（默认 `admin`），口令由 `BOOTSTRAP_ADMIN_PASSWORD` 注入；`server-setup.sh` 随机生成，生产环境下弱口令（如 `admin123`）会被启动安全守卫拒绝创建（V2.51）。
 
 ### 1.2 核心架构流
 ```text

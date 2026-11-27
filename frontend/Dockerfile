@@ -29,6 +29,7 @@ RUN npm run build && mkdir -p /app/vendor-assets && \
 # resolve + zone 的动态 upstream 需要 Nginx OSS 1.27.3 或更新版本。
 FROM nginx:1.27.3-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=build /app/vendor-assets/ /usr/share/nginx/html/assets/
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80

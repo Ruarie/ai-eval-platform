@@ -52,8 +52,14 @@ from .routers import (
     ws,
     ws_v2,
 )
-from .security import hash_password
+from .security import hash_password, verify_password
 from .seed import bootstrap_preview_data
+from .startup_security import (
+    bootstrap_admin_finding,
+    collect_config_findings,
+    enforce,
+    is_weak_admin_password,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai-eval")
@@ -65,10 +71,29 @@ BUILD_TIME = os.environ.get("BUILD_TIME", "").strip()
 
 
 def _bootstrap_admin() -> None:
-    """创建管理端引导账号，并把该账号的早期 member 角色提升为 admin。"""
+    """创建管理端引导账号，并把该账号的早期 member 角色提升为 admin。
+
+    创建前经启动安全守卫：生产环境禁止用公开默认/弱口令创建引导管理员；
+    存量账号仍可用弱引导口令登录时只告警，不阻止启动。
+    """
     db = SessionLocal()
     try:
         existing = db.query(User).filter(User.username == settings.bootstrap_admin_username).first()
+        # 只有引导口令本身是弱值时才做一次 bcrypt 比对，避免每次启动的无谓开销。
+        still_default = False
+        if (
+            existing is not None
+            and not existing.disabled
+            and is_weak_admin_password(settings.bootstrap_admin_password)
+        ):
+            still_default = verify_password(settings.bootstrap_admin_password, existing.password_hash)
+        finding = bootstrap_admin_finding(
+            settings,
+            admin_exists=existing is not None,
+            admin_uses_bootstrap_password=still_default,
+        )
+        if finding is not None:
+            enforce([finding])
         if not existing:
             db.add(
                 User(
@@ -185,6 +210,9 @@ async def lifespan(app: FastAPI):
     # 首次启动只补齐缺失的运行时技能文件，已有管理员修改绝不覆盖。
     from .workspace_exec_approval import try_enable_redis
 
+    # 启动安全守卫必须最先执行：生产环境下默认签名密钥等致命项直接阻止启动，
+    # 不能等引导账号、后台任务都起来之后才发现。
+    enforce(collect_config_findings(settings))
     try_enable_redis(settings.redis_url)
     ensure_skill_files()
     _bootstrap_admin()

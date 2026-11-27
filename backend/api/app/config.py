@@ -6,6 +6,10 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # 运行环境：production/prod 时启动安全守卫对默认密钥、弱引导口令 fail-fast
+    # （见 startup_security.py）；源码直跑与测试默认 development，只告警。
+    # Compose 默认注入 production。
+    app_env: str = "development"
     database_url: str = "postgresql://aieval:aieval_pass@localhost:5432/aieval"
     secret_key: str = "dev-secret-change-me"
     bootstrap_admin_username: str = "admin"

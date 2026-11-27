@@ -95,4 +95,6 @@ fi
 run_alembic "执行数据库迁移" upgrade head
 
 echo "==> 启动应用"
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+# 显式开启代理头解析：信任来源由 FORWARDED_ALLOW_IPS 环境变量控制（uvicorn 原生读取，
+# 未设置时只信任 127.0.0.1），使 request.client.host 为真实客户端而非反代容器地址。
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers

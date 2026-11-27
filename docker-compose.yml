@@ -48,11 +48,19 @@ services:
         BUILD_TIME: ${BUILD_TIME:-}
     restart: unless-stopped
     environment:
+      # 生产环境：启动安全守卫对默认 SECRET_KEY、弱引导口令 fail-fast；本地体验可设 development。
+      APP_ENV: ${APP_ENV:-production}
       DATABASE_URL: postgresql://${POSTGRES_USER:-aieval}:${POSTGRES_PASSWORD:-aieval_pass}@postgres:5432/${POSTGRES_DB:-aieval}
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin123}
       KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:-}
+      # 登录 Cookie 的 Secure 标志：仅全站 HTTPS 时置 true（同时保留 HTTP 入口时置 true 会无法登录）。
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # uvicorn 只信任这些来源的 X-Forwarded-For/Proto（取最右侧不可信地址为客户端 IP）。
+      # 默认信任本机与私有网段（web/https 反代容器所在的 Compose 网络），使登录限流与审计
+      # 记录真实客户端 IP；API 直连端口对公网开放时不受影响（公网地址不在信任列表内）。
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       # 协议档 URL、模型 ID、API Key 的宿主机环境文件；API 加锁刷新，Worker 只读。
       PROFILE_ENV_FILE: ${PROFILE_ENV_FILE:-/run/config/.env}
       # 远程（SSH）工作区：私钥目录只读挂载；白名单留空表示不限制目标主机（凭据决定边界）。
@@ -135,7 +143,9 @@ services:
       runner:
         condition: service_started
     ports:
-      - "${API_PORT:-8000}:8000"
+      # 默认只绑回环（与 README/.env.example 的 API_BIND_HOST 约定一致），浏览器统一走 web 反代；
+      # 需要从其它机器直连 API/Swagger 时在 .env 显式设 API_BIND_HOST=0.0.0.0。
+      - "${API_BIND_HOST:-127.0.0.1}:${API_PORT:-8000}:8000"
     volumes:
       - ./data:/data
       - ./.env:/run/config/.env

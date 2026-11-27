@@ -590,13 +590,13 @@
       </div>
     </div>
 
-    <!-- 弹窗 4：SSH 密码（只存 sessionStorage，服务端不落库） -->
+    <!-- 弹窗 4：SSH 密码（只存页面内存，不落浏览器存储，服务端不落库） -->
     <div v-if="showSshPwdModal" class="modal-backdrop" @click.self="showSshPwdModal = false">
       <div class="modal-card">
         <h3 class="modal-title">SSH 密码</h3>
         <p class="exec-hint">
           {{ currentWorkspace?.ssh_user }}@{{ currentWorkspace?.ssh_host }} ·
-          密码只保存在当前标签页（sessionStorage），关闭页面即失效；服务端不存储、不写日志。
+          密码只保存在当前页面内存中，不写入浏览器存储，刷新或关闭页面即失效；服务端不存储、不写日志。
         </p>
         <div class="form-group">
           <label>密码</label>
@@ -765,6 +765,7 @@ import WorkspaceCodeEditor from '../components/workspace/WorkspaceCodeEditor.vue
 import WorkspaceImageViewer from '../components/workspace/WorkspaceImageViewer.vue'
 import WorkspaceVideoViewer from '../components/workspace/WorkspaceVideoViewer.vue'
 import { formatBytes, formatDateTime } from '../utils/format'
+import { clearSshPassword, hasSshPassword, setSshPassword } from '../utils/sshPasswordVault'
 
 interface FlattenedNode extends UserWorkspaceTreeNode {
   _depth: number
@@ -795,7 +796,7 @@ const newWsPort = ref(22)
 const newWsUser = ref('')
 const newWsKeyName = ref('')
 const newWsRoot = ref('/srv/workspace')
-// password 认证：密码只在本次会话内存活（sessionStorage），服务端不落库。
+// password 认证：密码只在当前页面内存存活（utils/sshPasswordVault），服务端不落库。
 const newWsAuth = ref<'key_file' | 'password'>('key_file')
 const showSshPwdModal = ref(false)
 const sshPwdInput = ref('')
@@ -861,18 +862,14 @@ const writeGuardTitle = computed(() =>
     : isRemoteWorkspace.value ? '远程工作区仅支持浏览，不能写入' : '',
 )
 
-/** 当前工作区是否走"临时密码"认证（密码在 sessionStorage，不落库）。 */
+/** 当前工作区是否走"临时密码"认证（密码只在页面内存，不落库、不落浏览器存储）。 */
 const needsSshPassword = computed(
   () => isRemoteWorkspace.value && currentWorkspace.value?.auth_type === 'password',
 )
 
-function sshPwdKey(id: string): string {
-  return `ae_ws_ssh_pwd:${id}`
-}
-
 function refreshSshPwdState(): void {
   const ws = currentWorkspace.value
-  sshPwdSet.value = Boolean(ws && window.sessionStorage.getItem(sshPwdKey(ws.id)))
+  sshPwdSet.value = Boolean(ws && hasSshPassword(ws.id))
 }
 
 watch(needsSshPassword, refreshSshPwdState, { immediate: true })
@@ -887,12 +884,12 @@ function saveSshPwd(): void {
   const ws = currentWorkspace.value
   const password = sshPwdInput.value
   if (!ws || !password) return
-  // base64 传输（请求头只允许可见 ASCII），存 sessionStorage；关闭标签即失效。
-  window.sessionStorage.setItem(sshPwdKey(ws.id), window.btoa(unescape(encodeURIComponent(password))))
+  // 只存页面内存；发送时由 HTTP 拦截器编码为 base64 请求头（请求头只允许可见 ASCII）。
+  setSshPassword(ws.id, password)
   sshPwdSet.value = true
   sshPwdInput.value = ''
   showSshPwdModal.value = false
-  message.success('SSH 密码已保存到本次会话（关闭页面即失效）')
+  message.success('SSH 密码已保存到当前页面（刷新或关闭页面即失效）')
   // 立刻用新密码拉一次目录树：密码错了能当场发现，而不是等用户点文件才报错。
   void loadTree()
 }
@@ -900,10 +897,10 @@ function saveSshPwd(): void {
 function clearSshPwd(): void {
   const ws = currentWorkspace.value
   if (!ws) return
-  window.sessionStorage.removeItem(sshPwdKey(ws.id))
+  clearSshPassword(ws.id)
   sshPwdSet.value = false
   showSshPwdModal.value = false
-  message.success('已清除本会话保存的 SSH 密码')
+  message.success('已清除当前页面保存的 SSH 密码')
 }
 
 // ─── 远程命令：先登记审批单，用户确认后才真正执行 ───
