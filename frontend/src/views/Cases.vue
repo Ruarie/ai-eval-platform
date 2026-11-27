@@ -376,6 +376,7 @@
                     @keyup.enter="finishEditing"
                     @keyup.esc="cancelEditing"
                   />
+                  <!-- eslint-disable-next-line vue/no-v-html -- highlightText 逐段转义后只插入 <mark> -->
                   <div v-else class="cell-content primary-text" :class="{ empty: !c.name.trim() }" v-html="highlightMatch(c.name || '（空用例名称 · 点击录入）')"></div>
                 </td>
 
@@ -392,6 +393,7 @@
                     @keyup.enter="finishEditing"
                     @keyup.esc="cancelEditing"
                   />
+                  <!-- eslint-disable-next-line vue/no-v-html -- highlightText 逐段转义后只插入 <mark> -->
                   <div v-else class="cell-content" v-html="highlightMatch(c.module || '通用')"></div>
                 </td>
 
@@ -407,6 +409,7 @@
                     @keyup.enter="finishEditing"
                     @keyup.esc="cancelEditing"
                   />
+                  <!-- eslint-disable-next-line vue/no-v-html -- highlightText 逐段转义后只插入 <mark> -->
                   <div v-else class="cell-content" :class="{ placeholder: !c.feature_point }" v-html="highlightMatch(c.feature_point || '—')"></div>
                 </td>
 
@@ -461,6 +464,7 @@
                     @keyup.enter="finishEditing"
                     @keyup.esc="cancelEditing"
                   />
+                  <!-- eslint-disable-next-line vue/no-v-html -- highlightText 逐段转义后只插入 <mark> -->
                   <div v-else class="cell-content mono-sm" :class="{ placeholder: !c.preconditions }" v-html="highlightMatch(c.preconditions || '—')"></div>
                 </td>
 
@@ -482,6 +486,7 @@
                     @keyup.enter="finishEditing"
                     @keyup.esc="cancelEditing"
                   />
+                  <!-- eslint-disable-next-line vue/no-v-html -- highlightText 逐段转义后只插入 <mark> -->
                   <div v-else class="cell-content" :class="{ empty: !c.expected_result.trim() }" v-html="highlightMatch(c.expected_result || '（空预期结果 · 点击录入）')"></div>
                 </td>
 
@@ -920,7 +925,7 @@ import { useRoute } from 'vue-router'
 import { useMessage, useDialog, type DropdownOption } from 'naive-ui'
 import { api } from '../api/http'
 import type { CaseSet, TestCase, TestCaseInput, TestCaseCheck, CaseCompareResult, CaseCoverageResult, ColumnSchemaItem, Profile, TaskStatus } from '../api/types'
-import { escapeHtml, escapeRegex, renderIcon } from '../utils/render'
+import { highlightText, renderIcon } from '../utils/render'
 import CaseReviewDrawer from '../components/drawers/CaseReviewDrawer.vue'
 import CaseReviewFlowDrawer from '../components/drawers/CaseReviewFlowDrawer.vue'
 import RequirementCoverageDrawer from '../components/drawers/RequirementCoverageDrawer.vue'
@@ -1172,10 +1177,7 @@ function checkAllDisplayedCases() {
 }
 
 function highlightMatch(text: string): string {
-  const q = gridSearch.value.trim()
-  if (!q || !text) return escapeHtml(text)
-  const regex = new RegExp(`(${escapeRegex(q)})`, 'gi')
-  return escapeHtml(text).replace(regex, '<mark class="highlight-match">$1</mark>')
+  return highlightText(text, gridSearch.value)
 }
 
 // ─── 键盘流网格导航 (Keyboard Flow) ───

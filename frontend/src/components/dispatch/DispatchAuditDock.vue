@@ -38,7 +38,8 @@
             <span class="lci-tag" :class="l.cat">{{ l.kind }}</span>
             <span v-if="l.tid" class="lci-tid mono">{{ l.tid.substring(0, 8) }}</span>
           </div>
-          <div class="lci-body" v-html="l.html"></div>
+          <!-- eslint-disable-next-line vue/no-v-html -- 日志片段已转义，并经 sanitizeHtml(DOMPurify) 消毒 -->
+          <div class="lci-body" v-html="sanitizeHtml(l.html)"></div>
         </div>
         <div v-if="!logs.length" class="empty" style="padding: 28px 10px">
           <div class="small tertiary">暂无调度事件流</div>
@@ -49,6 +50,7 @@
 </template>
 
 <script setup lang="ts">
+import { sanitizeHtml } from '../../utils/sanitizeHtml'
 /** 调度事件审计坞：只负责渲染与筛选交互，日志本身由页面采集。 */
 interface AuditLogEntry {
   cat: string

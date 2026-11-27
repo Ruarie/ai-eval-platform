@@ -31,12 +31,38 @@ export function renderIcon(pathD: string | string[], strokeColor?: string) {
     )
 }
 
-/** 转义 HTML 特殊字符，防止 v-html 注入。 */
+/** 转义 HTML 特殊字符（含单双引号，可安全用于文本与属性值），防止 v-html 注入。 */
 export function escapeHtml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 }
 
 /** 转义正则元字符，用于把用户输入安全地拼进 RegExp。 */
 export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * 关键词高亮：在**原文**上切分命中片段，逐段转义后用 <mark> 包裹，输出可交给 v-html。
+ * 不能先转义再匹配——否则查询 amp/quot 会把标签插进 &amp; 等实体中间，
+ * 而含 & < " 的关键词又永远匹配不到。大小写不敏感。
+ */
+export function highlightText(text: string, query: string, markClass = 'highlight-match'): string {
+  const q = query.trim()
+  if (!text) return ''
+  if (!q) return escapeHtml(text)
+  const regex = new RegExp(escapeRegex(q), 'gi')
+  let out = ''
+  let last = 0
+  for (const match of text.matchAll(regex)) {
+    const start = match.index ?? 0
+    out += escapeHtml(text.slice(last, start))
+    out += `<mark class="${escapeHtml(markClass)}">${escapeHtml(match[0])}</mark>`
+    last = start + match[0].length
+  }
+  return out + escapeHtml(text.slice(last))
 }

@@ -7,6 +7,7 @@
     role="img"
     :aria-label="logo.label"
   >
+    <!-- eslint-disable-next-line vue/no-v-html -- 内置品牌 SVG 常量，不含外部输入 -->
     <span v-if="brandSvg" class="provider-brand-svg" aria-hidden="true" v-html="brandSvg"/>
     <svg v-else-if="hasGraphic" :viewBox="logo.viewBox || '0 0 24 24'" aria-hidden="true">
       <defs v-if="logo.gradient">

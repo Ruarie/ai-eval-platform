@@ -1,5 +1,6 @@
 """本地文件卷的上传与元数据查询接口。"""
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -109,15 +110,24 @@ async def upload_file(
         kind=Path(filename).suffix.lower().lstrip("."),
         uploaded_by=user.id,
     )
+    # 提交与 refresh 是同步 DB IO，放线程池执行，避免阻塞事件循环。
+    try:
+        await asyncio.to_thread(_persist_stored_file, db, stored)
+    except Exception:
+        storage_path.unlink(missing_ok=True)
+        raise
+    return stored
+
+
+def _persist_stored_file(db: Session, stored: StoredFile) -> None:
+    """落库并回填默认值；阻塞调用，只能在线程池中执行。"""
     db.add(stored)
     try:
         db.commit()
     except Exception:
         db.rollback()
-        storage_path.unlink(missing_ok=True)
         raise
     db.refresh(stored)
-    return stored
 
 
 @router.get("/{file_id}", response_model=FileOut)

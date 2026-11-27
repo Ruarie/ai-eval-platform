@@ -241,6 +241,7 @@ import {
   pushBoundedHistory,
 } from '../utils/dispatchFeed'
 import { truncate } from '../utils/dispatchLayout'
+import { escapeHtml } from '../utils/render'
 import { buildTopo } from '../utils/dispatchTopo'
 import DispatchKpiBand from '../components/dispatch/DispatchKpiBand.vue'
 import DispatchOverlays from '../components/dispatch/DispatchOverlays.vue'
@@ -1121,10 +1122,6 @@ function mapWorker(w: DispatchWorker): WorkerNode {
   return mapWorkerRow(w as unknown as Parameters<typeof mapWorkerRow>[0]) as unknown as WorkerNode
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
 let liveLoadRequestId = 0
 
 /** 刷新大盘指标、节点池与任务域；状态总量来自分页契约，星图只取有限代表任务。 */
@@ -1389,7 +1386,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
 }
 
-/* 星图缩放控件：原先只在 WorkflowDesigner 内定义，调度页按钮因此退化成原生灰底 */
+/* 星图缩放控件：调度页自带样式，避免按钮退化成原生灰底 */
 .zoom-ctrl {
   display: inline-flex;
   align-items: center;

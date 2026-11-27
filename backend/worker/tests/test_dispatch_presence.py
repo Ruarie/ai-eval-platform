@@ -2,10 +2,11 @@
 
 from datetime import UTC, datetime, timedelta
 
-from app.dispatch_presence import Presence, claim_allowed, take_idle_restart, write_presence
-from app.models import DispatchWorker
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from app.dispatch_presence import Presence, claim_allowed, take_idle_restart, write_presence
+from app.models import DispatchWorker
 
 
 def test_presence_registers_and_preserves_governed_state(tmp_path, monkeypatch):

@@ -1,12 +1,15 @@
 """协议档原生工具探测：只回填随机测试值，绝不调用业务工具或调度器。"""
 
 import asyncio
+import logging
 import secrets
 
 from .agent.stream import AssistantAttempt
 from .llm.contracts import ModelConfig
 from .llm.loop_contracts import LlmRequestError, ToolSpec
 from .llm.resolver import build_adapter, close_adapter, resolve_request
+
+logger = logging.getLogger("ai-eval.profile-tool-probe")
 
 
 async def probe_tool_roundtrip(config: ModelConfig) -> dict[str, str]:
@@ -50,12 +53,13 @@ async def probe_tool_roundtrip(config: ModelConfig) -> dict[str, str]:
         return {**result, "error_code": exc.public_code}
     except TimeoutError:
         return {**result, "error_code": "TIMEOUT"}
-    except Exception:
-        # 异常可能含上游正文与密钥，仅返回平台安全分类。
+    except Exception as exc:
+        # 异常可能含上游正文与密钥，仅返回平台安全分类；日志仅记类型名。
+        logger.warning("工具回合探测失败 type=%s", type(exc).__name__)
         return {**result, "error_code": "UPSTREAM"}
     finally:
         if adapter is not None:
             try:
                 await asyncio.wait_for(close_adapter(adapter), timeout=1.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("工具探测适配器释放失败 type=%s", type(exc).__name__)

@@ -210,6 +210,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt pytest
 
+      - name: Lint (ruff)
+        # worker 之前没有 lint 配置：与 api/shared 使用同一套规则（见本目录 pyproject.toml）。
+        run: ruff check .
+
       - name: Test (pytest)
         # ".." 使共享包 backend/shared 可导入（shared.models）
         run: PYTHONPATH=.:.. pytest
@@ -257,3 +261,61 @@ jobs:
 
       - name: Build (vite)
         run: npm run build
+
+  # lightrag 适配层与 media_mcp 之前完全没有 CI 作业：前者 46 项契约单测、
+  # 后者 5 项上游客户端用例（含 4 项 async），代码改了也不会被验证。
+  # 两者依赖各自独立且与 api 冲突（pydantic 版本不同），因此各自建作业。
+  lightrag:
+    needs: changes
+    if: always() && (github.event_name == 'push' || needs.changes.outputs.backend == 'true')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/lightrag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest==8.4.2 ruff==0.8.6
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Test (pytest)
+        # conftest.py 把 adapter 包加入导入路径；契约层不依赖 LightRAG 引擎。
+        run: pytest
+
+  media-mcp:
+    needs: changes
+    if: always() && (github.event_name == 'push' || needs.changes.outputs.backend == 'true')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/media_mcp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt ruff==0.8.6
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Test (pytest)
+        # pytest.ini 里 asyncio_mode=auto：上游客户端用例是 async，缺 pytest-asyncio
+        # 时会被静默跳过执行（只报 not natively supported），等于没有测试。
+        run: pytest

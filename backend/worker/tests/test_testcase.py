@@ -20,6 +20,8 @@ from app.models import (
     TaskEvent,
     utcnow,
 )
+
+
 def _file(path, filename="requirements.xlsx", kind="xlsx", owner="owner"):
     """构造与真实上传相同的无扩展名存储文件元数据。"""
     return StoredFile(

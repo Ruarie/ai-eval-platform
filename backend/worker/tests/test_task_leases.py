@@ -4,6 +4,7 @@ from datetime import timedelta
 from threading import Event, current_thread
 
 import pytest
+
 from app import benchmark, stress, task_state, testcase
 from app.models import Task, TaskEvent, utcnow
 

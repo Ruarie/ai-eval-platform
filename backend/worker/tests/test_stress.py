@@ -3,6 +3,7 @@
 from unittest.mock import Mock
 
 import pytest
+
 from app import stress
 from app.models import ProtocolProfile, Setting, Task, TaskEvent
 from app.stress import clamp_stress, host_allowed, metrics_from_status

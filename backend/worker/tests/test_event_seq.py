@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-
 from shared.event_seq import next_event_id, realign_event_seq
 from shared.models import Session as AgentSession
 from shared.models import User, WsEvent
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
 
 def _factory(tmp_path):

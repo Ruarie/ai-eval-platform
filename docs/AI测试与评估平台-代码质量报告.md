@@ -1,7 +1,8 @@
 # AI 测试与评估平台 — 代码质量报告
 
-> 版本：V1.1 ｜ 审查日期：2026-11-27 ｜ 审查基线：`main@0884772`（工作区无未提交改动）
+> 版本：V1.2 ｜ 审查日期：2026-11-27 ｜ 审查基线：`main@0884772`（工作区无未提交改动）
 > V1.1：P0 安全项与 README 已在分支 `fix/security-p0-hardening` 修复，见第 8 节。
+> V1.2：P1 质量治理（XSS 消毒、死代码、同步 DB 阻塞、工程化）已在分支 `refactor/p1-quality` 修复，见第 9 节。
 > 审查方式：静态阅读 + 本地可执行门禁。范围包括 `backend/`、`frontend/`、`deploy/`、`.github/workflows/`、`docker-compose.yml` 和文档。
 
 ---
@@ -217,3 +218,72 @@
 - Nginx：用 `nginx:1.27-alpine` 执行 `nginx -t` 通过；`/`、`/assets/*`、`/api/*` 三类响应实测都带上了安全头。
 - 代理 IP：用 uvicorn 0.34 中间件验证了单级反代、两级反代、客户端伪造 XFF、公网直连伪造 4 种场景，取到的都是真实客户端 IP。
 - 未执行：worker 测试（本批没有改动 worker 代码）。
+
+---
+
+## 9. 修复记录（V1.2，分支 `refactor/p1-quality`）
+
+### 9.1 处理状态
+
+| 编号 | 状态 | 处理方式 |
+| --- | --- | --- |
+| M5 | 已修复 | 删除 `components/workflow/`（约 4.2k 行，全仓只有一处 CSS 注释提到它）、`ShareModal.vue`、`ErrorStrip.vue`、`types.ts` 中的 Workflow* 类型，以及 vite 里永不命中的 katex 分包规则。删完构建产物哈希与删除前一致，说明这些代码本来就没进产物 |
+| M7 | 部分修复 | 两处重复的 `highlightMatch` 收敛到 `utils/render.highlightText`；`formatTime/formatBytes`、树宽拖拽、Fernet 解密等多份实现仍在，留待后续 |
+| R1 | 部分修复 | `delete_session`（含 `SELECT ... FOR UPDATE`）、文件上传落库、AI 标题行锁三处改走 `asyncio.to_thread`，`task.cancel()` 保留在事件循环线程；`ws_tickets` 的 Redis 调用是短超时网络 IO，不在本次范围 |
+| R3 | 已修复 | Redis 改共享客户端 + 故障冷却 30 秒：原实现每次握手新建连接池，Redis 故障时每条连接都要各自阻塞约 0.8 秒 |
+| R5 | 已修复 | 5 处 `except Exception: pass` 补上日志和异常类型名（只记类型，不记正文，避免泄露上游内容） |
+| E2 | 已修复 | `worker`、`lightrag`、`media_mcp` 三个目录**都没有 ruff 配置文件**，此前实际按 ruff 内置默认规则检查（只覆盖极少几类问题），等于没有 lint。现各自建 `pyproject.toml`，与 api/runner 统一为 `E,F,I,UP` + `target-version=py312` + `line-length=100`，顺手修掉 22 处 import 排序。`B`/`S`/`BLE`/`ASYNC` 扩展规则集未启用，留待后续 |
+| S6 | 已修复 | 新增 `utils/sanitizeHtml`（DOMPurify）作为 v-html 的最后一道防线，`vue/no-v-html` 升级为 error，12 处确需使用的逐行注明原因 |
+| E1 | 已修复 | worker 镜像 3.13→3.12，lightrag 3.11→3.12（CI 一直用 3.12 测，镜像与测试环境不一致） |
+| T3 | 已修复 | CI 新增 `lightrag`、`media-mcp` 两个作业，worker 补 ruff。`media_mcp` 原来缺 `asyncio_mode`，4 个 async 用例**从未真正执行**（只报 “not natively supported”），补 `pytest.ini` 与 `requirements-dev.txt` 后通过 |
+| M8 | 部分改善 | 删除死代码后前端显式 `any` 告警从 238 降到 194；`no-explicit-any` 仍是 warn，未升级为 error |
+| D2/D4 | 未处理 | `design-qa.md` 仍被《AgentLoop 前端重写与联调计划》多处引用，直接删除会让文档链接失效；建议随 D2 的文档拆分（版本历史移入 CHANGELOG、API.md 拆分）一并处理，本批不动 |
+
+### 9.2 顺带发现并修复的问题
+
+质量报告原有清单之外，本次改动中发现两个真实缺陷：
+
+1. **`highlightText` 的转义顺序错误**（原 `Cases.vue` / `Datasets.vue`）：先整体转义再做正则替换，导致搜 `amp`/`quot` 时 `<mark>` 标签被插进 `&amp;` 实体中间；而含 `& < "` 的关键词永远匹配不到原文。已改为在原文上切分、逐段转义。
+2. **`media_mcp` 的 4 个 async 用例从未执行**：`pytest.ini` 没开 `asyncio_mode`，也没装 `pytest-asyncio`，测试只会报 `async def functions are not natively supported` 而非失败，CI 从未覆盖这部分。
+3. **`worker`/`lightrag`/`media_mcp` 三个目录没有 ruff 配置**：执行 `ruff check .` 时按内置默认规则跑，只查极少数问题，`F401`/`F841` 这类常见问题不会报。建配置后立即暴露 22 处 import 排序问题（均为 `I001`，自动修复，无真实缺陷）。
+
+### 9.3 行为变化提示
+
+- **`vue/no-v-html` 现在是 error**：新增 `v-html` 必须先转义或经 `sanitizeHtml`，并按现有 12 处的方式逐行写明为什么安全，否则 lint 失败。
+- **`highlightText` 语义更正确**：含 `&`、引号的关键词现在能命中了，之前匹配不到。
+- **`ws_tickets` 的 Redis 冷却期**：Redis 故障后 30 秒内不再尝试建连，直接走进程内存去重。多副本部署下这 30 秒内的一次性票据校验只在各自进程内生效。
+
+### 9.4 修改代码文件与作用清单
+
+| 文件 | 作用 |
+| --- | --- |
+| `frontend/src/utils/sanitizeHtml.ts`（新） | DOMPurify 消毒入口，禁用 form/style/iframe 等标签，为新窗口链接补 noopener |
+| `frontend/src/utils/render.ts` | `escapeHtml` 补单引号；新增 `highlightText`（原文切分 + 逐段转义） |
+| `frontend/src/components/agent/MarkdownView.vue`、`components/dispatch/DispatchAuditDock.vue` | v-html 输出前统一走 `sanitizeHtml` |
+| `frontend/src/views/Cases.vue`、`views/Datasets.vue`、`components/datasets/DatasetRow.vue`、`components/ProviderLogo.vue` | 复用共享转义/高亮；确需 v-html 处逐行注明原因 |
+| `frontend/src/views/Dispatch.vue` | 删除本地重复的 `escapeHtml`，改用共享实现 |
+| `frontend/eslint.config.js` | `vue/no-v-html` 由 off 改为 error |
+| `frontend/vite.config.js` | 删除永不命中的 katex 分包规则 |
+| `frontend/package.json` / `package-lock.json` | `dompurify` 声明为直接依赖（3.4.18，与既有 override 一致） |
+| 删除：`frontend/src/components/workflow/*`、`components/modals/ShareModal.vue`、`components/common/ErrorStrip.vue` | 无引用死代码 |
+| `frontend/src/api/types.ts` | 删除无人使用的 Workflow* 类型 |
+| `backend/api/app/ws_tickets.py` | Redis 共享客户端 + 故障冷却 + `reset_redis_client` 夹具 |
+| `backend/api/app/routers/sessions.py`、`routers/files.py`、`routers/ws.py` | 同步 DB IO 移入 `asyncio.to_thread`（新增 `_load_deletable_session`、`_apply_session_soft_delete`、`_persist_stored_file`、`_apply_ai_title`） |
+| `backend/api/app/profile_check.py`、`profile_probe.py`、`profile_tool_probe.py`、`session_connections.py`、`agent/graph.py` | 吞异常处补日志与异常类型名 |
+| `backend/worker/Dockerfile`、`backend/lightrag/Dockerfile` | Python 版本统一到 3.12 |
+| `backend/worker/pyproject.toml`、`backend/lightrag/pyproject.toml`、`backend/media_mcp/pyproject.toml`（新） | 统一 ruff 规则集（此前无配置，按内置默认规则等于未 lint）；worker 同时登记 pytest pythonpath |
+| `backend/media_mcp/pytest.ini`、`requirements-dev.txt`（新） | 开启 asyncio 模式，补测试依赖 |
+| `.github/workflows/ci.yml` | 新增 `lightrag`、`media-mcp` 作业；worker 补 ruff |
+| 测试：`frontend/tests/renderHighlight.test.mjs`（新）、`tests/e2e/sanitizeHtml.spec.ts`（新）、`backend/api/tests/test_ws_tickets.py`、`tests/test_agent_title.py` | 新增 6 项高亮转义、2 项浏览器端消毒、3 项 Redis 共享/冷却、1 项行锁线程归属用例 |
+| `AGENTS.md`、本文件 | 版本 V2.52 登记与本节修复记录 |
+
+### 9.5 门禁结果
+
+- api：ruff 通过；pytest 2582 passed / 89 skipped。
+- worker：ruff 通过；pytest 98 passed（用临时 PostgreSQL 16 容器）。
+- runner：44 passed / 1 skipped；lightrag：46 passed；media_mcp：5 passed。五个 Python 服务均按统一规则跑 ruff，全部通过。
+- 配置自检：在各服务目录放入 `import os` + 未使用变量，`F401`/`F841` 均能报出，证明新配置确实生效（而非退回默认规则）。
+- 部署：单测 39 项通过。
+- 前端：lint 0 error（194 条既有 warning，比修复前少 44 条）；typecheck、build 通过；单测 179/179；e2e 171/171。
+- 回归守卫自检：把 `asyncio.to_thread` 换成同步执行后，新增的行锁线程归属用例确实失败，证明该用例有区分能力。
+- 未执行：lightrag 镜像构建（本机 BuildKit/buildx 不可用），改为在 Python 3.12 环境下按 `requirements.txt` + `constraints.txt` 完整解析安装并跑测试，确认 3.12 下依赖可解析。

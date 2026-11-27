@@ -1,0 +1,9 @@
+[tool.ruff]
+# 与其余 Python 服务保持一致的目标版本、行宽与规则集。
+# 此前本目录没有 ruff 配置，实际按内置默认规则检查（只覆盖极少几类问题）。
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]

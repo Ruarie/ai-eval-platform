@@ -33,6 +33,7 @@
         @keyup.enter="emit('finish')"
         @keyup.esc="emit('cancel')"
       />
+      <!-- eslint-disable-next-line vue/no-v-html -- highlight 由父组件传入 highlightText，已逐段转义 -->
       <div v-else class="cell-content primary-text" :class="{ empty: !row.q.trim() }" v-html="highlight(row.q || '（空问句 · 点击录入）')"></div>
     </td>
 
@@ -50,6 +51,7 @@
         @keyup.enter="emit('finish')"
         @keyup.esc="emit('cancel')"
       />
+      <!-- eslint-disable-next-line vue/no-v-html -- highlight 由父组件传入 highlightText，已逐段转义 -->
       <div v-else class="cell-content" :class="{ empty: !row.r.trim() }" v-html="highlight(row.r || '（空答案 · 点击录入）')"></div>
     </td>
 
@@ -67,6 +69,7 @@
         @keyup.enter="emit('finish')"
         @keyup.esc="emit('cancel')"
       />
+      <!-- eslint-disable-next-line vue/no-v-html -- highlight 由父组件传入 highlightText，已逐段转义 -->
       <div v-else class="cell-content mono-sm" :class="{ placeholder: !row.c }" v-html="highlight(row.c || '—')"></div>
     </td>
 
@@ -85,6 +88,7 @@
         @keyup.esc="emit('cancel')"
       />
       <div v-else class="cell-content">
+        <!-- eslint-disable-next-line vue/no-v-html -- highlight 由父组件传入 highlightText，已逐段转义 -->
         <span v-if="row.tags" class="tag-pill" v-html="highlight(row.tags)"></span>
         <span v-else class="placeholder">常规</span>
       </div>

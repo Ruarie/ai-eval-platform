@@ -51,24 +51,73 @@ def consume_memory_ticket(jti: str, ttl_seconds: int) -> bool:
 
 def _redis_consume(jti: str, ttl_seconds: int) -> bool | None:
     """Redis SET NX EX。成功返回是否首次写入；连接失败返回 None 以便回退。"""
-    try:
-        import redis
-    except Exception:
+    client = _get_redis_client()
+    if client is None:
         return None
     try:
-        # 每次校验都是短生命周期的独立连接池，用上下文管理器确保连接被回收，
-        # 避免重连高峰时句柄随连接池累积。
-        with redis.Redis.from_url(
-            settings.redis_url,
-            socket_connect_timeout=0.4,
-            socket_timeout=0.4,
-            decode_responses=True,
-        ) as client:
-            ok = client.set(f"{_KEY_PREFIX}{jti}", "1", nx=True, ex=max(1, int(ttl_seconds)))
+        ok = client.set(f"{_KEY_PREFIX}{jti}", "1", nx=True, ex=max(1, int(ttl_seconds)))
         return bool(ok)
     except Exception as exc:
+        _mark_redis_unavailable()
         agent_trace(f"WS 短票 Redis 不可用 type={type(exc).__name__}，回退进程内存")
         return None
+
+
+# 进程级共享客户端（内部自带连接池）：旧实现每次握手都新建连接池，重连高峰时
+# 反复建连；Redis 故障时每条连接还要各自阻塞约 0.8s。现在复用同一个客户端，
+# 故障后冷却 _REDIS_RETRY_COOLDOWN_S 秒内直接走进程内存回退，不再逐次探测。
+_REDIS_RETRY_COOLDOWN_S = 30.0
+_REDIS_CLIENT = None
+_REDIS_UNAVAILABLE_UNTIL = 0.0
+_REDIS_LOCK = threading.Lock()
+
+
+def _mark_redis_unavailable() -> None:
+    """记录 Redis 故障并进入冷却期；冷却结束后下一次调用重新建连。"""
+    global _REDIS_CLIENT, _REDIS_UNAVAILABLE_UNTIL
+    with _REDIS_LOCK:
+        client, _REDIS_CLIENT = _REDIS_CLIENT, None
+        _REDIS_UNAVAILABLE_UNTIL = time.monotonic() + _REDIS_RETRY_COOLDOWN_S
+    if client is not None:
+        try:
+            client.close()
+        except Exception as exc:
+            agent_trace(f"WS 短票 Redis 关闭连接失败 type={type(exc).__name__}")
+
+
+def _get_redis_client():
+    """惰性创建共享客户端；冷却期内或 redis 库缺失时返回 None。"""
+    global _REDIS_CLIENT
+    if _REDIS_CLIENT is not None:
+        return _REDIS_CLIENT
+    with _REDIS_LOCK:
+        if _REDIS_CLIENT is not None:
+            return _REDIS_CLIENT
+        if time.monotonic() < _REDIS_UNAVAILABLE_UNTIL:
+            return None
+        try:
+            import redis
+        except Exception:
+            return None
+        try:
+            _REDIS_CLIENT = redis.Redis.from_url(
+                settings.redis_url,
+                socket_connect_timeout=0.4,
+                socket_timeout=0.4,
+                decode_responses=True,
+            )
+        except Exception as exc:
+            agent_trace(f"WS 短票 Redis 初始化失败 type={type(exc).__name__}，回退进程内存")
+            return None
+        return _REDIS_CLIENT
+
+
+def reset_redis_client() -> None:
+    """测试夹具：丢弃共享客户端并清除冷却状态。"""
+    global _REDIS_CLIENT, _REDIS_UNAVAILABLE_UNTIL
+    with _REDIS_LOCK:
+        _REDIS_CLIENT = None
+        _REDIS_UNAVAILABLE_UNTIL = 0.0
 
 
 def consume_ws_jti(jti: str, ttl_seconds: int) -> bool:

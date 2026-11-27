@@ -1,5 +1,6 @@
 """Agent 会话及历史回放 REST 接口。"""
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -662,8 +663,36 @@ async def delete_session(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    """软删除空闲会话，不物理删除审计消息、事件、任务或报告。"""
-    session = require_session_owner(db, session_id, user.id, lock=True)
+    """软删除空闲会话，不物理删除审计消息、事件、任务或报告。
+
+    同步 DB 操作（含 ``SELECT ... FOR UPDATE`` 等行锁）一律放到线程池：等锁期间
+    会阻塞整个事件循环，同副本上其它连接的收包与心跳都会卡住。
+    """
+    session = await asyncio.to_thread(_load_deletable_session, db, session_id, user.id)
+
+    # MAJ-4：软删前中止该会话在途 Agent 回合（尽力而为——取消分支负责唯一
+    # completed 收尾；软删后断连 close_all 在 commit 后执行）。局部 import
+    # 防 routers/ws → sessions 循环依赖。task.cancel 必须留在事件循环线程。
+    from . import ws as _ws_module
+
+    _ws_module.stop_session_turns(session.id)
+
+    await asyncio.to_thread(_apply_session_soft_delete, db, session, user.id)
+    # 软删除后联动清该会话检查点（失败不影响 204，TTL 后台任务会兜底）。
+    try:
+        removed = await asyncio.to_thread(purge_session_checkpoints, session.id)
+        if removed:
+            agent_trace(f"session checkpoint cleanup removed={removed}")
+    except Exception as exc:
+        agent_trace(f"session checkpoint cleanup failed type={type(exc).__name__}")
+    # 删除完成后统一断开 owner 与协作者。
+    await SESSION_CONNECTION_HUB.close_all(session.id)
+    return Response(status_code=204)
+
+
+def _load_deletable_session(db: Session, session_id: str, user_id: str) -> AgentSession:
+    """加行锁取出会话并校验可删；阻塞调用，只能在线程池中执行。"""
+    session = require_session_owner(db, session_id, user_id, lock=True)
     if session.pending_confirm:
         raise AppError(ErrorCode.VALIDATION, "存在待确认任务，请先确认或取消后再删除会话")
     active_task = (
@@ -673,18 +702,15 @@ async def delete_session(
     )
     if active_task:
         raise AppError(ErrorCode.VALIDATION, "存在执行中的任务，请先取消或等待任务结束")
+    return session
 
-    # MAJ-4：软删前中止该会话在途 Agent 回合（尽力而为——取消分支负责唯一
-    # completed 收尾；软删后断连 close_all 在 commit 后执行）。局部 import
-    # 防 routers/ws → sessions 循环依赖。
-    from . import ws as _ws_module
 
-    _ws_module.stop_session_turns(session.id)
-
+def _apply_session_soft_delete(db: Session, session: AgentSession, user_id: str) -> None:
+    """写入删除标记与审计并提交；阻塞调用，只能在线程池中执行。"""
     session.deleted_at = datetime.now(UTC)
     db.add(
         AuditLog(
-            user_id=user.id,
+            user_id=user_id,
             action="session_delete",
             target_type="session",
             target_id=session.id,
@@ -692,13 +718,3 @@ async def delete_session(
         )
     )
     db.commit()
-    # 软删除后联动清该会话检查点（失败不影响 204，TTL 后台任务会兜底）。
-    try:
-        removed = purge_session_checkpoints(session.id)
-        if removed:
-            agent_trace(f"session checkpoint cleanup removed={removed}")
-    except Exception as exc:
-        agent_trace(f"session checkpoint cleanup failed type={type(exc).__name__}")
-    # 删除完成后统一断开 owner 与协作者。
-    await SESSION_CONNECTION_HUB.close_all(session.id)
-    return Response(status_code=204)

@@ -1395,6 +1395,25 @@ def stop_session_turns(session_id: str) -> None:
         abort.set()
 
 
+def _apply_ai_title(db: Session, session_id: str, title: str) -> bool:
+    """加行锁复查默认标题后写入 AI 标题。
+
+    阻塞调用，只能在线程池中执行（``SELECT ... FOR UPDATE`` 等锁会挂住事件循环）。
+    返回 False 表示标题已被用户改名，调用方应跳过广播。
+    """
+    row = (
+        db.query(AgentSession)
+        .filter(AgentSession.id == session_id)
+        .with_for_update()
+        .first()
+    )
+    if row is None or row.title != "新会话":
+        return False
+    row.title = title
+    db.commit()
+    return True
+
+
 def _maybe_schedule_title(
     session: AgentSession,
     websocket: WebSocket,
@@ -1419,17 +1438,10 @@ def _maybe_schedule_title(
             title = await generate_title_text(stripped)
             if not title:
                 return
-            # 行锁复查默认标题：避免与用户手动改名或并发任务互相覆盖
-            row = (
-                db.query(AgentSession)
-                .filter(AgentSession.id == session.id)
-                .with_for_update()
-                .first()
-            )
-            if row is None or row.title != "新会话":
+            # 行锁复查默认标题：避免与用户手动改名或并发任务互相覆盖。
+            # 行锁与提交都是阻塞 DB IO，整体放线程池，避免等锁卡住事件循环。
+            if not await asyncio.to_thread(_apply_ai_title, db, session.id, title):
                 return
-            row.title = title
-            db.commit()
             await _emit_persistent(
                 db,
                 websocket,

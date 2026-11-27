@@ -11,6 +11,7 @@ from dataclasses import replace
 from types import ModuleType, SimpleNamespace
 
 import pytest
+
 from adapter.config import load_config
 from adapter.engine import (
     _MAX_FAILED_RECORDS,

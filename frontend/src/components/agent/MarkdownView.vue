@@ -12,6 +12,7 @@
       label="结构化输出"
       show-toolbar
     />
+    <!-- eslint-disable-next-line vue/no-v-html -- renderedHtml 已逐段转义并经 sanitizeHtml(DOMPurify) 消毒 -->
     <div v-else class="markdown-content" v-html="renderedHtml"></div>
     <span v-if="isStreaming" class="md-streaming-cursor" aria-hidden="true">▍</span>
   </div>
@@ -21,6 +22,8 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import StructuredDataView from './StructuredDataView.vue'
 import { copyText } from '../../utils/clipboard'
+import { escapeHtml } from '../../utils/render'
+import { sanitizeHtml } from '../../utils/sanitizeHtml'
 
 type MermaidApi = typeof import('mermaid')['default']
 
@@ -205,18 +208,6 @@ async function renderAllMermaidDiagrams(): Promise<void> {
       }
     }
   }
-}
-
-/**
- * 基础 HTML 实体转义（防御 XSS）
- */
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
 }
 
 /**
@@ -601,7 +592,8 @@ function parseStandaloneJson(raw: string): unknown | undefined {
 
 const structuredValue = computed(() => parseStandaloneJson(renderedSource.value))
 const showStructuredValue = computed(() => !props.isStreaming && structuredValue.value !== undefined)
-const renderedHtml = computed(() => renderMarkdown(renderedSource.value))
+// 渲染器内部已逐段转义；输出前再经 DOMPurify 消毒，作为转义遗漏时的最后防线。
+const renderedHtml = computed(() => sanitizeHtml(renderMarkdown(renderedSource.value)))
 
 /**
  * 流式正文节流：整段 Markdown 重解析是线性成本，逐 token（约 60 次/秒）解析长

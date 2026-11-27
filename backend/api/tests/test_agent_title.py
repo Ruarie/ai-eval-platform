@@ -1,6 +1,7 @@
 """会话标题 AI 生成测试：结构化输出解析、兜底链路与 WS 触发编排。"""
 
 import asyncio
+import threading
 
 import pytest
 
@@ -128,6 +129,45 @@ class _TitleDb:
 
     def close(self) -> None:
         pass
+
+
+@pytest.mark.asyncio
+async def test_schedule_title_runs_row_lock_off_event_loop(monkeypatch):
+    """行锁查询与提交必须在工作线程执行，不能阻塞事件循环。"""
+    session = AgentSession(id="s-9", user_id="u-1", title="新会话", visibility="private")
+    row = AgentSession(id="s-9", user_id="u-1", title="新会话", visibility="private")
+    threads: dict[str, int] = {}
+
+    class _ThreadRecordingDb(_TitleDb):
+        def first(self):
+            threads["query"] = threading.get_ident()
+            return super().first()
+
+        def commit(self) -> None:
+            threads["commit"] = threading.get_ident()
+            super().commit()
+
+    async def fake_generate(_text: str) -> str:
+        return "线程校验标题"
+
+    async def fake_emit(*_args, **_kwargs):
+        return True
+
+    monkeypatch.setattr(ws, "SessionLocal", lambda: _ThreadRecordingDb(row))
+    monkeypatch.setattr(ws, "generate_title_text", fake_generate)
+    monkeypatch.setattr(ws, "_emit_persistent", fake_emit)
+    monkeypatch.setattr(ws, "_TITLE_GENERATING", set())
+
+    loop_thread = threading.get_ident()
+    ws._maybe_schedule_title(session, object(), ws._ConnectionState(), "首条消息")
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if "commit" in threads:
+            break
+
+    assert row.title == "线程校验标题"
+    assert threads.get("query") not in (None, loop_thread)
+    assert threads.get("commit") not in (None, loop_thread)
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -13,6 +14,8 @@ from .llm.providers.catalog import detect_provider
 from .llm.providers.reasoning_templates import ensure_template_compatible
 from .llm.resolver import build_adapter, close_adapter, resolve_request
 from .profile_tool_probe import probe_tool_roundtrip
+
+logger = logging.getLogger("ai-eval.profile-probe")
 
 PROBE_MAX_ATTEMPTS = 5
 PROBE_DEADLINE_SECONDS = 30.0
@@ -84,16 +87,17 @@ async def _probe_one(
         return False, None, _PROBE_ERROR_CODES.get(exc.code, exc.public_code)
     except TimeoutError:
         return False, None, "TIMEOUT"
-    except Exception:
-        # 上游正文与 SDK 异常都可能含敏感内容，只保留平台安全分类。
+    except Exception as exc:
+        # 上游正文与 SDK 异常都可能含敏感内容，只保留平台安全分类；日志仅记类型名。
+        logger.warning("思考档位探测失败 type=%s", type(exc).__name__)
         return False, None, "UPSTREAM"
     finally:
         if adapter is not None:
             try:
                 # 清理失败不得覆盖已获得的验证结果；最多额外等待一秒释放资源。
                 await asyncio.wait_for(close_adapter(adapter), timeout=1.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("探测适配器释放失败 type=%s", type(exc).__name__)
 
 
 async def _probe_with_deadline(config: ModelConfig, *, requires_reasoning_evidence: bool):

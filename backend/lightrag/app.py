@@ -21,6 +21,9 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
+from fastapi import FastAPI, Header, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
+
 from adapter import (
     MAX_GRAPH_NODES,
     EngineBusy,
@@ -31,8 +34,6 @@ from adapter import (
     load_config,
 )
 from adapter.contract import api_key_accepted
-from fastapi import FastAPI, Header, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),

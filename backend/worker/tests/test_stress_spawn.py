@@ -1,6 +1,7 @@
 """样本量夹紧与停用压测后的派生门禁。"""
 
 import pytest
+
 from app.models import Task
 from app.sampling import SAMPLE_SIZE_CAP, clamp_sample_size
 from app.stress_spawn import maybe_spawn_stress

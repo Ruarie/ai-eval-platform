@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 
 import pytest
+
 from app import main, stress, task_state
 from app.models import Task, TaskEvent, utcnow
 

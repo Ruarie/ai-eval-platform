@@ -40,6 +40,7 @@ from .graph_updates import (  # noqa: F401  对外重导出
     iter_pending_events,
     router_audit_from_update,
 )
+from .log import agent_trace
 from .router_node import direct_node, router_node
 from .routing import chat_stream_node
 from .taor_nodes import (
@@ -341,7 +342,8 @@ class LangGraphAgent:
         config = {"configurable": {"thread_id": thread_id}}
         try:
             snapshot = await self._graph.aget_state(config)
-        except Exception:  # noqa: BLE001 —— 检查点异常不阻塞恢复判定主流程
+        except Exception as exc:  # noqa: BLE001 —— 检查点异常不阻塞恢复判定主流程
+            agent_trace(f"检查点读取失败，按无待恢复中断处理 type={type(exc).__name__}")
             return False
         return bool(getattr(snapshot, "next", ()))
 
@@ -375,8 +377,8 @@ class LangGraphAgent:
             try:
                 if await self.ahas_pending_interrupt(thread_id):
                     return
-            except Exception:  # noqa: BLE001 —— 判定失败按可清理处理
-                pass
+            except Exception as exc:  # noqa: BLE001 —— 判定失败按可清理处理
+                agent_trace(f"中断判定失败，按可清理处理 type={type(exc).__name__}")
         self._native_tool_results.clear(thread_id)
 
     @staticmethod

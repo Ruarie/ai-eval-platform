@@ -1,0 +1,15 @@
+[tool.pytest.ini_options]
+# ".." 使共享包 backend/shared 可导入（shared.models）
+pythonpath = [".", ".."]
+testpaths = ["tests"]
+
+[tool.ruff]
+# 与 backend/api、backend/runner 保持一致：统一目标版本、行宽与规则集。
+# 之前 worker 没有配置文件，ruff 实际使用内置默认规则（只查极少几类问题），
+# 等于没有 lint。
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]

@@ -1,11 +1,13 @@
 """适配层内部契约单测：来源标识、状态映射与检索结果映射（无需 LightRAG 引擎）。"""
 
 import pytest
+
 from adapter.contract import (
     MAX_GRAPH_NODES,
     STATUS_FAILED,
     STATUS_INDEXED,
     STATUS_INDEXING,
+    api_key_accepted,
     belongs_to_kb,
     build_file_source,
     chunk_top_k_for,
@@ -14,7 +16,6 @@ from adapter.contract import (
     map_graph,
     parse_doc_ids,
     parse_file_source,
-    api_key_accepted,
     sanitize_filename,
 )
 

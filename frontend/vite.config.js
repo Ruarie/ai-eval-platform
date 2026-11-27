@@ -39,8 +39,9 @@ export default defineConfig(({ mode }) => {
     },
   },
   build: {
-    // 大依赖手动分包：mermaid/echarts/katex 均为低频更新的大体积库，
+    // 大依赖手动分包：mermaid/echarts 均为低频更新的大体积库，
     // 拆分后业务代码改动不会使其缓存失效，显著改善构建产物缓存命中率
+    // （katex 虽是 mermaid 的依赖，但当前渲染路径不会打包进产物，无需单独分包）
     rollupOptions: {
       output: {
         manualChunks(rawId) {
@@ -64,9 +65,6 @@ export default defineConfig(({ mode }) => {
           }
           if (id.includes('/node_modules/echarts/') || id.includes('/node_modules/zrender/')) {
             return 'vendor-echarts'
-          }
-          if (id.includes('/node_modules/katex/')) {
-            return 'vendor-katex'
           }
           // naive-ui 不再强制单块：按需引入后让 Rollup 跟随路由分配，
           // 否则所有组件仍会被并进入口预加载。

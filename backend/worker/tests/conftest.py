@@ -1,6 +1,11 @@
 """Worker 持久化回归使用独立 SQLite 文件，不访问配置中的业务数据库。"""
 
 import pytest
+from sqlalchemy import BigInteger, create_engine
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+
 from app import case_ai, main, stress, task_state, testcase
 from app.models import (
     CaseAiJob,
@@ -13,10 +18,6 @@ from app.models import (
     Task,
     TaskEvent,
 )
-from sqlalchemy import BigInteger, create_engine
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import sessionmaker
 
 
 @compiles(JSONB, "sqlite")

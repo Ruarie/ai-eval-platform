@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from urllib.parse import urlsplit
+
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
 

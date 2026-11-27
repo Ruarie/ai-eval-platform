@@ -32,11 +32,11 @@ from shared.casegen import (
     clip_source,
     dedupe_cases,
     generation_token_budget,
-    parse_cases_with_stats,
     module_label,
+    parse_cases_with_stats,
     rebalance_with_stats,
-    split_sections,
     selfcheck,
+    split_sections,
     validate_strategy_weights,
 )
 from sqlalchemy.orm import Session

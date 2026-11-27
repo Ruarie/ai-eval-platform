@@ -15,13 +15,13 @@ from uuid import uuid4
 
 from .benchmark import run_benchmark
 from .case_ai import claim_next_case_ai_job, recover_expired_case_ai_jobs, run_case_ai_job
-from .dispatch_presence import Presence
 from .dataset_import import (
     claim_next_dataset_import,
     recover_expired_dataset_import_leases,
     run_dataset_import,
 )
 from .db import SessionLocal
+from .dispatch_presence import Presence
 from .events import push_ws
 from .models import CaseAiJob, CaseSet, Setting, Task, TaskEvent
 from .rag import run_rag

@@ -1,11 +1,14 @@
 """连通检查使用对话同源的流式请求，只判断本次模型端点能否响应。"""
 
 import asyncio
+import logging
 import time
 
 from .llm.contracts import ModelConfig
 from .llm.loop_contracts import Done, LlmRequestError, ReasoningDelta, TextDelta
 from .llm.resolver import build_adapter, close_adapter, resolve_request
+
+logger = logging.getLogger("ai-eval.profile-check")
 
 
 async def _check_model_connection(config: ModelConfig) -> dict:
@@ -28,7 +31,9 @@ async def _check_model_connection(config: ModelConfig) -> dict:
         return {"ok": False, "code": exc.public_code, "message": str(exc)}
     except TimeoutError:
         return {"ok": False, "code": "TIMEOUT", "message": "本次连通测试等待响应超时；模型冷启动或高强度思考可能需要更长时间"}
-    except Exception:
+    except Exception as exc:
+        # 只记录异常类型：原文可能含上游正文或密钥。
+        logger.warning("模型连通测试失败 type=%s", type(exc).__name__)
         return {"ok": False, "code": "UPSTREAM", "message": "本次模型探测未完成，请检查配置或稍后重试"}
     finally:
         # 提前收到输出也必须关闭异步生成器，触发适配器 finally 释放 HTTP 流。
@@ -36,8 +41,8 @@ async def _check_model_connection(config: ModelConfig) -> dict:
             if resource is not None:
                 try:
                     await asyncio.wait_for(close(resource), timeout=1.0)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("连通测试资源释放失败 type=%s", type(exc).__name__)
 
 
 def check_model_connection(config: ModelConfig) -> dict:

@@ -384,7 +384,7 @@ import DatasetListFooter from '../components/datasets/DatasetListFooter.vue'
 import DatasetMetricsStrip from '../components/datasets/DatasetMetricsStrip.vue'
 import DatasetAiGenDrawer from '../components/datasets/DatasetAiGenDrawer.vue'
 import DatasetRowView from '../components/datasets/DatasetRow.vue'
-import { escapeHtml, escapeRegex, renderIcon } from '../utils/render'
+import { highlightText, renderIcon } from '../utils/render'
 
 interface EditableDatasetRow {
   row_no: number
@@ -590,10 +590,7 @@ function checkAllDisplayedRows() {
 
 // 关键词高亮
 function highlightMatch(text: string): string {
-  const q = gridSearch.value.trim()
-  if (!q || !text) return escapeHtml(text)
-  const regex = new RegExp(`(${escapeRegex(q)})`, 'gi')
-  return escapeHtml(text).replace(regex, '<mark class="highlight-match">$1</mark>')
+  return highlightText(text, gridSearch.value)
 }
 
 // ─── 键盘流网格导航 (Keyboard Flow) ───

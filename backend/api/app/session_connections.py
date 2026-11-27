@@ -8,11 +8,14 @@ Worker 产生的持久化事件仍通过 ``ws_events`` 轮询转发；本模块�
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import WebSocket
+
+logger = logging.getLogger("ai-eval.session-connections")
 
 
 @dataclass
@@ -174,8 +177,9 @@ class SessionConnectionHub:
             try:
                 async with row.state.lock:
                     await row.websocket.close(code=4404)
-            except Exception:
-                pass
+            except Exception as exc:
+                # 对端可能已断开，关闭失败属预期；仍记录类型便于排查连接泄漏。
+                logger.debug("关闭会话连接失败 type=%s", type(exc).__name__)
             finally:
                 self.unregister(row.session_id, row.connection_id)
 

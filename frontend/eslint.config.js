@@ -44,8 +44,9 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'warn',
       // 单文件组件命名沿用现状（页面级组件非多词命名是项目既有约定）
       'vue/multi-word-component-names': 'off',
-      // 模板中允许 v-html（Markdown 渲染等场景已在组件内自行消毒）
-      'vue/no-v-html': 'off',
+      // v-html 默认禁止：确需使用时须先转义/经 utils/sanitizeHtml 消毒，并逐行
+      // `eslint-disable-next-line vue/no-v-html -- 原因` 说明为何安全。
+      'vue/no-v-html': 'error',
       // 存量确认卡通过 prop 对象直接编辑表单（ConfirmCard 等）：降为告警，
       // 组件重构（本地副本 + emit）留待前端结构治理批次处理
       'vue/no-mutating-props': 'warn',
