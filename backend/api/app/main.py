@@ -53,6 +53,7 @@ from .routers import (
     ws_v2,
 )
 from .security import hash_password, verify_password
+from .security_headers import SecurityHeadersMiddleware
 from .seed import bootstrap_preview_data
 from .startup_security import (
     bootstrap_admin_finding,
@@ -267,6 +268,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# 加在 CORS 之后，成为最外层：能看见路由已经设置的 CSP，不会把附件的 sandbox 冲掉。
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(auth.router)
 app.include_router(users.router)

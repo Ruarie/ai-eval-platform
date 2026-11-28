@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import or_
+from sqlalchemy import String, cast, or_
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -171,10 +171,16 @@ def _require_file_access(db: Session, user: User, stored: StoredFile | None) -> 
         raise AppError(ErrorCode.NOT_FOUND, "文件不存在")
     if stored.uploaded_by == user.id:
         return
-    # 同时兼容旧字符串引用和 AttachmentView 对象引用，仅遍历可见会话消息。
-    refs = db.query(Message.attachments).join(AgentSession, AgentSession.id == Message.session_id).filter(
-        AgentSession.deleted_at.is_(None),
-        or_(AgentSession.user_id == user.id, AgentSession.visibility == "team"),
+    # 先在数据库里按文件 ID 收窄，再做精确比对。否则每次下载都要把可见会话的
+    # 全部附件 JSON 拉进进程。字符串引用和 {file_id} 对象引用都含这段 ID。
+    refs = (
+        db.query(Message.attachments)
+        .join(AgentSession, AgentSession.id == Message.session_id)
+        .filter(
+            AgentSession.deleted_at.is_(None),
+            or_(AgentSession.user_id == user.id, AgentSession.visibility == "team"),
+            cast(Message.attachments, String).contains(stored.id),
+        )
     )
     for (attachments,) in refs:
         if any((item if isinstance(item, str) else item.get("file_id") if isinstance(item, dict) else None) == stored.id for item in attachments or []):
