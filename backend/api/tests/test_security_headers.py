@@ -15,7 +15,14 @@ def _app() -> Starlette:
     async def sandboxed(_request):
         return PlainTextResponse("file", headers={"Content-Security-Policy": "sandbox"})
 
-    app = Starlette(routes=[Route("/plain", plain), Route("/file", sandboxed)])
+    async def write(_request):
+        return PlainTextResponse("saved")
+
+    app = Starlette(routes=[
+        Route("/plain", plain),
+        Route("/file", sandboxed),
+        Route("/write", write, methods=["POST"]),
+    ])
     app.add_middleware(SecurityHeadersMiddleware)
     return app
 
@@ -31,3 +38,20 @@ def test_existing_sandbox_csp_is_kept():
     response = TestClient(_app()).get("/file")
     assert response.headers["content-security-policy"] == "sandbox"
     assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_write_without_origin_and_same_host_are_allowed():
+    client = TestClient(_app())
+    assert client.post("/write").status_code == 200
+    assert client.post("/write", headers={"Origin": "http://testserver"}).status_code == 200
+    # 8443 的 Origin 带端口，反代 Host 不带端口，仍应视为本站。
+    assert client.post("/write", headers={"Origin": "http://testserver:8443"}).status_code == 200
+
+
+def test_cross_site_write_is_rejected():
+    response = TestClient(_app()).post("/write", headers={"Origin": "https://evil.example"})
+    assert response.status_code == 403
+    assert response.json()["code"] == "UNAUTHORIZED"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    # 读请求不拦截，避免健康检查和普通链接被 Origin 误伤。
+    assert TestClient(_app()).get("/plain", headers={"Origin": "https://evil.example"}).status_code == 200
