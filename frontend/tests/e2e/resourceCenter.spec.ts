@@ -233,6 +233,27 @@ test('资源广场：精选卡与三榜渲染，飙升榜空态给出口径说�
   await expect(page.locator('.pl-board').nth(1)).toContainText('近 7 天还没有新的使用记录')
 })
 
+test('320px 资源网格不横溢，广场精选和榜单可用键盘导航', async ({ page }) => {
+  await mockApis(page, { items: [makeRes()], creates: [], uses: [], clones: [] })
+  await page.setViewportSize({ width: 320, height: 740 })
+  await page.goto('/plaza')
+  const featured = page.locator('.pl-featured').getByRole('link', { name: '日志分析助手' })
+  await expect(featured).toBeVisible()
+  expect(await page.locator('.content').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+
+  await featured.focus()
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/\/agents$/)
+  await expect(page.locator('.rc-card')).toBeVisible()
+  expect(await page.locator('.content').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+
+  await page.goBack()
+  const ranked = page.locator('.pl-board').first().getByRole('link', { name: '日志分析助手' })
+  await ranked.focus()
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/\/agents$/)
+})
+
 
 test('RAG 中心：绑定知识库并可用固化口径试检索', async ({ page }) => {
   const store = { items: [] as Res[], creates: [] as unknown[], uses: [] as string[], clones: [] as string[] }

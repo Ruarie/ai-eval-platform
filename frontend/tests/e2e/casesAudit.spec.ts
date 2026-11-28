@@ -675,6 +675,7 @@ test('窄屏仍可操作保存、确认及候选审核抽屉', async ({ page }) 
     expect(box).not.toBeNull()
     expect(box!.x + box!.width).toBeLessThanOrEqual(390)
   }
+  await page.getByRole('button', { name: '用例集列表' }).click()
   await generateCandidate(page)
   const apply = page.getByRole('button', { name: '采纳并保存候选 (1 条)' })
   await apply.scrollIntoViewIfNeeded()

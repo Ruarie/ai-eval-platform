@@ -6,6 +6,7 @@ import { useThemeStore } from './stores/theme'
 import './styles/tokens.css'
 import './styles/base.css'
 import './styles/components/skeleton.css'
+import './styles/components/workbench.css'
 
 // 构建信息：由 vite.config.js 在构建时注入
 // 北京时间：强制用 Asia/Shanghai 时区，不依赖浏览器本地时区

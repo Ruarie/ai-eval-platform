@@ -1,57 +1,53 @@
 <template>
-  <div class="aa-page">
-    <header class="aa-head">
-      <div>
-        <div class="eyebrow">管理后台</div>
-        <h1>审计日志</h1>
-        <p>写操作全量留痕：新建、编辑、删除、远程执行、账号与协议档变更。只读，不可修改。</p>
-      </div>
-      <div class="aa-head-actions">
-        <n-button :disabled="loading" @click="reload">刷新</n-button>
-      </div>
+  <div class="workbench-page">
+    <header class="workbench-intro">
+      <p>按时间、动作或对象 ID 查询平台的操作记录。</p>
+      <n-button :disabled="loading" @click="reload">刷新</n-button>
     </header>
 
-    <section class="aa-toolbar">
+    <section class="aa-toolbar workbench-filters" aria-label="审计日志筛选">
       <n-date-picker
         v-model:value="range"
+        class="workbench-filter workbench-filter-wide"
         type="daterange"
         clearable
         size="medium"
         start-placeholder="开始日期"
         end-placeholder="结束日期"
-        style="width: 260px"
       />
-      <n-select v-model:value="action" :options="actionOptions" clearable placeholder="全部动作" style="width: 200px" filterable @update:value="reload" />
-      <n-input v-model:value="keyword" clearable placeholder="筛选对象 ID" style="width: 200px" @keyup.enter="reload" />
+      <n-select v-model:value="action" class="workbench-filter" :options="actionOptions" clearable placeholder="全部动作" :input-props="{ 'aria-label': '筛选动作' }" filterable @update:value="reload" />
+      <n-input v-model:value="keyword" class="workbench-filter" clearable placeholder="筛选对象 ID" :input-props="{ 'aria-label': '筛选对象 ID' }" @keyup.enter="reload" />
       <n-button :loading="loading" @click="reload">查询</n-button>
-      <span class="aa-total">共 {{ total }} 条</span>
+      <span class="aa-total workbench-count">共 {{ total }} 条</span>
     </section>
 
     <n-alert v-if="error" type="error" :show-icon="false">{{ error }}</n-alert>
 
     <n-spin :show="loading">
-      <div v-if="rows.length" class="aa-table-wrap">
-        <table class="aa-table">
-          <thead>
-            <tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>IP</th><th>明细</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in rows" :key="row.id">
-              <td class="aa-time">{{ fmt(row.at) }}</td>
-              <td class="aa-actor">{{ actorName(row) }}</td>
-              <td><code>{{ row.action }}</code></td>
-              <td class="aa-target">
-                <span v-if="row.target">{{ row.target.type || '—' }}<template v-if="row.target.id"> · {{ row.target.id.slice(0, 8) }}</template></span>
-                <span v-else>—</span>
-              </td>
-              <td class="aa-ip">{{ row.ip || '—' }}</td>
-              <td class="aa-detail" :title="detailText(row)">{{ detailText(row) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="aa-more">
+      <div v-if="rows.length" class="workbench-table-panel">
+        <div class="workbench-table-scroll" role="region" aria-label="审计日志表格" tabindex="0">
+          <table class="aa-table ds-table">
+            <thead>
+              <tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>IP</th><th>明细</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in rows" :key="row.id">
+                <td class="aa-time">{{ fmt(row.at) }}</td>
+                <td class="aa-actor">{{ actorName(row) }}</td>
+                <td class="aa-action"><span>{{ auditActionLabel(row.action) }}</span><code>{{ row.action }}</code></td>
+                <td class="aa-target">
+                  <span v-if="row.target">{{ row.target.type || '—' }}<template v-if="row.target.id"> · {{ row.target.id.slice(0, 8) }}</template></span>
+                  <span v-else>—</span>
+                </td>
+                <td class="aa-ip">{{ row.ip || '—' }}</td>
+                <td class="aa-detail">{{ detailText(row) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="aa-more workbench-table-footer">
           <n-button v-if="hasMore" size="small" :loading="loading" @click="loadMore">加载更多</n-button>
-          <span v-else-if="total > rows.length" class="aa-cap">
+          <span v-else-if="total > rows.length">
             已显示最近 {{ rows.length }} 条（共 {{ total }} 条），更早的记录请缩小时间范围
           </span>
           <span v-else>已到末尾</span>
@@ -163,24 +159,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.aa-page { display: flex; flex-direction: column; gap: 14px; }
-.aa-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-.eyebrow { font-size: 12px; letter-spacing: .12em; color: var(--text-tertiary); text-transform: uppercase; }
-.aa-head h1 { margin: 4px 0; font-size: 22px; }
-.aa-head p { margin: 0; color: var(--text-secondary); font-size: 13.5px; }
-
-.aa-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.aa-total { font-size: 12px; color: var(--text-tertiary); margin-left: auto; }
-
-.aa-table-wrap { border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-card); overflow: hidden; }
-.aa-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.aa-table th { text-align: left; padding: 10px 12px; font-size: 11.5px; color: var(--text-tertiary); background: var(--bg-elevated); font-weight: 600; }
-.aa-table td { padding: 9px 12px; border-top: 1px solid var(--border-subtle); }
-.aa-table code { font-size: 11.5px; }
+.aa-table { min-width: 40rem; font-size: 13px; }
 .aa-time { white-space: nowrap; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-.aa-actor { white-space: nowrap; }
-.aa-target, .aa-ip { color: var(--text-tertiary); font-size: 11.5px; }
-.aa-detail { color: var(--text-tertiary); font-size: 11.5px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.aa-more { padding: 12px; text-align: center; font-size: 12px; color: var(--text-tertiary); display: flex; gap: 10px; justify-content: center; align-items: center; }
-.aa-cap { color: var(--text-tertiary); }
+.aa-actor, .aa-target, .aa-action { overflow-wrap: anywhere; }
+.aa-action code { display: block; font: 11px/1.5 var(--font-mono); color: var(--text-secondary); }
+.aa-target, .aa-ip, .aa-detail { color: var(--text-secondary); }
+.aa-detail { max-width: 18rem; overflow-wrap: anywhere; }
 </style>

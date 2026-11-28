@@ -16,8 +16,8 @@
   --bg-elevated: #f4f8f8;
   --text-primary: #111827;
   --text-secondary: #4b5563;
-  /* 原 #9ca3af 在 #fff 上仅 2.5:1；提到 #6b7280 后 4.83:1 */
-  --text-tertiary: #6b7280;
+  /* 次级说明在白底和薄荷浅底上保持至少 4.5:1 的对比度。 */
+  --text-tertiary: #626b78;
   --border-subtle: #e5e7eb;
   --accent-ai: #1f5947;
   /* 语义色兼作文字/徽标颜色，取白底 ≥4.5:1 的深一档；需要亮绿填充时用 --t-* 或 --c-* */
@@ -26,7 +26,10 @@
   --accent-error: #dc2626;
   --accent-info: #3b82f6;
   --row-hover: rgba(17, 24, 39, 0.035);
-  --sidebar-bg: rgba(255, 255, 255, 0.55);
+  --sidebar-bg: #f3f7f5;
+  --scroll-thumb: #aab7b4;
+  --overlay: rgba(15, 23, 42, 0.42);
+  --shadow-dialog: 0 20px 48px rgba(17, 24, 39, 0.13), 0 4px 12px rgba(17, 24, 39, 0.06);
 
   /* ── 填充 / 边框 / 语义（补齐历史遗漏：曾有多处 var(--bg-card) 等
      未定义令牌，浅色回退 #fff 在深色下变成白底白字） ────────── */
@@ -85,9 +88,9 @@
   --radius-xl: 14px;
 
   /* ── 骨架（规范 §8.3） ────────────────────────────────── */
-  --sidebar-w: 260px;
-  --sidebar-w-fold: 72px;
-  --topbar-h: 64px;
+  --sidebar-w: 220px;
+  --sidebar-w-fold: 62px;
+  --topbar-h: 56px;
   --ease-shell: 0.28s cubic-bezier(0.4, 0, 0.2, 1);
   --focus-ring: 0 0 0 3px rgba(31, 89, 71, 0.16);
 }
@@ -124,7 +127,10 @@
   --accent-error: #f87171;
   --accent-info: #60a5fa;
   --row-hover: rgba(255, 255, 255, 0.04);
-  --sidebar-bg: rgba(11, 15, 25, 0.65);
+  --sidebar-bg: #101622;
+  --scroll-thumb: #65758a;
+  --overlay: rgba(6, 10, 18, 0.66);
+  --shadow-dialog: 0 20px 48px rgba(0, 0, 0, 0.38), 0 4px 12px rgba(0, 0, 0, 0.18);
   --focus-ring: 0 0 0 3px rgba(22, 151, 122, 0.25);
 
   --t-agent: rgba(22, 151, 122, 0.2);     --c-agent: #34d399;

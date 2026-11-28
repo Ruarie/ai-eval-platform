@@ -8,6 +8,8 @@ import { useAuthStore } from '../stores/auth'
 declare module 'vue-router' {
   interface RouteMeta {
     title?: string
+    /** 页面没有独立标题时，由顶栏提供主标题。 */
+    titleInTopbar?: boolean
     public?: boolean
     /** 能力中心复用同一组件，用 kind 区分 Agent / Skill / Script / Rule。 */
     resourceKind?: 'agent' | 'skill' | 'script' | 'rule' | 'rag'
@@ -38,12 +40,12 @@ const routes: RouteRecordRaw[] = [
       { path: 'notifications', component: () => import('../views/NotificationCenter.vue'), meta: { title: '通知中心' } },
       { path: 'usage', component: () => import('../views/UsageCenter.vue'), meta: { title: '用量中心' } },
       // 能力中心：四类资源共用 ResourceCenter，按 meta.resourceKind 区分。
-      { path: 'plaza', component: () => import('../views/ResourcePlaza.vue'), meta: { title: '资源广场' } },
-      { path: 'agents', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Agent 中心', resourceKind: 'agent' } },
-      { path: 'skills', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Skills 中心', resourceKind: 'skill' } },
-      { path: 'scripts', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Script 中心', resourceKind: 'script' } },
-      { path: 'rules', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Rules 中心', resourceKind: 'rule' } },
-      { path: 'rag', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'RAG 中心', resourceKind: 'rag' } },
+      { path: 'plaza', component: () => import('../views/ResourcePlaza.vue'), meta: { title: '资源广场', titleInTopbar: true } },
+      { path: 'agents', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Agent 中心', titleInTopbar: true, resourceKind: 'agent' } },
+      { path: 'skills', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Skills 中心', titleInTopbar: true, resourceKind: 'skill' } },
+      { path: 'scripts', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Script 中心', titleInTopbar: true, resourceKind: 'script' } },
+      { path: 'rules', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'Rules 中心', titleInTopbar: true, resourceKind: 'rule' } },
+      { path: 'rag', component: () => import('../views/ResourceCenter.vue'), meta: { title: 'RAG 中心', titleInTopbar: true, resourceKind: 'rag' } },
       { path: 'mcp', component: () => import('../views/McpCenter.vue'), meta: { title: 'MCP 中心' } },
       // benchmark / RAG 已停止新建，页面文案统一为「历史」；标题只在本表维护。
       { path: 'reports', component: () => import('../views/Report.vue'), meta: { title: '历史报告' } },
@@ -58,8 +60,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'my-models', component: () => import('../views/MyModels.vue'), meta: { title: '我的模型' } },
       // 管理后台：概览聚合、审计查询、资源治理；账号与协议档沿用既有页面。
       { path: 'admin', component: () => import('../views/AdminOverview.vue'), meta: { title: '平台概览', adminOnly: true } },
-      { path: 'admin/audit', component: () => import('../views/AdminAudit.vue'), meta: { title: '审计日志', adminOnly: true } },
-      { path: 'admin/resources', component: () => import('../views/AdminResources.vue'), meta: { title: '资源治理', adminOnly: true } },
+      { path: 'admin/audit', component: () => import('../views/AdminAudit.vue'), meta: { title: '审计日志', titleInTopbar: true, adminOnly: true } },
+      { path: 'admin/resources', component: () => import('../views/AdminResources.vue'), meta: { title: '资源治理', titleInTopbar: true, adminOnly: true } },
       { path: 'admin/profiles', component: () => import('../views/AdminProfiles.vue'), meta: { title: '模型管理', adminOnly: true } },
       { path: 'admin/users', component: () => import('../views/AdminUsers.vue'), meta: { title: '账号', adminOnly: true } },
       // 兜底放在布局内：未知地址不再白屏，且保留侧边导航便于回到正常页面。

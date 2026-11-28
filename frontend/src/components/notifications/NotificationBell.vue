@@ -306,7 +306,7 @@ onBeforeUnmount(() => {
 @media (max-width: 700px) {
   .notif-panel {
     position: fixed;
-    top: 58px;
+    top: calc(var(--topbar-h) + 4px);
     left: 12px;
     right: 12px;
     width: auto;

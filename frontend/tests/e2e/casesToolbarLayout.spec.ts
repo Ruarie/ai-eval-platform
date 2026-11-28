@@ -120,6 +120,57 @@ test('已入库用例集展示只读提示，不再提示可编辑', async ({ pa
   await expect(page.locator('table textarea')).toHaveCount(0)
 })
 
+test('320px 工作台可切换用例集，表格可横向滚动且分页可操作', async ({ page }) => {
+  await setup(page)
+  await page.setViewportSize({ width: 320, height: 640 })
+  await page.route('**/api/case-sets/gen-1', route => route.fulfill({
+    json: { ...generatedSet, cases: Array.from({ length: 36 }, (_, i) => row(`r-${i}`, `TC-${i + 1}`)) },
+  }))
+  await page.goto('/cases?set_id=gen-1')
+  await expect(page.locator('.main-dataset-title')).toHaveText(generatedSet.name)
+  await expectWritable(page)
+
+  const treeToggle = page.getByRole('button', { name: '用例集列表' })
+  await expect(treeToggle).toHaveAttribute('aria-expanded', 'false')
+  await treeToggle.press('Enter')
+  await expect(treeToggle).toHaveAttribute('aria-expanded', 'true')
+  const setActions = page.getByRole('button', { name: `${generatedSet.name}的用例集操作` })
+  await setActions.press('Enter')
+  await expect(page.getByText('重命名', { exact: true })).toBeVisible()
+  await setActions.press('Escape')
+  await expect(setActions).toHaveAttribute('aria-expanded', 'false')
+  await page.getByRole('button', { name: `${confirmedSet.name} 已入库`, exact: true }).press('Enter')
+  await expect(page.locator('.main-dataset-title')).toHaveText(confirmedSet.name)
+  await expect(treeToggle).toBeFocused()
+  await expect(treeToggle).toHaveAttribute('aria-expanded', 'false')
+
+  await treeToggle.click()
+  await page.getByRole('button', { name: /^支付链路草稿用例集 草稿/ }).click()
+  const table = page.getByRole('region', { name: '测试用例表格' })
+  await expect(table.locator('tbody tr').first()).toContainText('TC-1')
+  const offsets = await table.evaluate(el => {
+    el.scrollLeft = el.scrollWidth
+    el.scrollTop = el.scrollHeight
+    return { left: el.scrollLeft, top: el.scrollTop }
+  })
+  expect(offsets.left).toBeGreaterThan(500)
+  expect(offsets.top).toBeGreaterThan(50)
+
+  const pagination = page.locator('.table-pagination-bar')
+  await pagination.scrollIntoViewIfNeeded()
+  const bounds = await pagination.locator('.pagination-controls').evaluate(el => ({
+    right: el.getBoundingClientRect().right,
+    childRight: Math.max(...[...el.querySelectorAll('.n-pagination > *')].map(child => child.getBoundingClientRect().right)),
+  }))
+  expect(bounds.right).toBeLessThanOrEqual(320)
+  expect(bounds.childRight).toBeLessThanOrEqual(bounds.right + 1)
+  await expect(pagination.locator('.pagination-pages')).toContainText('第 1 / 2 页')
+  await pagination.getByText('2', { exact: true }).click()
+  await expect(pagination.locator('.pagination-pages')).toContainText('第 2 / 2 页')
+  await expect(table.locator('tbody tr').first()).toContainText('TC-21')
+  expect(await table.evaluate(el => el.scrollTop)).toBe(0)
+})
+
 test('全局搜索面板在失焦后仍可用 Esc 关闭', async ({ page }) => {
   await setup(page)
   await page.setViewportSize({ width: 1440, height: 900 })

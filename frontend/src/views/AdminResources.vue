@@ -1,53 +1,55 @@
 <template>
-  <div class="ar-page">
-    <header class="ar-head">
-      <div>
-        <div class="eyebrow">管理后台</div>
-        <h1>资源治理</h1>
-        <p>能力中心全部资源（含他人私有）；可调整可见性或下架不合规内容，改动会写入审计。</p>
-      </div>
-      <div class="ar-head-actions"><n-button :disabled="loading" @click="reload">刷新</n-button></div>
+  <div class="workbench-page">
+    <header class="workbench-intro">
+      <p>管理能力中心资源的可见性与下架，变更会写入审计日志。</p>
+      <n-button :disabled="loading" @click="reload">刷新</n-button>
     </header>
 
-    <section class="ar-toolbar">
-      <n-input v-model:value="keyword" clearable placeholder="搜索名称或描述" style="width: 240px" @keyup.enter="reload" />
-      <n-select v-model:value="kind" :options="kindOptions" clearable placeholder="全部类型" style="width: 150px" @update:value="reload" />
-      <n-select v-model:value="visibility" :options="visibilityOptions" clearable placeholder="全部可见性" style="width: 150px" @update:value="reload" />
+    <section class="workbench-filters" aria-label="资源治理筛选">
+      <n-input v-model:value="keyword" class="workbench-filter workbench-filter-wide" clearable placeholder="搜索名称或描述" :input-props="{ 'aria-label': '搜索名称或描述' }" @keyup.enter="reload" />
+      <n-select v-model:value="kind" class="workbench-filter" :options="kindOptions" clearable placeholder="全部类型" :input-props="{ 'aria-label': '筛选资源类型' }" @update:value="reload" />
+      <n-select v-model:value="visibility" class="workbench-filter" :options="visibilityOptions" clearable placeholder="全部可见性" :input-props="{ 'aria-label': '筛选可见性' }" @update:value="reload" />
       <n-button :loading="loading" @click="reload">查询</n-button>
-      <span class="ar-total">共 {{ total }} 个</span>
+      <span class="ar-total workbench-count">共 {{ total }} 个</span>
     </section>
 
     <n-alert v-if="error" type="error" :show-icon="false">{{ error }}</n-alert>
 
     <n-spin :show="loading">
-      <div v-if="rows.length" class="ar-table-wrap">
-        <table class="ar-table">
-          <thead>
-            <tr><th>名称</th><th>类型</th><th>可见性</th><th>创建人</th><th>使用</th><th>更新时间</th><th>操作</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in rows" :key="item.id">
-              <td class="ar-name">
-                <b>{{ item.name }}</b>
-                <small>{{ item.summary || '（无描述）' }}</small>
-              </td>
-              <td><span class="ar-tag" :style="kindStyle(item.kind)">{{ kindLabel(item.kind) }}</span></td>
-              <td>
-                <span class="ar-vis" :class="item.visibility">{{ item.visibility === 'team' ? '团队' : '私有' }}</span>
-              </td>
-              <td class="ar-owner">{{ item.owner_name || '—' }}</td>
-              <td class="ar-num">{{ item.usage_count }}</td>
-              <td class="ar-time">{{ fmt(item.updated_at) }}</td>
-              <td class="ar-actions">
-                <n-button size="tiny" :disabled="busy === item.id" @click="toggleVisibility(item)">
-                  {{ item.visibility === 'team' ? '转为私有' : '设为团队' }}
-                </n-button>
-                <n-button size="tiny" quaternary type="error" :disabled="busy === item.id" @click="remove(item)">下架删除</n-button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="ar-more">
+      <div v-if="rows.length" class="workbench-table-panel">
+        <div class="workbench-table-scroll" role="region" aria-label="资源治理表格" tabindex="0">
+          <table class="ar-table ds-table">
+            <thead>
+              <tr><th>名称</th><th>类型</th><th>可见性</th><th>创建人</th><th>使用</th><th>更新时间</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in rows" :key="item.id">
+                <td>
+                  <div class="ar-name">
+                    <b>{{ item.name }}</b>
+                    <small>{{ item.summary || '（无描述）' }}</small>
+                  </div>
+                </td>
+                <td><span class="ar-tag" :style="kindStyle(item.kind)">{{ kindLabel(item.kind) }}</span></td>
+                <td>
+                  <span class="ar-vis" :class="item.visibility">{{ item.visibility === 'team' ? '团队' : '私有' }}</span>
+                </td>
+                <td class="ar-owner">{{ item.owner_name || '—' }}</td>
+                <td class="ar-num">{{ item.usage_count }}</td>
+                <td class="ar-time">{{ fmt(item.updated_at) }}</td>
+                <td>
+                  <div class="ar-actions">
+                    <n-button size="tiny" :disabled="busy === item.id" @click="toggleVisibility(item)">
+                      {{ item.visibility === 'team' ? '转为私有' : '设为团队' }}
+                    </n-button>
+                    <n-button size="tiny" quaternary type="error" :disabled="busy === item.id" @click="remove(item)">下架删除</n-button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="workbench-table-footer">
           <n-button v-if="hasMore" size="small" :loading="loading" @click="loadMore">加载更多</n-button>
           <span v-else>已到末尾</span>
         </div>
@@ -177,28 +179,15 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.ar-page { display: flex; flex-direction: column; gap: 14px; }
-.ar-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-.eyebrow { font-size: 12px; letter-spacing: .12em; color: var(--text-tertiary); text-transform: uppercase; }
-.ar-head h1 { margin: 4px 0; font-size: 22px; }
-.ar-head p { margin: 0; color: var(--text-secondary); font-size: 13.5px; }
-
-.ar-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.ar-total { font-size: 12px; color: var(--text-tertiary); margin-left: auto; }
-.ar-more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-tertiary); }
-
-.ar-table-wrap { border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-card); overflow: hidden; }
-.ar-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.ar-table th { text-align: left; padding: 10px 12px; font-size: 11.5px; color: var(--text-tertiary); background: var(--bg-elevated); font-weight: 600; white-space: nowrap; }
-.ar-table td { padding: 9px 12px; border-top: 1px solid var(--border-subtle); vertical-align: middle; }
-.ar-name { display: flex; flex-direction: column; gap: 2px; min-width: 220px; }
-.ar-name b { font-size: 13px; font-weight: 600; }
-.ar-name small { font-size: 11.5px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; }
+.ar-table { min-width: 47rem; font-size: 13px; }
+.ar-name { display: grid; gap: 2px; min-width: 11rem; max-width: 21rem; overflow-wrap: anywhere; }
+.ar-name b { font-weight: 600; }
+.ar-name small { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ar-tag { font-size: 11px; padding: 2px 7px; border-radius: 6px; }
 .ar-vis { font-size: 11px; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--border-subtle); color: var(--text-secondary); }
 .ar-vis.private { border-style: dashed; }
-.ar-owner { color: var(--text-secondary); white-space: nowrap; }
-.ar-num, .ar-time { color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ar-owner { color: var(--text-secondary); overflow-wrap: anywhere; }
+.ar-num, .ar-time { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ar-actions { display: flex; gap: 6px; white-space: nowrap; }
-.ar-note { margin: 0; font-size: 11.5px; color: var(--text-tertiary); }
+.ar-note { font-size: 12px; color: var(--text-secondary); }
 </style>

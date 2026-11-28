@@ -168,3 +168,24 @@ test('资源治理：切换可见性与下架删除', async ({ page }) => {
   await expect(page.locator('.ar-table tbody tr')).toHaveCount(1)
   expect(store.deletes).toHaveLength(1)
 })
+
+test('320px 管理台表格可用键盘横滚，筛选栏留在内容区内', async ({ page }) => {
+  await mockAdmin(page, { rows: [RES()], patches: [], deletes: [] })
+  await page.setViewportSize({ width: 320, height: 740 })
+
+  for (const [path, label] of [
+    ['/admin/audit', '审计日志表格'],
+    ['/admin/resources', '资源治理表格'],
+  ]) {
+    await page.goto(path)
+    const table = page.getByRole('region', { name: label })
+    await expect(table).toBeVisible()
+    await table.focus()
+    await expect(table).toBeFocused()
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => table.evaluate(el => el.scrollLeft)).toBeGreaterThan(0)
+
+    const over = await page.locator('.content').evaluate(el => el.scrollWidth - el.clientWidth)
+    expect(over).toBeLessThanOrEqual(1)
+  }
+})

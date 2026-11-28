@@ -1,0 +1,107 @@
+.workbench-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.workbench-intro {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+}
+
+.workbench-intro > p {
+  flex: 1 1 20rem;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.workbench-actions,
+.workbench-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.workbench-filters {
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+}
+
+.workbench-filters > .workbench-filter {
+  flex: 0 1 9rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.workbench-filters > .workbench-filter-wide {
+  flex-basis: 16rem;
+}
+
+.workbench-count {
+  margin-inline-start: auto;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.workbench-table-panel {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+}
+
+.workbench-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-tertiary) transparent;
+}
+
+.workbench-table-scroll:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.workbench-table-scroll > .ds-table th {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.workbench-table-scroll > .ds-table th,
+.workbench-table-scroll > .ds-table td {
+  padding: var(--space-2) var(--space-3);
+}
+
+.workbench-table-scroll > .ds-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.workbench-table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .workbench-filters > .workbench-filter {
+    flex: 1 1 7rem;
+  }
+
+  .workbench-filters > .workbench-filter-wide {
+    flex-basis: 100%;
+  }
+}

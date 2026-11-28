@@ -1,37 +1,34 @@
 <template>
   <div class="loop-workspace">
-    <div class="loop-tabs">
-      <button class="workspace-tab" :class="{active:tab==='chat'}" @click="tab='chat'">对话</button>
-      <button class="workspace-tab" :class="{active:tab==='trace'}" :disabled="!state" @click="tab='trace'">轨迹 <small v-if="state?.cursor" class="trace-tab-count">{{ state.cursor }}</small></button>
-      <div class="loop-tabs-actions">
-        <span v-if="sessionId" class="loop-status">
-          <i :class="{running:busy}"/>{{ status }}
-        </span>
-        <button class="loop-runtime-btn" type="button" @click="runtimeOpen=!runtimeOpen">运行信息</button>
+    <header class="loop-toolbar">
+      <div class="loop-session-heading"><slot name="session-heading" /></div>
+      <div class="loop-tabs">
+        <div class="workspace-tab-group" role="group" aria-label="会话视图">
+          <button class="workspace-tab" type="button" :class="{active:tab==='chat'}" :aria-pressed="tab==='chat'" @click="tab='chat'">对话</button>
+          <button class="workspace-tab" type="button" :class="{active:tab==='trace'}" :aria-pressed="tab==='trace'" :disabled="!state" @click="tab='trace'">
+            轨迹 <small v-if="state?.cursor" class="trace-tab-count" aria-hidden="true">{{ state.cursor }}</small>
+          </button>
+        </div>
+        <div class="loop-tabs-actions">
+          <slot name="session-actions" />
+          <span v-if="sessionId" class="loop-status" role="status">
+            <i :class="{running:busy}" aria-hidden="true" />{{ status }}
+          </span>
+          <button ref="runtimeButton" class="loop-runtime-btn" type="button" :aria-expanded="runtimeOpen" aria-controls="agent-runtime-panel" @click="toggleRuntime">运行信息</button>
+        </div>
       </div>
-    </div>
+    </header>
     <p v-if="connectionState && connectionState.connection !== 'online'" class="loop-notice" role="status">{{ connectionState.connection === 'connecting' ? '正在同步会话…' : '连接中断，状态待同步。' }}<button @click="store.clients.get(sessionId)?.connect()">重新连接</button></p>
     <p v-if="connectionState?.error || error" class="loop-notice error" role="alert">{{ connectionState?.error || error }}</p>
     <CollaborationPanel v-if="sessionId" :session-id="sessionId" :can-control="canControl" />
     <div class="loop-content">
-      <div class="loop-center">
-        <section v-if="tab==='chat'" ref="chatShell" class="loop-chat-shell" :class="{ 'is-resizing': isResizing, 'is-empty': !rows.length, 'has-interaction': !!activeInteractionDrawer }" :style="chatShellStyle" aria-label="对话内容区域">
-          <!-- 空状态：输入框上方水平居中展示 Logo + 名字及产品标语 -->
-          <div v-if="!rows.length" class="loop-empty-hero">
-            <div class="hero-brand">
-              <div class="hero-logo-mark" aria-hidden="true">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 3L4 20H8.5L10.2 15.5H13.8L15.5 20H20L12 3ZM11.1 11.8L12 7.2L12.9 11.8H11.1Z" fill="#ffffff" />
-                </svg>
-              </div>
-              <div class="hero-brand-name-wrap">
-                <span class="hero-brand-name">AI Eval</span>
-                <span class="hero-brand-badge">AGENT LOOP</span>
-              </div>
-            </div>
-            <h1 class="hero-tagline">从一个目标开始，让每一步都有依据。</h1>
-            <p class="hero-subline">在工作区处理文件、查找资料，或生成测试用例。</p>
+      <div ref="chatCenter" class="loop-center">
+        <section v-if="tab==='chat'" ref="chatShell" class="loop-chat-shell" :class="{ 'is-resizing': isResizing, 'is-empty': !rows.length, 'has-interaction': !!activeInteractionDrawer }" :style="chatShellStyle" aria-label="对话内容区域" :aria-busy="restoringConversation">
+          <div v-if="showEmptyPrompts" class="loop-empty-hero">
+            <h1 class="hero-tagline">准备测试什么？</h1>
+            <p class="hero-subline">描述测试目标，或上传需求文档让 Agent 起草用例。</p>
           </div>
+          <p v-else-if="restoringConversation" class="loop-loading" role="status">正在读取会话记录…</p>
 
           <!-- 对话消息滚动区：有消息时正常滚动展示；空状态隐藏以保持居中 -->
           <div ref="scroller" class="loop-conversation" :class="{ 'is-empty': !rows.length }" role="log" aria-label="对话消息" @scroll="trackScroll">
@@ -133,6 +130,7 @@
           <p v-if="!busy && state?.phase && ['max_tokens','max_steps','cancelled','service_restart','interrupted','error'].includes(state.phase)" class="loop-notice">{{ finishLabels[state.phase] }}</p>
           </div>
           <div class="loop-composer-wrap">
+            <button v-if="!atBottom && !activeInteractionDrawer" class="jump-bottom" type="button" @click="scrollBottom">↓ 回到最新</button>
             <div class="composer-top-bar" :style="workspacePopoverOpen ? { marginBottom: `${workspacePopoverSpace}px` } : undefined">
               <n-popover
                 ref="workspacePopoverRef"
@@ -280,33 +278,72 @@
             </div>
           </div>
           <!-- 空状态时的提示词卡片（位于输入框下方，点击填充草稿） -->
-          <div v-if="!rows.length" class="loop-empty-prompts">
+          <div v-if="showEmptyPrompts" class="loop-empty-prompts" role="group" aria-label="常用任务">
             <button
               v-for="prompt in prompts"
-              :key="prompt"
+              :key="prompt.label"
               class="empty-prompt-card"
               type="button"
-              @click="fill(prompt)"
+              @click="fill(prompt.content)"
             >
-              <span class="prompt-text">{{ prompt }}</span>
-              <span class="prompt-arrow">↗</span>
+              <span class="prompt-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+                  <path :d="prompt.icon" />
+                </svg>
+              </span>
+              <span class="prompt-text">
+                <strong>{{ prompt.label }}</strong>
+                <span>{{ prompt.description }}</span>
+              </span>
+              <svg class="prompt-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14m-5-5 5 5-5 5" />
+              </svg>
             </button>
           </div>
-          <div class="loop-width-edge loop-width-edge-left" @pointerenter="previewContentResize('left', $event)" @pointermove="moveContentResizePreview('left', $event)" @pointerleave="hideContentResizePreview('left')">
+          <div v-if="canResizeChat" class="loop-width-edge loop-width-edge-left" @pointerenter="previewContentResize('left', $event)" @pointermove="moveContentResizePreview('left', $event)" @pointerleave="hideContentResizePreview('left')">
             <button class="loop-width-handle" :class="{ 'is-visible': hoverResizeEdge === 'left' || (isResizing && resizeEdge === 'left'), 'is-active': isResizing && resizeEdge === 'left' }" :style="resizeHandleStyle('left')" type="button" aria-label="向左拖拽调整对话内容宽度" aria-orientation="vertical" role="separator" :aria-valuemin="minimumChatWidth" :aria-valuemax="maximumChatWidth" :aria-valuenow="Math.round(renderedChatWidth)" @pointerdown="beginContentResize($event, 'left')" @keydown="adjustContentWidthByKey($event, 'left')">
               <span aria-hidden="true"></span>
             </button>
           </div>
-          <div class="loop-width-edge loop-width-edge-right" @pointerenter="previewContentResize('right', $event)" @pointermove="moveContentResizePreview('right', $event)" @pointerleave="hideContentResizePreview('right')">
+          <div v-if="canResizeChat" class="loop-width-edge loop-width-edge-right" @pointerenter="previewContentResize('right', $event)" @pointermove="moveContentResizePreview('right', $event)" @pointerleave="hideContentResizePreview('right')">
             <button class="loop-width-handle" :class="{ 'is-visible': hoverResizeEdge === 'right' || (isResizing && resizeEdge === 'right'), 'is-active': isResizing && resizeEdge === 'right' }" :style="resizeHandleStyle('right')" type="button" aria-label="向右拖拽调整对话内容宽度" aria-orientation="vertical" role="separator" :aria-valuemin="minimumChatWidth" :aria-valuemax="maximumChatWidth" :aria-valuenow="Math.round(renderedChatWidth)" @pointerdown="beginContentResize($event, 'right')" @keydown="adjustContentWidthByKey($event, 'right')">
               <span aria-hidden="true"></span>
             </button>
           </div>
         </section>
         <TraceWorkspace v-else-if="state && trace" :state="state" :trace="trace"/>
-        <button v-if="!atBottom && tab==='chat'" class="jump-bottom" @click="scrollBottom">↓ 回到最新</button>
       </div>
-      <aside v-if="runtimeOpen" class="loop-runtime"><button class="runtime-close" @click="runtimeOpen=false">关闭</button><h3>当前运行</h3><p>{{ status }}</p><dl><dt>会话</dt><dd>{{ sessionId || '未发送的草稿' }}</dd><dt>实际模型</dt><dd>{{ summary?.model || '尚无实际请求' }}</dd><dt>思考档位</dt><dd>{{ summary?.reasoning_effort || '未知' }}</dd><dt>协议档版本</dt><dd>{{ summary?.profile_version || '未知' }}</dd><dt>最近活动</dt><dd v-for="event in state?.facts.slice(-5) || []" :key="event.cursor">{{ event.type }}</dd></dl><h4 v-if="tasks.length">Worker 任务</h4><div v-for="task in tasks" :key="task.key"><router-link :to="'/tasks'">{{ task.key }}</router-link><p>{{ task.status || '等待状态' }}</p><p v-if="task.progress">{{ JSON.stringify(task.progress) }}</p><router-link v-if="task.report_id" :to="`/reports/${task.report_id}`">查看报告</router-link></div><p v-for="execution in quarantined" :key="execution.key" class="loop-notice">执行范围受限 · {{ execution.reason || '等待对账' }}</p></aside>
+      <aside v-if="runtimeOpen" id="agent-runtime-panel" class="loop-runtime" aria-labelledby="agent-runtime-title" @keydown.esc.stop="closeRuntime">
+        <header class="runtime-heading">
+          <h2 id="agent-runtime-title">运行信息</h2>
+          <button ref="runtimeClose" class="runtime-close" type="button" aria-label="关闭运行信息" @click="closeRuntime">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </header>
+        <dl>
+          <dt>状态</dt><dd>{{ status }}</dd>
+          <dt>会话</dt><dd>{{ sessionId || '未发送的草稿' }}</dd>
+          <dt>实际模型</dt><dd>{{ summary?.model || '尚无实际请求' }}</dd>
+          <dt>思考档位</dt><dd>{{ summary?.reasoning_effort || '未知' }}</dd>
+          <dt>协议档版本</dt><dd>{{ summary?.profile_version || '未知' }}</dd>
+        </dl>
+        <template v-if="state?.facts.length">
+          <h3>最近活动</h3>
+          <ul class="runtime-events">
+            <li v-for="event in state.facts.slice(-5)" :key="event.cursor">{{ event.type }}</li>
+          </ul>
+        </template>
+        <h3 v-if="tasks.length">后台任务</h3>
+        <div v-for="task in tasks" :key="task.key" class="runtime-task">
+          <router-link to="/tasks">{{ task.key }}</router-link>
+          <p>{{ task.status || '等待状态' }}</p>
+          <p v-if="task.progress">{{ JSON.stringify(task.progress) }}</p>
+          <router-link v-if="task.report_id" :to="`/reports/${task.report_id}`">查看报告</router-link>
+        </div>
+        <p v-for="execution in quarantined" :key="execution.key" class="loop-notice">执行范围受限 · {{ execution.reason || '等待对账' }}</p>
+      </aside>
     </div>
     <div v-if="tab==='trace'" class="loop-composer-wrap loop-trace-composer" :class="{ 'has-interaction': !!activeInteractionDrawer }">
       <div class="composer-top-bar">
@@ -563,18 +600,39 @@ async function handleCreateWorkspace() {
 }
 
 const runtimeOpen = ref(false), error = ref(''), effort = ref<Effort | null>(null)
+const runtimeButton = ref<HTMLButtonElement>(), runtimeClose = ref<HTMLButtonElement>()
+
+function closeRuntime() {
+  runtimeOpen.value = false
+  void nextTick(() => runtimeButton.value?.focus())
+}
+
+function toggleRuntime() {
+  if (runtimeOpen.value) {
+    closeRuntime()
+    return
+  }
+  runtimeOpen.value = true
+  void nextTick(() => runtimeClose.value?.focus())
+}
+
 const ui = ref<LoopUi | null>(null), selectedProfileId = ref(''), selectedAgentId = ref(''), shown = ref(80), attachments = ref<Record<string, AttachmentReference[]>>({})
 const composer = ref<InstanceType<typeof AgentComposer>>(), scroller = ref<HTMLElement>(), chatShell = ref<HTMLElement>(), atBottom = ref(true)
+const chatCenter = ref<HTMLElement>(), chatCenterWidth = ref(0)
 type ResizeEdge = 'left' | 'right'
 const chatWidth = ref<number | null>(null), isResizing = ref(false), resizeEdge = ref<ResizeEdge | null>(null), hoverResizeEdge = ref<ResizeEdge | null>(null)
 const resizeHandleOffsets = ref<Record<ResizeEdge, number>>({ left: 110, right: 110 })
 const minimumChatWidth = 520
+const defaultChatWidth = 820
+const chatOuterGutters = 40
 const chatWidthStorageKey = 'agent-loop:chat-shell-width:v3'
 // 空闲连接重开时，先完成服务端授权与回放，再展示保留的历史正文。
 const connectionState = computed(() => props.store.sessions[props.sessionId])
-const state = computed(() => props.store.restoring.has(props.sessionId) ? undefined : connectionState.value), trace = computed(() => props.store.traces[props.sessionId])
+const restoringConversation = computed(() => props.store.restoring.has(props.sessionId))
+const state = computed(() => restoringConversation.value ? undefined : connectionState.value), trace = computed(() => props.store.traces[props.sessionId])
 const draft = computed(() => props.store.draft(props.sessionId || 'draft'))
 const rows = computed(() => state.value ? conversationRows(state.value) : [])
+const showEmptyPrompts = computed(() => !rows.value.length && !restoringConversation.value)
 const visibleRows = computed(() => rows.value.slice(-shown.value))
 /** 只读取 task_plan.updated 的会话快照；工具调用草稿与失败结果不能改变抽屉。 */
 const taskPlan = computed<TaskPlanDisplay | null>(() => state.value?.taskPlan || null)
@@ -616,10 +674,22 @@ function taskForTool(tool: ToolRun): LoopRecord | null {
 const quarantined = computed(() => Object.values(state.value?.executions || {}).filter(e => e.event === 'execution.quarantined'))
 /** finishLabels / phaseLabels / status 文案与 workspaceDerived 同源（模板与状态条共用）。 */
 const status = computed(() => phaseStatusText(state.value))
-const prompts = ['查看工作区文件，说明可以如何处理', '根据需求文档生成测试用例草稿', '查询资料并给出可核对的来源']
-const chatShellStyle = computed(() => chatWidth.value ? { width: `${chatWidth.value}px` } : undefined)
-const maximumChatWidth = computed(() => Math.max(minimumChatWidth, (chatShell.value?.parentElement?.clientWidth || minimumChatWidth + 48) - 48))
-const renderedChatWidth = computed(() => chatWidth.value || chatShell.value?.getBoundingClientRect().width || minimumChatWidth)
+const prompts = [
+  { label: '生成测试用例', description: '梳理场景与边界条件', content: '根据需求文档生成测试用例草稿', icon: 'M9 5h6m-8 0H5v16h14V5h-2M9 3h6v4H9zM8 13l2 2 5-5' },
+  { label: '检查工作区文件', description: '查看内容与可处理项', content: '查看工作区文件，说明可以如何处理', icon: 'M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Zm0 3h18' },
+  { label: '查找参考资料', description: '整理结论和可核对来源', content: '查询资料并给出可核对的来源', icon: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm5-2 4 4' },
+]
+const chatShellStyle = computed(() => ({ '--chat-width': `${chatWidth.value || defaultChatWidth}px` }))
+const maximumChatWidth = computed(() => Math.max(0, chatCenterWidth.value - chatOuterGutters))
+const canResizeChat = computed(() => maximumChatWidth.value > minimumChatWidth)
+const renderedChatWidth = computed(() => Math.min(chatWidth.value || defaultChatWidth, maximumChatWidth.value))
+// 侧栏折叠或运行信息展开均会改变可用宽度，观察实际容器以同步键盘与指针的调整范围。
+watch(chatCenter, (element, _, onCleanup) => {
+  if (!element) return
+  const observer = new ResizeObserver(([entry]) => { chatCenterWidth.value = entry.contentRect.width })
+  observer.observe(element)
+  onCleanup(() => observer.disconnect())
+}, { flush: 'post' })
 let resizeStartX = 0, resizeStartWidth = 0
 const resizeHandleHeight = 100
 /** 合并重复能力读取，首次加载即时执行；后台刷新保留当前有效配置。 */
@@ -733,7 +803,7 @@ function hideContentResizePreview(edge: ResizeEdge) {
 function resizeHandleStyle(edge: ResizeEdge) { return { top: `${resizeHandleOffsets.value[edge]}px` } }
 /** 两侧边缘都可拖拽；外扩和内收只改变宽度，壳层始终保持页面居中。 */
 function beginContentResize(event: PointerEvent, edge: ResizeEdge) {
-  if (event.pointerType === 'touch' || !chatShell.value) return
+  if (event.pointerType === 'touch' || event.button !== 0 || !chatShell.value) return
   event.preventDefault()
   resizeEdge.value = edge
   hoverResizeEdge.value = edge
@@ -743,7 +813,9 @@ function beginContentResize(event: PointerEvent, edge: ResizeEdge) {
   chatWidth.value = resizeStartWidth
   isResizing.value = true
   window.addEventListener('pointermove', resizeContent)
-  window.addEventListener('pointerup', finishContentResize, { once: true })
+  window.addEventListener('pointerup', finishContentResize)
+  window.addEventListener('pointercancel', finishContentResize)
+  window.addEventListener('blur', finishContentResize)
 }
 function resizeContent(event: PointerEvent) {
   const upper = maximumChatWidth.value
@@ -757,6 +829,9 @@ function finishContentResize() {
   resizeEdge.value = null
   hoverResizeEdge.value = null
   window.removeEventListener('pointermove', resizeContent)
+  window.removeEventListener('pointerup', finishContentResize)
+  window.removeEventListener('pointercancel', finishContentResize)
+  window.removeEventListener('blur', finishContentResize)
   try { if (chatWidth.value) localStorage.setItem(chatWidthStorageKey, String(Math.round(chatWidth.value))) } catch { /* 本地存储失败不影响本次调整。 */ }
 }
 /** 键盘用户可用方向键从当前侧边缘放大或缩小居中的共享壳层。 */
@@ -951,7 +1026,281 @@ async function hydrateAttachments() {
 <style scoped>
 .generated-files{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}.generated-files a{padding:6px 10px;border:1px solid #d5e5db;border-radius:8px;color:#175a40;text-decoration:none;overflow-wrap:anywhere}
 
-.loop-workspace{display:flex;flex:1;flex-direction:column;min-height:0;min-width:0;background:var(--bg-main,#f8faf8)}.loop-tabs{display:flex;align-items:center;gap:8px;padding:8px 20px;border-bottom:1px solid #e0e8e2}.loop-tabs button{padding:7px 12px;border:0;border-radius:7px;background:transparent;color:#61776a;cursor:pointer}.loop-tabs .active{background:#e2eee6;color:#154834}.loop-status{margin-left:auto;font-size:12px;display:flex;align-items:center;gap:6px}.loop-status i{width:7px;height:7px;border-radius:50%;background:#93a99c}.loop-status .running{background:#21a37e;animation:pulse 1.5s ease-in-out infinite}.loop-content{display:flex;flex:1;min-height:0;position:relative}.loop-center{display:flex;flex-direction:column;flex:1;min-width:0;position:relative;min-height:0}.loop-conversation{overflow:auto;flex:1;padding:24px max(20px,calc((100% - 800px)/2));scrollbar-gutter:stable}.loop-message{margin:0 0 22px;min-width:0;overflow-wrap:anywhere}.loop-message header{display:flex;gap:8px;align-items:center;font-size:13px;font-weight:600;margin-bottom:8px}.loop-message header small{font-weight:400;color:var(--text-tertiary)}.assistant-header{display:flex;align-items:center}.assistant-identity{display:flex;min-width:0;align-items:center;gap:8px;flex-wrap:wrap}.assistant-identity strong{font-weight:650}.assistant-identity time{color:var(--text-tertiary);font-size:11px;font-weight:400;font-variant-numeric:tabular-nums}.loop-message.assistant.is-continuation{margin-top:12px}.loop-message.user{background:#eaf3ed;padding:16px 20px;border-radius:12px}.loop-message.user p{white-space:pre-wrap;margin:0;line-height:1.7}.history-files{display:flex;gap:8px;flex-wrap:wrap}.loop-composer-wrap{padding:12px 24px 18px;max-width:950px;width:100%;box-sizing:border-box;margin:0 auto}.loop-runtime{width:240px;overflow:auto;padding:18px;border-left:1px solid #e0e8e2;font-size:12px;background:#f5f8f5}.loop-runtime dd{margin:5px 0 14px;overflow-wrap:anywhere}.loop-runtime dt{color:#7d9081}.runtime-close{float:right;border:0;background:transparent;cursor:pointer}.loop-notice{padding:8px 16px;margin:4px 10px;background:#f6f0e2;color:#866934;font-size:12px}.loop-notice.error{color:#a24d43}.loop-notice button,.history-more{border:0;background:transparent;text-decoration:underline;cursor:pointer}.jump-bottom{position:absolute;bottom:10px;right:20px;border:1px solid #caddcf;background:#fff;border-radius:20px;padding:8px 15px;cursor:pointer}.muted{color:#86968b}@keyframes pulse{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}@media(max-width:768px){.loop-runtime{position:absolute;inset:0 0 0 auto;max-width:calc(100% - 35px);z-index:30;box-shadow:-20px 0 50px #173e2520}.loop-composer-wrap{padding:8px}.loop-conversation{padding:16px 12px}.loop-tabs{padding:6px;gap:0}.loop-tabs button{padding:7px}.loop-status{font-size:11px}.loop-message header{flex-wrap:wrap}}
+.loop-workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  container-type: inline-size;
+  background: var(--bg-main);
+}
+
+.loop-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-main);
+}
+
+.loop-session-heading {
+  flex: 1 1 125px;
+  min-width: 0;
+}
+
+.loop-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+
+.workspace-tab-group {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+}
+
+.workspace-tab {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-tab:hover:not(:disabled) { color: var(--text-primary); }
+
+.workspace-tab.active {
+  background: var(--t-agent);
+  color: var(--c-agent);
+  font-weight: 650;
+}
+
+.workspace-tab:disabled { opacity: .55; cursor: default; }
+
+.trace-tab-count {
+  margin-inline-start: 2px;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.loop-tabs-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.loop-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.loop-status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.loop-status .running { background: var(--accent-success); }
+
+.loop-runtime-btn {
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.loop-runtime-btn:hover, .loop-runtime-btn[aria-expanded='true'] {
+  background: var(--t-agent);
+  color: var(--c-agent);
+}
+
+.loop-content {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.loop-center {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.loop-conversation {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px 5px;
+  scrollbar-gutter: stable both-edges;
+}
+
+.loop-message {
+  min-width: 0;
+  margin: 0 0 22px;
+  overflow-wrap: anywhere;
+}
+
+.loop-message header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.loop-message header small { color: var(--text-tertiary); font-weight: 400; }
+.assistant-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.assistant-identity strong { font-weight: 650; }
+.assistant-identity time { color: var(--text-tertiary); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.loop-message.assistant.is-continuation { margin-top: 12px; }
+
+.loop-message.user {
+  width: fit-content;
+  max-width: min(100%, 680px);
+  margin-inline-start: auto;
+  padding: 12px 16px;
+  border-radius: var(--radius-xl);
+  background: var(--t-agent);
+  color: var(--text-primary);
+}
+
+.loop-message.user header { margin-bottom: 4px; color: var(--c-agent); }
+.loop-message.user p { margin: 0; white-space: pre-wrap; line-height: 1.65; }
+.history-files { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.loop-composer-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 950px;
+  margin: 0 auto;
+  padding: 10px 20px 18px;
+}
+
+.loop-runtime {
+  flex: 0 0 240px;
+  width: 240px;
+  min-width: 0;
+  overflow: auto;
+  padding: 14px;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.runtime-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.runtime-heading h2 { margin: 0; font-size: 15px; }
+
+.runtime-close {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.runtime-close:hover { color: var(--text-primary); }
+
+.loop-runtime dl, .loop-runtime h3 { margin: 14px 0 6px; }
+.loop-runtime h3 { font-size: 13px; }
+.loop-runtime dt { color: var(--text-secondary); }
+.loop-runtime dd { margin: 3px 0 12px; overflow-wrap: anywhere; }
+.runtime-events { margin: 0; padding-inline-start: 16px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.runtime-task { padding-block: 8px; border-bottom: 1px solid var(--border-subtle); overflow-wrap: anywhere; }
+.runtime-task p { margin: 3px 0; }
+
+.loop-notice {
+  margin: 5px 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-warning) 9%, var(--bg-main));
+  color: var(--accent-warning);
+  font-size: 12px;
+}
+
+.loop-notice.error { background: var(--t-error); color: var(--c-error); }
+.loop-notice button, .history-more { border: 0; background: transparent; text-decoration: underline; cursor: pointer; }
+
+.jump-bottom {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  z-index: 2;
+  transform: translateY(-100%);
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.jump-bottom:hover { color: var(--text-primary); }
+.muted { color: var(--text-tertiary); }
+
+@container (max-width: 700px) {
+  .loop-toolbar { padding: 8px 12px; gap: 4px; }
+  .loop-session-heading, .loop-tabs { flex-basis: 100%; }
+  .loop-tabs { justify-content: space-between; gap: 4px 8px; }
+  .loop-tabs-actions { gap: 4px; }
+  .loop-runtime {
+    position: absolute;
+    z-index: 30;
+    inset: 0 0 0 auto;
+    max-width: calc(100% - 24px);
+    box-shadow: -12px 0 26px color-mix(in srgb, var(--text-primary) 10%, transparent);
+  }
+}
+
 
 .attempt-error { display: block; margin-top: 8px; color: #a24d43; line-height: 1.5; }
 
@@ -1032,173 +1381,123 @@ async function hydrateAttachments() {
   color: #34d399;
 }
 
-/* 对话/轨迹导航采用参考页的下划线选中态。 */
-.loop-tabs{--line:#e3e8f0;--text:#172033;--subtle:var(--text-tertiary);--accent:#5b5bd6}
-    .loop-tabs { display: flex; min-height: 42px; align-items: end; gap: 22px; border-bottom: 1px solid var(--line); padding: 0 28px; background: rgba(255,255,255,.68); }
-    .loop-tabs .workspace-tab { position: relative; min-height: 42px; border: 0; background: transparent; padding: 0 1px; color: var(--subtle); font-size: 12px; cursor: pointer; }
-    .loop-tabs .workspace-tab::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; content: ""; border-radius: 2px 2px 0 0; background: transparent; }
-    .loop-tabs .workspace-tab:hover { color: var(--text); }
-    .loop-tabs .workspace-tab.active { color: var(--accent); font-weight: 650; }
-    .loop-tabs .workspace-tab.active::after { background: var(--accent); }
-    .trace-tab-count { display: inline-grid; min-width: 16px; height: 16px; place-items: center; border-radius: 999px; background: #eef0ff; padding: 0 4px; color: #4d4ebb; font-size: 9px; vertical-align: 1px; }
-    .loop-tabs .workspace-tab-hint { margin: 0 0 12px auto; color: #8994a6; font: 10px ui-monospace,SFMono-Regular,Consolas,monospace; letter-spacing: .04em; }
-
-
-.loop-tabs .workspace-tab{background:transparent}.loop-tabs .workspace-tab:disabled{opacity:.45;cursor:default}
-
 /* 消息区与输入框共用同一宽度壳层，并始终在页面内容区居中。 */
-.loop-chat-shell{position:relative;display:flex;flex:1;flex-direction:column;min-height:0;width:min(900px,calc(100% - 48px));max-width:calc(100% - 48px);min-width:520px;margin:0 auto}
-.loop-chat-shell .loop-conversation{padding:24px 16px}
-.loop-chat-shell .loop-composer-wrap{flex:0 0 auto;width:100%;max-width:none;margin:0;padding:12px 0 18px;box-sizing:border-box}
+.loop-chat-shell {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  width: var(--chat-width);
+  max-width: calc(100% - 40px);
+  margin-inline: auto;
+}
+
+.loop-chat-shell .loop-composer-wrap {
+  flex: 0 0 auto;
+  max-width: none;
+  padding: 10px 0 14px;
+}
 .loop-chat-shell.has-interaction .loop-conversation{min-height:96px;padding-bottom:12px}.loop-chat-shell.has-interaction .loop-composer-wrap{padding-top:8px}.loop-chat-shell.has-interaction .composer-top-bar,.loop-trace-composer.has-interaction .composer-top-bar{display:none}.composer-anchor{position:relative}.composer-interaction-drawer{position:absolute;z-index:20;right:0;bottom:calc(100% + 12px);left:0;margin:0}.composer-interaction-enter-active,.composer-interaction-leave-active{overflow:hidden;transition:max-height .24s cubic-bezier(.2,.8,.2,1),opacity .18s ease,transform .24s cubic-bezier(.2,.8,.2,1)}.composer-interaction-enter-from,.composer-interaction-leave-to{max-height:0;opacity:0;transform:translateY(12px)}.composer-interaction-enter-to,.composer-interaction-leave-from{max-height:520px;opacity:1;transform:translateY(0)}
 
-/* 空状态：居中布局、输入框上方水平居中 Logo + 名字及提示词卡片 */
+/* 自适应空闲空间。高度不足时从顶部开始滚动，标题和输入框仍可访问。 */
 .loop-chat-shell.is-empty {
-  justify-content: center;
-  padding: 32px 0 48px;
+  padding-block: 24px 30px;
   overflow-y: auto;
-}
-.loop-chat-shell.is-empty .loop-conversation.is-empty {
-  display: none;
-}
-.loop-empty-hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  width: 100%;
-  margin-bottom: 24px;
-  padding: 0 12px;
-}
-.hero-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.hero-logo-mark {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #1f5947 0%, #154234 100%);
-  display: grid;
-  place-items: center;
-  box-shadow: 0 4px 14px rgba(23, 74, 58, 0.22);
-}
-.hero-brand-name-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.hero-brand-name {
-  font-family: var(--font-display, inherit);
-  font-size: 26px;
-  font-weight: 750;
-  color: #173f30;
-  letter-spacing: -0.02em;
-}
-.hero-brand-badge {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: #e2eee6;
-  color: #154834;
-  letter-spacing: 0.1em;
-}
-.hero-tagline {
-  font-size: 22px;
-  font-weight: 600;
-  color: #173f30;
-  margin: 0 0 6px;
-  line-height: 1.4;
-}
-.hero-subline {
-  font-size: 13.5px;
-  color: var(--text-secondary);
-  margin: 0;
-}
-.loop-empty-prompts {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  width: 100%;
-  margin-top: 14px;
-  box-sizing: border-box;
-}
-.empty-prompt-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  border: 1px solid #d8e4dc;
-  border-radius: 12px;
-  background: #ffffff;
-  color: #41594d;
-  font-size: 13px;
-  line-height: 1.5;
-  text-align: left;
-  cursor: pointer;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
-  transition: all 0.18s ease;
-}
-.empty-prompt-card:hover {
-  border-color: #1f5947;
-  background: #f8faf9;
-  color: #173f30;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(23, 74, 58, 0.08);
-}
-.prompt-arrow {
-  color: var(--text-tertiary);
-  font-size: 14px;
-  margin-left: 8px;
-  flex-shrink: 0;
-  transition: transform 0.18s ease, color 0.18s ease;
-}
-.empty-prompt-card:hover .prompt-arrow {
-  color: #1f5947;
-  transform: translate(2px, -2px);
+  scrollbar-width: thin;
 }
 
-/* 深色模式适配 */
-[data-theme='dark'] .hero-logo-mark {
-  background: linear-gradient(135deg, #16977a 0%, #0f5e4c 100%);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+.loop-chat-shell.is-empty .loop-conversation.is-empty { display: none; }
+
+.loop-empty-hero {
+  flex: 0 0 auto;
+  width: 100%;
+  margin-block: auto 14px;
+  padding-inline: 4px;
 }
-[data-theme='dark'] .hero-brand-name {
-  color: #f3f4f6;
+
+.hero-tagline {
+  margin: 0 0 7px;
+  color: var(--text-primary);
+  font: 650 clamp(25px, 4vw, 38px)/1.25 var(--font-display);
+  letter-spacing: -.035em;
 }
-[data-theme='dark'] .hero-brand-badge {
-  background: rgba(22, 151, 122, 0.2);
-  color: #34d399;
+
+.hero-subline {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
 }
-[data-theme='dark'] .hero-tagline {
-  color: #f9fafb;
+
+.loop-loading {
+  margin-block: auto 12px;
+  color: var(--text-secondary);
+  text-align: center;
 }
-[data-theme='dark'] .hero-subline {
-  color: #9ca3af;
+
+.loop-empty-prompts {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-block: 1px auto;
 }
-[data-theme='dark'] .empty-prompt-card {
-  background: #111827;
-  border-color: rgba(255, 255, 255, 0.1);
-  color: #d1d5db;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+
+.empty-prompt-card {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-main);
+  color: var(--text-primary);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
 }
-[data-theme='dark'] .empty-prompt-card:hover {
-  border-color: #16977a;
-  background: #1f2937;
-  color: #ffffff;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+
+.empty-prompt-card:hover {
+  border-color: var(--accent-ai);
+  background: var(--bg-elevated);
 }
-[data-theme='dark'] .empty-prompt-card:hover .prompt-arrow {
-  color: #34d399;
+
+.prompt-icon {
+  display: grid;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: var(--radius-lg);
+  background: var(--t-agent);
+  color: var(--c-agent);
 }
-@media(max-width: 768px) {
-  .loop-empty-prompts {
-    grid-template-columns: 1fr;
-  }
+
+.prompt-text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.prompt-text strong {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.prompt-arrow { flex-shrink: 0; color: var(--text-tertiary); }
+.empty-prompt-card:hover .prompt-arrow { color: var(--c-agent); }
+
+@container (max-width: 640px) {
+  .loop-empty-prompts { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .empty-prompt-card { padding: 6px 8px; }
+  .prompt-text { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; }
 }
 
 /* 拖拽式隐藏边框：命中区与图2高品质羽化渐变悬浮手柄 */
@@ -1315,60 +1614,22 @@ async function hydrateAttachments() {
   transition: transform 0.15s ease, background 0.15s ease;
   pointer-events: none;
 }
-@media(max-width:768px){.loop-chat-shell{width:100%!important;max-width:none;min-width:0;margin:0}.loop-chat-shell .loop-composer-wrap{padding:8px}.loop-chat-shell.has-interaction .loop-conversation{min-height:72px;padding-bottom:8px}.loop-width-edge{display:none}.loop-chat-shell .loop-conversation{padding:16px 12px}}
-/* 769–1024：侧栏 + 会话列表占去约 500px 后，聊天壳的 520px 硬下限会把内容顶出容器
-   （780px 视口下 .loop-chat-shell 的 scrollWidth 比 clientWidth 大 100px）。
-   该区间让聊天壳可收缩，输入区控件按需折行，避免出现内部横向滚动条。 */
-@media(max-width:1024px){
-  .loop-chat-shell{min-width:0;width:min(900px,100%);max-width:100%}
+@container (max-width: 560px) {
+  .loop-chat-shell { max-width: calc(100% - 24px); width: 100%; }
+  .loop-chat-shell .loop-composer-wrap { padding-block: 6px 10px; }
+  .loop-chat-shell .loop-conversation { padding: 14px 0; }
+  .loop-chat-shell.has-interaction .loop-conversation { min-height: 72px; padding-bottom: 8px; }
+  .loop-width-edge { display: none; }
+  .loop-trace-composer { padding: 8px 12px 12px; }
 }
 
-/* 顶栏操作区：对齐与垂直居中 */
-.loop-tabs-actions {
-  margin-left: auto;
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
+@media (max-height: 640px) {
+  .loop-chat-shell.is-empty { padding-block: 12px 16px; }
+  .loop-empty-hero { margin-bottom: 8px; }
 }
-.loop-tabs-actions .loop-status {
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #55685e;
-}
-[data-theme='dark'] .loop-tabs-actions .loop-status { color: var(--text-secondary, #9ca3af); }
-[data-theme='dark'] .loop-runtime-btn {
-  border-color: var(--border-subtle, #374151);
-  background: var(--bg-elevated, #1f2937);
-  color: var(--text-primary, #f9fafb);
-}
-.loop-runtime-btn {
-  padding: 4px 10px;
-  border: 1px solid #d3dee2;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #485c52;
-  font-size: 12px;
-  cursor: pointer;
-  line-height: 1.4;
-  transition: all 0.15s ease;
-}
-.loop-runtime-btn:hover {
-  background: #f2f7f4;
-  border-color: #b0c9bd;
-  color: #1a4233;
-}
-[data-theme='dark'] .loop-runtime-btn {
-  background: #1e293b;
-  border-color: rgba(255, 255, 255, 0.12);
-  color: #cbd5e1;
-}
-[data-theme='dark'] .loop-runtime-btn:hover {
-  background: #334155;
-  color: #f1f5f9;
+
+@media (prefers-reduced-motion: reduce) {
+  .empty-prompt-card, .loop-width-handle, .loop-width-handle span { transition: none; }
 }
 
 /* 输入框上方工作区选择器（图2样式） */
@@ -1740,45 +2001,4 @@ async function hydrateAttachments() {
   color: #64748b;
 }
 
-/* ── 深色补漏 ─────────────────────────────────────────────────
-   早期对话壳（.loop-* 基础样式）写死了浅色值，未随 data-theme 切换；
-   这里只补这些遗留类，新增样式应直接引用 tokens.css 变量。 */
-[data-theme='dark'] .loop-tabs {
-  --line: var(--border-subtle);
-  --text: var(--text-primary);
-  --subtle: var(--text-secondary);
-  --accent: #a5b4fc;
-  border-bottom-color: var(--border-subtle);
-  /* 浅色态的半透明白底在深色下会形成一条贯穿内容区的浅色带，选中标签（浅紫）
-     落在该带上对比度接近 1:1，文字基本不可读；深色下改为透明，直接继承卡片底色。 */
-  background: transparent;
-}
-[data-theme='dark'] .loop-message.user {
-  background: rgba(22, 151, 122, 0.16);
-  color: var(--text-primary);
-}
-[data-theme='dark'] .loop-runtime {
-  background: var(--bg-elevated);
-  border-left-color: var(--border-subtle);
-  color: var(--text-secondary);
-}
-[data-theme='dark'] .loop-runtime dt,
-[data-theme='dark'] .loop-message header small,
-[data-theme='dark'] .assistant-identity time,
-[data-theme='dark'] .muted,
-[data-theme='dark'] .loop-tabs .workspace-tab-hint {
-  color: var(--text-tertiary);
-}
-[data-theme='dark'] .loop-notice {
-  background: rgba(251, 191, 36, 0.14);
-  color: #fbbf24;
-}
-[data-theme='dark'] .loop-notice.error {
-  color: #f87171;
-}
-[data-theme='dark'] .jump-bottom {
-  background: var(--bg-elevated);
-  border-color: var(--border-subtle);
-  color: var(--text-primary);
-}
 </style>

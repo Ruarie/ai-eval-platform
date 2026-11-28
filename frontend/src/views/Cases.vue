@@ -2,98 +2,129 @@
   <div class="cases-workbench" @keydown="onWorkbenchKeydown">
     <div class="nordic-layout" :style="{ '--tree-w': treeWidth + 'px' }">
       <!-- ─── 左侧：用例集资源树侧边栏 ─── -->
-      <aside class="nordic-sidebar">
-        <div class="sidebar-header">
-          <div class="sidebar-title-row">
-            <div class="sidebar-title">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="title-icon">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-                <polyline points="10 9 9 9 8 9" />
-              </svg>
-              <span>用例集资源</span>
-            </div>
-            <div class="sidebar-actions">
-              <button class="btn btn-ghost-subtle btn-xs" aria-label="导入 Excel 用例" @click="showImportExcel = true">
-                导入 Excel
-              </button>
-              <button class="btn btn-ghost-subtle btn-xs" title="通过 PRD 或接口需求自动推导用例集" aria-label="PRD 用例推导向导" @click="openAiGenDrawer">
-                + PRD 推导
-              </button>
-              <button class="btn btn-ghost-subtle btn-xs" title="新建空用例集" aria-label="新建空用例集" @click="createEmptyCaseSet">
-                + 新建
-              </button>
-            </div>
-          </div>
-
-          <!-- 搜索输入框 -->
-          <div class="search-box">
-            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input v-model="treeSearch" class="search-input" placeholder="搜索用例集..." aria-label="搜索用例集" />
-            <button v-if="treeSearch" class="clear-search-btn" aria-label="清空搜索" @click="treeSearch = ''">✕</button>
-          </div>
-        </div>
-
-        <!-- 目录树内容区 -->
-        <div class="tree-content custom-scroll">
-          <div v-for="folder in filteredFolders" :key="folder.id" class="folder-group" :data-fid="folder.id">
-            <!-- 文件夹节点 -->
-            <div
-              class="tree-node folder-node"
-              :class="{ open: folder.open }"
-              @click="folder.open = !folder.open"
-              @contextmenu.prevent.stop="openCtxMenu($event, 'folder', folder.id)"
-            >
-              <span class="chevron-icon" :class="{ rotated: folder.open }">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="9 18 15 12 9 6" />
+      <aside class="nordic-sidebar" :class="{ 'tree-open': mobileTreeOpen }" aria-label="用例集">
+        <button
+          ref="mobileTreeToggle"
+          type="button"
+          class="mobile-tree-toggle"
+          aria-controls="case-set-list"
+          :aria-expanded="mobileTreeOpen"
+          @click="mobileTreeOverride = !mobileTreeOpen"
+        >
+          用例集列表
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+        <div id="case-set-list" class="case-set-list">
+          <div class="sidebar-header">
+            <div class="sidebar-title-row">
+              <div class="sidebar-title">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="title-icon">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
                 </svg>
-              </span>
-              <svg class="folder-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path v-if="folder.open" d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
-                <path v-else d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-              </svg>
-              <span class="node-name">{{ folder.name }}</span>
-              <span class="node-badge">{{ folder.items.length }}</span>
-            </div>
-
-            <!-- 用例集子项目 -->
-            <div v-if="folder.open" class="folder-children">
-              <div
-                v-for="item in folder.items"
-                :key="item.id"
-                class="tree-node file-node"
-                :class="{ active: activeSetId === item.id }"
-                :title="`${item.name} · ${caseSetStatusLabel(item.status)}`"
-                @click="requestSelectCaseSet(item.id)"
-                @contextmenu.prevent.stop="openCtxMenu($event, 'file', item.id)"
-              >
-                <span class="file-icon case-set" :class="`status-${item.status}`">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="9 11 12 14 22 4" />
-                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                  </svg>
-                </span>
-                <span class="node-name">{{ item.name }}</span>
-                <span class="version-badge" :class="`badge-${item.status}`">
-                  {{ caseSetStatusLabel(item.status) }}
-                </span>
-                <span v-if="item.status === 'generated'" class="pending-dot" title="AI 自动生成草稿，待确认"></span>
+                <span>用例集</span>
+              </div>
+              <div class="sidebar-actions">
+                <button class="btn btn-ghost-subtle btn-xs" aria-label="导入 Excel 用例" @click="showImportExcel = true">
+                  导入 Excel
+                </button>
+                <button class="btn btn-ghost-subtle btn-xs" title="通过 PRD 或接口需求自动推导用例集" aria-label="PRD 用例推导向导" @click="openAiGenDrawer">
+                  + PRD 推导
+                </button>
+                <button class="btn btn-ghost-subtle btn-xs" title="新建空用例集" aria-label="新建空用例集" @click="createEmptyCaseSet">
+                  + 新建
+                </button>
               </div>
             </div>
+
+            <!-- 搜索输入框 -->
+            <div class="search-box">
+              <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input v-model="treeSearch" class="search-input" placeholder="搜索用例集..." aria-label="搜索用例集" />
+              <button v-if="treeSearch" class="clear-search-btn" aria-label="清空搜索" @click="treeSearch = ''">✕</button>
+            </div>
           </div>
 
-          <div v-if="!filteredFolders.length" class="tree-empty">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-icon">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <p>{{ treeSearch.trim() ? `无匹配结果「${treeSearch.trim()}」` : '暂无用例集，点击上方「+ PRD 推导」或「+ 新建」' }}</p>
+          <!-- 目录树内容区 -->
+          <div class="tree-content custom-scroll">
+            <div v-for="folder in filteredFolders" :key="folder.id" class="folder-group" :data-fid="folder.id">
+              <!-- 文件夹节点 -->
+              <button
+                type="button"
+                class="tree-node folder-node"
+                :class="{ open: folder.open }"
+                :aria-expanded="folder.open"
+                @click="toggleCaseFolder(folder.id)"
+                @contextmenu.prevent.stop="openCtxMenu($event, 'folder', folder.id)"
+              >
+                <span class="chevron-icon" :class="{ rotated: folder.open }">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </span>
+                <svg class="folder-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path v-if="folder.open" d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
+                  <path v-else d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                </svg>
+                <span class="node-name">{{ folder.name }}</span>
+                <span class="node-badge">{{ folder.items.length }}</span>
+              </button>
+
+              <!-- 用例集子项目 -->
+              <div v-if="folder.open" class="folder-children">
+                <div v-for="item in folder.items" :key="item.id" class="case-set-row" :class="{ active: activeSetId === item.id }">
+                  <button
+                    type="button"
+                    class="tree-node file-node"
+                    :class="{ active: activeSetId === item.id }"
+                    :aria-current="activeSetId === item.id ? 'true' : undefined"
+                    :title="`${item.name} · ${caseSetStatusLabel(item.status)}`"
+                    @click="selectCaseSetFromTree(item.id)"
+                    @contextmenu.prevent.stop="openCtxMenu($event, 'file', item.id)"
+                  >
+                    <span class="file-icon case-set" aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="9 11 12 14 22 4" />
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                      </svg>
+                    </span>
+                    <span class="node-name">{{ item.name }}</span>
+                    <span class="version-badge" :class="`badge-${item.status}`">
+                      {{ caseSetStatusLabel(item.status) }}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    class="case-set-menu"
+                    :aria-label="`${item.name}的用例集操作`"
+                    aria-haspopup="menu"
+                    :aria-expanded="ctxMenu.show && ctxMenu.type === 'file' && ctxMenu.targetId === item.id"
+                    title="用例集操作"
+                    @click="openCtxMenu($event, 'file', item.id)"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="!filteredFolders.length" class="tree-empty">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-icon">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <p>{{ treeSearch.trim() ? `无匹配结果「${treeSearch.trim()}」` : '暂无用例集，点击上方「+ PRD 推导」或「+ 新建」' }}</p>
+            </div>
           </div>
         </div>
 
@@ -110,13 +141,13 @@
       </aside>
 
       <!-- ─── 右侧：主用例工作台 ─── -->
-      <main v-if="currentSet" class="nordic-main">
+      <section v-if="currentSet" class="nordic-main" aria-labelledby="case-set-title">
         <!-- 1. 顶栏：层级分明的操作区与检索 -->
         <div class="main-toolbar">
           <div class="toolbar-default">
-            <div class="toolbar-title-group">
+            <div class="toolbar-heading">
               <div class="title-row">
-                <span class="main-dataset-title">{{ currentSet.name }}</span>
+                <h2 id="case-set-title" class="main-dataset-title" :title="currentSet.name">{{ currentSet.name }}</h2>
                 <span class="status-badge" :class="`status-${currentSet.status}`">
                   {{ currentSet.status === 'confirmed' ? '已确认入库' : currentSet.status === 'cancelled' ? '已废弃' : '草稿待审' }}
                 </span>
@@ -124,120 +155,62 @@
                   剩余 {{ countdownHours }}h 确认
                 </span>
               </div>
-              <div class="breadcrumb-row">
-                <span>用例库</span>
-                <span class="sep">/</span>
-                <span class="cur">{{ currentSet.name }}</span>
+              <div class="toolbar-action-group">
+                <template v-if="currentSet.status === 'generated'">
+                  <button
+                    class="btn btn-save btn-md"
+                    :class="{ dirty: hasUnsavedChanges, saved: justSaved }"
+                    :disabled="!canEditCases || !hasUnsavedChanges || savingCases"
+                    title="快捷键 Ctrl/⌘ + S"
+                    aria-label="保存用例修改"
+                    @click="persistCases"
+                  >
+                    <span v-if="justSaved" class="saved-icon">✓</span>
+                    {{ savingCases ? '保存中…' : justSaved ? '已保存' : '保存修改' }}
+                    <kbd class="shortcut-key" aria-hidden="true">{{ saveShortcut }}</kbd>
+                  </button>
+
+                  <button class="btn btn-primary btn-md primary-cta" :disabled="!canEditCases" aria-label="确认入库用例集" @click="confirmCaseSet">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    确认入库
+                  </button>
+                </template>
+                <button v-else class="btn btn-secondary btn-md" @click="exportExcel">导出 Excel</button>
+                <n-dropdown :options="moreMenuOptions" trigger="click" @select="handleMoreMenuSelect">
+                  <button class="btn btn-ghost-subtle btn-md btn-icon-only" title="更多用例操作" aria-label="更多操作">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="1"></circle>
+                      <circle cx="19" cy="12" r="1"></circle>
+                      <circle cx="5" cy="12" r="1"></circle>
+                    </svg>
+                  </button>
+                </n-dropdown>
               </div>
             </div>
 
-            <!-- 表格内即时搜索过滤框 (Instant Grid Filter) -->
-            <div class="table-search-box">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="table-search-icon">
-                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-              <input v-model="gridSearch" class="table-search-input" placeholder="在当前用例集中极速筛选 (⌘F)..." aria-label="在当前用例集中极速筛选" />
-              <span v-if="gridSearch" class="grid-search-count mono">{{ displayedCases.length }}/{{ cases.length }}</span>
-              <button v-if="gridSearch" class="clear-search-btn" aria-label="清空表内搜索" @click="gridSearch = ''">✕</button>
-            </div>
+            <div class="toolbar-tools">
+              <div class="table-search-box" :class="{ 'has-query': gridSearch }">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="table-search-icon" aria-hidden="true">
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input v-model="gridSearch" class="table-search-input" placeholder="搜索当前用例集" aria-label="搜索当前用例集" />
+                <span v-if="gridSearch" class="grid-search-count mono">{{ displayedCases.length }}/{{ cases.length }}</span>
+                <button v-if="gridSearch" class="clear-search-btn" aria-label="清空表内搜索" @click="gridSearch = ''">✕</button>
+              </div>
 
-            <div class="grow"></div>
-
-            <!-- 右侧操作组（操作金字塔） -->
-            <div class="toolbar-action-group">
-              <template v-if="currentSet.status === 'generated'">
-                <!-- 中频操作组 -->
-                <div class="action-btn-group">
-                  <button class="btn btn-secondary btn-md" :disabled="!canEditCases" aria-label="新增测试用例" @click="addCase">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                    新增用例
-                  </button>
-                  <button class="btn btn-secondary btn-md" :disabled="!canEditCases" aria-label="新增扩展属性列" @click="openAddColModal">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                    新增列
-                  </button>
-                  <button
-                    v-if="currentSet"
-                    class="btn btn-secondary btn-md"
-                    aria-label="AI 评审当前用例集"
-                    @click="reviewOpen = true"
-                  >
-                    AI 评审
-                  </button>
-                  <button
-                    v-if="currentSet"
-                    class="btn btn-secondary btn-md"
-                    aria-label="打开评审工作台"
-                    @click="reviewFlowOpen = true"
-                  >
-                    评审工作台
-                  </button>
-                  <button
-                    v-if="currentSet"
-                    class="btn btn-secondary btn-md"
-                    aria-label="查看需求覆盖与缺口"
-                    @click="coverageOpen = true"
-                  >
-                    需求覆盖
-                  </button>
-                  <button class="btn btn-secondary btn-md" aria-label="打开 PRD 用例推导向导" @click="openAiGenDrawer">
-                    PRD 推导向导
-                  </button>
-                </div>
-
-                <!-- 保存修改按钮 -->
-                <button
-                  class="btn btn-save btn-md"
-                  :class="{ dirty: hasUnsavedChanges, saved: justSaved }"
-                  :disabled="!canEditCases || !hasUnsavedChanges || savingCases"
-                  title="快捷键 Ctrl/⌘ + S"
-                  aria-label="保存用例修改"
-                  @click="persistCases"
-                >
-                  <span v-if="justSaved" class="saved-icon">✓</span>
-                  {{ savingCases ? '保存中…' : justSaved ? '已保存' : '保存修改' }}
-                  <kbd class="shortcut-key">⌘S</kbd>
+              <div v-if="currentSet.status === 'generated'" class="action-btn-group" role="group" aria-label="草稿用例操作">
+                <button class="btn btn-secondary btn-md" :disabled="!canEditCases" aria-label="新增测试用例" @click="addCase">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                  新增用例
                 </button>
-
-                <!-- 主操作 CTA：确认入库 -->
-                <button class="btn btn-primary btn-md primary-cta btn-success-solid" :disabled="!canEditCases" aria-label="确认入库用例集" @click="confirmCaseSet">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                  确认入库
-                </button>
-
-                <!-- 更多操作下拉 -->
-                <n-dropdown :options="moreMenuOptions" trigger="click" @select="handleMoreMenuSelect">
-                  <button class="btn btn-ghost-subtle btn-md btn-icon-only" title="更多用例操作" aria-label="更多操作">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="12" cy="12" r="1"></circle>
-                      <circle cx="19" cy="12" r="1"></circle>
-                      <circle cx="5" cy="12" r="1"></circle>
-                    </svg>
-                  </button>
-                </n-dropdown>
-              </template>
-
-              <!-- 已确认或已废弃时仅提供只读操作 -->
-              <template v-else>
-                <div class="action-btn-group">
-                  <button class="btn btn-secondary btn-md" @click="exportExcel">
-                    导出 Excel
-                  </button>
-                </div>
-
-                <!-- 更多操作下拉 -->
-                <n-dropdown :options="moreMenuOptions" trigger="click" @select="handleMoreMenuSelect">
-                  <button class="btn btn-ghost-subtle btn-md btn-icon-only" title="更多用例操作" aria-label="更多操作">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="12" cy="12" r="1"></circle>
-                      <circle cx="19" cy="12" r="1"></circle>
-                      <circle cx="5" cy="12" r="1"></circle>
-                    </svg>
-                  </button>
-                </n-dropdown>
-              </template>
+                <button class="btn btn-ghost btn-md" :disabled="!canEditCases" aria-label="新增扩展属性列" @click="openAddColModal">新增列</button>
+                <button class="btn btn-ghost btn-md" aria-label="AI 评审当前用例集" @click="reviewOpen = true">AI 评审</button>
+                <button class="btn btn-ghost btn-md" aria-label="打开评审工作台" @click="reviewFlowOpen = true">评审工作台</button>
+                <button class="btn btn-ghost btn-md" aria-label="查看需求覆盖与缺口" @click="coverageOpen = true">需求覆盖</button>
+                <button class="btn btn-ghost btn-md" aria-label="打开 PRD 用例推导向导" @click="openAiGenDrawer">PRD 推导向导</button>
+              </div>
             </div>
           </div>
         </div>
@@ -245,11 +218,11 @@
         <!-- 2. 六大策略分布可交互胶囊筛选条 -->
         <div class="metrics-strip">
           <div class="strip-left">
-            <span class="strip-label">策略筛选:</span>
-            <div class="strategy-pills-bar">
+            <div class="strategy-pills-bar" role="group" aria-label="策略筛选">
               <button
                 class="strategy-pill"
                 :class="{ active: filterStrategy === '' }"
+                :aria-pressed="filterStrategy === ''"
                 @click="filterStrategy = ''"
               >
                 全部 <b class="pill-num">{{ cases.length }}</b>
@@ -259,6 +232,7 @@
                 :key="st"
                 class="strategy-pill"
                 :class="[`pill-${st}`, { active: filterStrategy === st }]"
+                :aria-pressed="filterStrategy === st"
                 @click="filterStrategy = filterStrategy === st ? '' : st"
               >
                 {{ st }} <b class="pill-num">{{ count }}</b>
@@ -266,15 +240,13 @@
             </div>
 
             <span class="strip-divider"></span>
-            <span v-if="isSixStrategyCovered" class="status-indicator-success">
+            <span v-if="uncoveredStrategyCount === 0" class="status-indicator-success">
               ✓ 6 大策略完备覆盖
             </span>
             <span v-else class="status-indicator-warning">
-              缺失个别策略覆盖
+              缺 {{ uncoveredStrategyCount }} 类策略
             </span>
           </div>
-
-          <div class="grow"></div>
 
           <!-- 键盘流提示 (可悬停查看)：仅在草稿可编辑态展示 -->
           <div v-if="canEditCases" class="keyboard-flow-hint" title="支持键盘方向键与快捷键无障碍操作">
@@ -292,27 +264,26 @@
           </div>
         </div>
 
-        <div class="review-summary" aria-label="用例草稿审核信息">
-          <span class="review-count">待补全 {{ pendingCompleteCount }} 条 · 缺步骤 {{ missingStepsCount }} 条（可暂存草稿，入库前请核对）</span>
-          <span v-if="!currentSet.checks?.length" class="review-clear">服务端自检：无提示</span>
+        <div v-if="pendingCompleteCount || missingStepsCount || currentSet.checks?.length" class="review-summary" aria-label="用例草稿审核信息">
+          <span class="review-count">待补全 {{ pendingCompleteCount }} 条 · 缺步骤 {{ missingStepsCount }} 条</span>
           <span v-for="check in currentSet.checks" :key="check.code" class="review-check" :class="`check-${check.level}`">{{ check.message }}</span>
         </div>
 
         <!-- 3. 用例表格：分页网格 + 居中自定义多选框 -->
-        <div ref="tableContainerRef" class="table-container custom-scroll" tabindex="0">
+        <div ref="tableContainerRef" class="table-container custom-scroll" tabindex="0" role="region" aria-label="测试用例表格">
           <table class="nordic-table">
             <thead>
               <tr>
-                <th class="th-chk" style="width: 48px" title="全选当前页用例" @click.stop="toggleCurrentPageCasesDirect">
+                <th class="th-chk" title="全选当前页用例" @click.stop="toggleCurrentPageCasesDirect">
                   <div class="clean-chk-box" :class="{ checked: isCurrentPageAllChecked }" role="checkbox" :aria-checked="isCurrentPageAllChecked">
                     <svg v-if="isCurrentPageAllChecked" class="chk-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
                       <polyline points="20 6 9 17 4 12" />
                     </svg>
                   </div>
                 </th>
-                <th style="width: 64px">#</th>
-                <th style="width: 100px">用例编码</th>
-                <th style="min-width: 220px">用例名称 <span class="req-star">*</span></th>
+                <th class="th-row-number">#</th>
+                <th class="th-case-code">用例编码</th>
+                <th class="th-case-name">用例名称 <span class="req-star">*</span></th>
                 <th style="width: 120px">所属模块</th>
                 <th style="min-width: 140px">功能点</th>
                 <th style="width: 90px">测试策略</th>
@@ -558,7 +529,10 @@
               :item-count="displayedCases.length"
               :page-sizes="[10, 20, 50, 100]"
               show-size-picker
+              :page-slot="5"
               show-quick-jumper
+              @update:page="resetTableScroll"
+              @update:page-size="resetTableScroll"
             />
           </div>
         </div>
@@ -588,10 +562,10 @@
             </div>
           </div>
         </transition>
-      </main>
+      </section>
 
       <!-- 空态页面 (精致矢量引导态) -->
-      <main v-else class="nordic-main empty-main">
+      <section v-else class="nordic-main empty-main" aria-labelledby="empty-case-set-title">
         <div class="empty-box">
           <div class="empty-icon-wrapper">
             <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -602,9 +576,9 @@
               <polyline points="10 9 9 9 8 9" />
             </svg>
           </div>
-          <h3>{{ pendingTaskId ? missingTaskTitle : '尚未选择或创建用例集' }}</h3>
+          <h2 id="empty-case-set-title">{{ pendingTaskId ? missingTaskTitle : '选择用例集开始工作' }}</h2>
           <p v-if="pendingTaskId" class="empty-desc">{{ missingTaskDescription }}</p>
-          <p v-else class="empty-desc">您可以基于 PRD 或接口需求文档一键自动推导六大策略测试用例，或新建空集手动录入。</p>
+          <p v-else class="empty-desc">从列表打开已有用例集，或根据需求文档生成一份草稿。</p>
           <div class="empty-buttons">
             <button v-if="pendingTaskId" class="btn btn-secondary btn-md" @click="loadCaseSets">刷新用例集</button>
             <button class="btn btn-primary btn-md primary-cta" @click="openAiGenDrawer">
@@ -616,7 +590,7 @@
             </button>
           </div>
         </div>
-      </main>
+      </section>
     </div>
 
     <ImportCasesExcelModal v-model:show="showImportExcel" :current-set="importCurrentSet" @imported="onCasesImported" />
@@ -830,7 +804,7 @@
     <n-dropdown
       trigger="manual"
       placement="bottom-start"
-      :show="ctxMenu.show"
+      v-model:show="ctxMenu.show"
       :x="ctxMenu.x"
       :y="ctxMenu.y"
       :options="ctxMenuOptions"
@@ -973,8 +947,11 @@ const STRATEGY_OPTIONS = [
 const message = useMessage()
 const dialog = useDialog()
 const route = useRoute()
+const saveShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘S' : 'Ctrl+S'
 
 const treeSearch = ref('')
+const mobileTreeOverride = ref<boolean | null>(null)
+const mobileTreeToggle = ref<HTMLButtonElement | null>(null)
 const gridSearch = ref('')
 const caseSets = ref<CaseSet[]>([])
 const activeSetId = ref('')
@@ -1060,6 +1037,7 @@ interface TreeFolder {
 const folders = ref<TreeFolder[]>([{ id: 'cases', name: '用例集目录', open: true, items: [] }])
 
 const currentSet = computed<CaseSet | undefined>(() => caseSets.value.find((s: CaseSet) => s.id === activeSetId.value))
+const mobileTreeOpen = computed(() => mobileTreeOverride.value ?? !currentSet.value)
 /** 导入当前集必须使用已加载的修订号；未保存编辑只能导入为新集。 */
 const importCurrentSet = computed<CaseSet | null>(() => {
   const set = currentSet.value
@@ -1117,7 +1095,7 @@ const strategyDistribution = computed(() => {
   })
   return map
 })
-const isSixStrategyCovered = computed(() => STRATEGIES.every(s => (strategyDistribution.value[s] || 0) > 0))
+const uncoveredStrategyCount = computed(() => STRATEGIES.filter(strategy => !strategyDistribution.value[strategy]).length)
 const pendingCompleteCount = computed(() => cases.value.filter(c => !c.name.trim() || !c.expected_result.trim()).length)
 const missingStepsCount = computed(() => cases.value.filter(c => !c.steps?.length).length)
 
@@ -1149,6 +1127,7 @@ const displayedCases = computed(() => {
 // 监听搜索或策略筛选变化，自动重置页码为 1
 watch([gridSearch, filterStrategy], () => {
   page.value = 1
+  resetTableScroll()
 })
 
 const totalPages = computed(() => Math.max(1, Math.ceil(displayedCases.value.length / pageSize.value)))
@@ -1198,6 +1177,7 @@ function setCellCursor(c: ExtendedTestCase, field: string) {
   if (!canEditCases.value) return
   const idx = getDisplayedIndex(c)
   focusedCell.value = { rowIdx: idx, field }
+  tableContainerRef.value?.focus({ preventScroll: true })
 }
 
 function handleCellClick(c: ExtendedTestCase, field: string) {
@@ -1224,7 +1204,12 @@ function onWorkbenchKeydown(e: KeyboardEvent) {
   }
 
   // 只读（已入库）用例集不参与网格键盘流，保留 ⌘F 搜索能力。
-  if (!canEditCases.value) return
+  if (!canEditCases.value || e.target !== tableContainerRef.value) return
+
+  if (e.key === 'Escape') {
+    focusedCell.value = null
+    return
+  }
 
   if (!focusedCell.value) {
     if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key) && displayedCases.value.length) {
@@ -1272,6 +1257,9 @@ function onWorkbenchKeydown(e: KeyboardEvent) {
       }
       break
     case 'Tab':
+      // 到达网格边缘时让浏览器继续正常的 Tab 焦点顺序。
+      if (e.shiftKey && rowIdx === 0 && fIdx <= 0) break
+      if (!e.shiftKey && rowIdx === displayedCases.value.length - 1 && fIdx === fields.length - 1) break
       e.preventDefault()
       if (e.shiftKey) {
         if (fIdx > 0) focusedCell.value = { rowIdx, field: fields[fIdx - 1] }
@@ -1318,6 +1306,10 @@ function scrollToFocusedRow(idx: number) {
   }
 }
 
+function resetTableScroll() {
+  if (tableContainerRef.value) tableContainerRef.value.scrollTop = 0
+}
+
 const filteredFolders = computed(() => {
   const keyword = treeSearch.value.trim().toLowerCase()
   if (!keyword) return folders.value
@@ -1326,6 +1318,11 @@ const filteredFolders = computed(() => {
     items: folder.items.filter((item: CaseSet) => item.name.toLowerCase().includes(keyword)),
   })).filter(folder => folder.items.length > 0)
 })
+
+function toggleCaseFolder(id: string) {
+  const folder = folders.value.find(item => item.id === id)
+  if (folder) folder.open = !folder.open
+}
 
 // 自定义列
 const customColsMap = ref<Record<string, CustomColumn[]>>({})
@@ -1491,6 +1488,13 @@ function requestSelectCaseSet(id: string, after?: () => void) {
       }
       void selectCaseSet(id).then(() => after?.())
     },
+  })
+}
+
+function selectCaseSetFromTree(id: string) {
+  requestSelectCaseSet(id, () => {
+    mobileTreeOverride.value = false
+    if (mobileTreeToggle.value?.offsetWidth) mobileTreeToggle.value.focus()
   })
 }
 
@@ -1810,7 +1814,10 @@ const ctxMenu = ref<{ show: boolean; x: number; y: number; type: CtxMenuType; ta
 })
 
 function openCtxMenu(e: MouseEvent, type: CtxMenuType, targetId = '', rowIdx = -1) {
-  ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, type, targetId, rowIdx }
+  const anchor = e.type === 'click' && e.currentTarget instanceof HTMLElement
+    ? e.currentTarget.getBoundingClientRect()
+    : null
+  ctxMenu.value = { show: true, x: anchor?.left ?? e.clientX, y: anchor?.bottom ?? e.clientY, type, targetId, rowIdx }
 }
 function closeCtxMenu() {
   ctxMenu.value.show = false
