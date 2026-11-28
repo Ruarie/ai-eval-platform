@@ -71,8 +71,17 @@ def _strategy_fit(cases: list[dict], weights: dict[str, int]) -> float:
     return max(0.0, 1.0 - distance / 2)
 
 
-def score_cases(cases: list[dict], weights: dict[str, int] | None = None) -> dict:
-    """给一份候选打结构分。没有用例时各维为 0。"""
+def score_cases(
+    cases: list[dict],
+    weights: dict[str, int] | None = None,
+    source_text: str = "",
+) -> dict:
+    """给一份候选打结构分。没有用例时各维为 0。
+
+    ``source_text`` 传入时，自检会核对 P0 编号是否被用例覆盖。存在 error 级自检
+    （缺核心正向、缺反向，或 P0 编号没有对应用例）时，分数封顶到 84.9，等级最高为 B。
+    三份实测需求的结构分都在 94 以上，但各少一条 P0；只靠 10% 的自检权重仍会显示 A。
+    """
     weights = validate_strategy_weights(weights)
     total = len(cases)
     if not total:
@@ -95,7 +104,7 @@ def score_cases(cases: list[dict], weights: dict[str, int] | None = None) -> dic
     actionable_count = sum(1 for case in cases if _actionable(case))
     actionable = actionable_count / total
     strategy = _strategy_fit(cases, weights)
-    checks = selfcheck(cases, weights=weights)
+    checks = selfcheck(cases, weights=weights, source_text=source_text)
     review = 1.0 if not checks else 0.0
     dimensions = {
         "complete": round(complete, 3),
@@ -112,6 +121,9 @@ def score_cases(cases: list[dict], weights: dict[str, int] | None = None) -> dic
     if actionable < 0.8:
         issues.append(f"仅 {actionable_count}/{total} 条步骤可执行且预期可观察")
     issues.extend(check["message"] for check in checks)
+    # error 级自检表示还不能当作成品，不能靠其余维度把等级维持在 A。
+    if any(check.get("level") == "error" for check in checks):
+        score = min(score, 84.9)
     grade = "A" if score >= 85 else "B" if score >= 70 else "C" if score >= 55 else "D"
     return {
         "score": round(score, 1),
@@ -161,10 +173,11 @@ def compare_case_runs(
     right_name: str = "模型 B",
     left_ok: bool = True,
     right_ok: bool = True,
+    source_text: str = "",
 ) -> dict:
     """对比两份候选并写出本轮结论。任一侧失败时不拿空列表冒充低分。"""
-    left_score = score_cases(left, weights) if left_ok else None
-    right_score = score_cases(right, weights) if right_ok else None
+    left_score = score_cases(left, weights, source_text=source_text) if left_ok else None
+    right_score = score_cases(right, weights, source_text=source_text) if right_ok else None
     shared, only_left, only_right = _split_points(
         _points(left) if left_ok else [],
         _points(right) if right_ok else [],
