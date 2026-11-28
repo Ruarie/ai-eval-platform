@@ -506,7 +506,7 @@ def run_testcase(task_id: str) -> None:
             status="generated",
             generated_count=len(cases),
             confirmed_count=0,
-            checks=selfcheck(cases, weights=weights),
+            checks=selfcheck(cases, weights=weights, source_text=source_text),
             expires_at=expires_at,
         )
         db.add(case_set)

@@ -422,3 +422,56 @@ def test_parse_review_normalizes_and_clamps():
 def test_parse_review_rejects_non_object():
     with pytest.raises(ValueError):
         casegen.parse_review("[1, 2, 3]")
+
+
+def test_dedupe_keeps_cases_with_different_requirement_ids():
+    """措辞接近但编号不同的规则必须都留下。同意和撤回都写「待审批」时不能并成一条。"""
+    items = [
+        {
+            "name": "待审批状态的单据可以被同意", "strategy": "状态迁移",
+            "feature_point": "FR-201 待审批状态的单据可以被同意",
+            "steps": "1. 打开待审批单据\n2. 点击同意", "expected": "状态变为已通过",
+        },
+        {
+            "name": "待审批状态的单据可以被撤回", "strategy": "状态迁移",
+            "feature_point": "FR-204 待审批状态的单据可以被撤回",
+            "steps": "1. 打开待审批单据\n2. 点击撤回", "expected": "状态变为已撤回",
+        },
+    ]
+    kept, dropped = casegen.dedupe_cases(items)
+    assert dropped == 0
+    assert [item["feature_point"][:6] for item in kept] == ["FR-201", "FR-204"]
+
+
+def test_rebalance_keeps_later_requirement_beyond_strategy_quota():
+    """状态迁移默认只有一个名额时，后出现的另一条编号用例不能被配额裁掉。"""
+    fillers = [{"name": f"正向{index}", "strategy": "正向", "priority": "HX"} for index in range(12)]
+    early = {
+        "name": "草稿不可见", "strategy": "状态迁移", "priority": "FHX",
+        "feature_point": "FR-105 草稿不进审批",
+    }
+    later = {
+        "name": "待审批可撤回", "strategy": "状态迁移", "priority": "HX",
+        "feature_point": "FR-204 待审批可撤回",
+    }
+    kept, _dropped = casegen.rebalance_with_stats([early, *fillers, later], 24)
+    state_names = [item["name"] for item in kept if item["strategy"] == "状态迁移"]
+    assert state_names == ["草稿不可见", "待审批可撤回"]
+
+
+def test_selfcheck_flags_missing_p0_requirement_id():
+    """只对原文里标了 P0 的编号报缺，P1 没写到用例上不报。"""
+    source = "| FR-101 | 提交报销 | P0 |\n| FR-204 | 待审批可撤回 | P0 |\n| FR-105 | 草稿 | P1 |"
+    cases = [
+        {"name": "提交", "strategy": "正向", "priority": "HX", "feature_point": "FR-101 提交"},
+        {"name": "缺附件", "strategy": "反向", "feature_point": "FR-101 附件"},
+    ]
+    checks = casegen.selfcheck(cases, source_text=source)
+    missing = next(item for item in checks if item["code"] == "missing_p0")
+    assert "FR-204" in missing["message"]
+    assert "FR-105" not in missing["message"]
+    assert "FR-101" not in missing["message"]
+    covered = cases + [{
+        "name": "撤回", "strategy": "状态迁移", "priority": "HX", "feature_point": "FR-204 撤回",
+    }]
+    assert all(item["code"] != "missing_p0" for item in casegen.selfcheck(covered, source_text=source))

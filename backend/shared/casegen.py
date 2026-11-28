@@ -511,6 +511,16 @@ def _overlaps(left: set[str], right: set[str]) -> float:
     return len(left & right) / min(len(left), len(right))
 
 
+_REQ_ID = re.compile(r"(?:FR|NFR|BR|SR)-\d{2,4}", re.IGNORECASE)
+_P0_MARK = re.compile(r"(?<![A-Za-z0-9])P0(?![A-Za-z0-9])")
+
+
+def case_requirement_ids(item: dict) -> set[str]:
+    """从用例名称和功能点抽出需求编号。没有编号时返回空集。"""
+    text = f"{item.get('feature_point') or ''} {item.get('name') or ''}"
+    return {match.group(0).upper() for match in _REQ_ID.finditer(text)}
+
+
 def dedupe_cases(items: list[dict]) -> tuple[list[dict], int]:
     """按名称、步骤预期、以及名称+功能点近似度去重，返回 ``(保留项, 丢弃条数)``。
 
@@ -518,21 +528,30 @@ def dedupe_cases(items: list[dict]) -> tuple[list[dict], int]:
     前两种用精确指纹；第三种用与质量评分相同的二元组重叠（≥ 0.75）。
     指纹要求步骤 ≥ 8 字且预期 ≥ 4 字，近似键至少 4 个词片，避免把「留空待澄清」或短名称误合并。
     缺名称的条目不参与名称去重（由上层判缺项）。
+
+    带有尚未保留过的需求编号时，不按步骤或功能点近似合并。三份实测需求都出现过
+    「待审批可同意」和「待审批可撤回」因措辞接近被并成一条，后一条 P0 就此消失。
     """
     seen_name: set[tuple[str, str]] = set()
     seen_content: set[tuple[str, str, str, str]] = set()
     seen_near: list[set[str]] = []
+    covered_ids: set[str] = set()
     result: list[dict] = []
     for item in items:
         strategy = str(item.get("strategy") or "")
         name = "".join(str(item.get("name") or "").split()).lower()
         signature = _content_signature(item)
         near = _near_key(item)
+        ids = case_requirement_ids(item)
+        # 新编号代表另一条规则，即使步骤措辞接近也不能当成重复灌水。
+        novel = bool(ids - covered_ids)
         if name and (strategy, name) in seen_name:
             continue
-        if signature is not None and signature in seen_content:
+        if not novel and signature is not None and signature in seen_content:
             continue
-        if near is not None and any(_overlaps(near, prev) >= NEAR_DUP_OVERLAP for prev in seen_near):
+        if not novel and near is not None and any(
+            _overlaps(near, prev) >= NEAR_DUP_OVERLAP for prev in seen_near
+        ):
             continue
         if name:
             seen_name.add((strategy, name))
@@ -540,6 +559,7 @@ def dedupe_cases(items: list[dict]) -> tuple[list[dict], int]:
             seen_content.add(signature)
         if near is not None:
             seen_near.append(near)
+        covered_ids |= ids
         result.append(item)
     return result, len(items) - len(result)
 
@@ -713,6 +733,10 @@ def rebalance_with_stats(
     统计用于向用户解释「模型给了 N 条、实际保留 M 条」：
     ``dropped_unknown_strategy`` = 策略不在本次所选配比内的条目（含模型自创策略），
     ``dropped_over_quota`` = 同一策略超过配额或总数超过 max_count 的条目。
+
+    带新需求编号的用例先保留，不受策略配额限制，直到总数达到 ``max_count``。
+    默认配比里状态迁移只有约 5%，三份实测都把后出现的 P0 状态用例裁掉，
+    只留下更早的一条低优先级状态用例。没有编号的用例仍按原配额从前往后截取。
     """
     weights = validate_strategy_weights(weights)
     total_weight = sum(weights.values())
@@ -722,22 +746,51 @@ def rebalance_with_stats(
     }
     dropped_unknown = 0
     dropped_over_quota = 0
-    grouped: dict[str, list[dict]] = {}
+    eligible: list[dict] = []
     for item in items:
         strategy = str(item.get("strategy") or "")
         if quotas.get(strategy, 0) <= 0:
             dropped_unknown += 1
             continue
-        grouped.setdefault(strategy, []).append(item)
-    result: list[dict] = []
-    for strategy, group in grouped.items():
-        quota = quotas[strategy]
-        result.extend(group[:quota])
-        dropped_over_quota += max(0, len(group) - quota)
-    if len(result) > max_count:
-        dropped_over_quota += len(result) - max_count
-        result = result[:max_count]
-    return result, {
+        eligible.append(item)
+
+    covered: set[str] = set()
+    anchors: list[dict] = []
+    rest: list[dict] = []
+    for item in eligible:
+        novel = case_requirement_ids(item) - covered
+        if novel:
+            anchors.append(item)
+            covered |= novel
+        else:
+            rest.append(item)
+    if len(anchors) > max_count:
+        # 编号过多时优先留核心用例，同优先级保持原文顺序。
+        ranked = sorted(
+            enumerate(anchors),
+            key=lambda pair: (0 if pair[1].get("priority") == "HX" else 1, pair[0]),
+        )
+        keep_at = {index for index, _item in ranked[:max_count]}
+        dropped_over_quota += len(anchors) - max_count
+        anchors = [item for index, item in enumerate(anchors) if index in keep_at]
+        rest = []
+
+    used: dict[str, int] = {}
+    for item in anchors:
+        strategy = str(item.get("strategy") or "")
+        used[strategy] = used.get(strategy, 0) + 1
+    selected = list(anchors)
+    for item in rest:
+        if len(selected) >= max_count:
+            dropped_over_quota += 1
+            continue
+        strategy = str(item.get("strategy") or "")
+        if used.get(strategy, 0) >= quotas[strategy]:
+            dropped_over_quota += 1
+            continue
+        selected.append(item)
+        used[strategy] = used.get(strategy, 0) + 1
+    return selected, {
         "dropped_unknown_strategy": dropped_unknown,
         "dropped_over_quota": dropped_over_quota,
     }
@@ -750,11 +803,17 @@ def rebalance_by_strategy(
     return rebalance_with_stats(items, max_count, weights=weights)[0]
 
 
-def selfcheck(cases: list[dict], weights: dict[str, int] | None = None) -> list[dict]:
+def selfcheck(
+    cases: list[dict],
+    weights: dict[str, int] | None = None,
+    source_text: str = "",
+) -> list[dict]:
     """自检红字（PRD 5.4.1 P0）：无核心正向、缺约束反向 → 确认页红字检查项。
 
     ``weights`` 给定时只检查权重 > 0 的策略：用户主动选择「只生成正向」时，
     再要求反向用例属于拿默认配比否定用户的显式配置。
+    ``source_text`` 给定时，需求原文里标了 P0 且带编号的条目必须在用例名称或
+    功能点中出现；只写了规则、没带编号的 P1 不在这里报缺。
     """
     weights = validate_strategy_weights(weights)
     checks: list[dict] = []
@@ -773,4 +832,23 @@ def selfcheck(cases: list[dict], weights: dict[str, int] | None = None) -> list[
         negatives = [case for case in cases if case.get("strategy") == "反向"]
         if not negatives:
             checks.append({"level": "error", "code": "missing_constraint_negative", "message": "自检未通过：缺少反向（约束/异常）策略用例"})
+    if source_text:
+        covered = {rule_id for case in cases for rule_id in case_requirement_ids(case)}
+        missing: list[str] = []
+        for rule in requirement_rules(source_text):
+            if not _P0_MARK.search(rule):
+                continue
+            match = _REQ_ID.search(rule)
+            if match is None:
+                continue
+            rule_id = match.group(0).upper()
+            if rule_id not in covered and rule_id not in missing:
+                missing.append(rule_id)
+        if missing:
+            shown = "、".join(missing[:8])
+            checks.append({
+                "level": "error",
+                "code": "missing_p0",
+                "message": f"自检未通过：P0 需求没有对应用例：{shown}",
+            })
     return checks
