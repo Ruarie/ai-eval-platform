@@ -1,14 +1,11 @@
 <template>
   <div class="loop-composer" :class="{ 'is-busy': busy || draft.submitting }" @dragover.prevent @drop.prevent="drop">
-    <div v-if="busy || draft.submitting" class="composer-border-beam" aria-hidden="true">
-      <span class="composer-beam-head" />
-      <span class="composer-beam-head is-delayed" />
-    </div>
-    <div class="draft-files"><AttachmentPreview v-for="file in draft.files" :key="file.key" :attachment="{file_id:file.id,filename:file.filename,size:file.size,content_type:file.content_type,preview_url:file.source,uploading:file.uploading,uploadProgress:file.progress,error:!!file.error}" removable @remove="remove(file)"/></div>
-    <textarea ref="input" v-model="draft.content" aria-label="消息" placeholder="输入任何评测问题或需求，Shift + Enter 换行，Enter 发送" rows="1" @input="resize" @paste="() => nextTick(resize)" @keydown="keydown" />
+    <div v-if="busy || draft.submitting" class="composer-border-beam" aria-hidden="true"></div>
+    <div v-if="draft.files.length" class="draft-files"><AttachmentPreview v-for="file in draft.files" :key="file.key" :attachment="{file_id:file.id,filename:file.filename,size:file.size,content_type:file.content_type,preview_url:file.source,uploading:file.uploading,uploadProgress:file.progress,error:!!file.error}" removable @remove="remove(file)"/></div>
+    <textarea ref="input" v-model="draft.content" aria-label="消息" placeholder="输入消息，或拖入附件" aria-keyshortcuts="Enter Shift+Enter" rows="1" @input="resize" @paste="() => nextTick(resize)" @keydown="keydown" />
     <div class="composer-bottom">
       <input ref="picker" type="file" multiple hidden :accept="ui?.attachments.upload_suffixes.join(',')" @change="pick"/>
-      <button class="loop-control attach-trigger" aria-label="添加附件" type="button" :disabled="!ui" @click="picker?.click()"><n-icon :component="AddIcon" :size="15"/></button>
+      <button class="loop-control attach-trigger" aria-label="添加附件" title="添加附件" type="button" :disabled="!ui" @click="picker?.click()"><n-icon :component="AddIcon" :size="17"/></button>
       <n-popover v-model:show="agentOpen" trigger="click" placement="top-start" :show-arrow="false">
         <template #trigger>
           <button class="loop-control model-trigger agent-trigger" type="button" aria-haspopup="dialog" :aria-expanded="agentOpen" :disabled="!agents.length">
@@ -309,154 +306,217 @@ function pick(event: Event) { const el = event.target as HTMLInputElement; void 
 function drop(event: DragEvent) { void upload(Array.from(event.dataTransfer?.files || [])) }
 </script>
 <style scoped>
-.loop-composer{position:relative;border:1px solid #d8e2de;border-radius:20px;background:#fff;box-shadow:0 4px 20px -2px rgba(23,74,58,.06),0 2px 6px -1px rgba(15,23,42,.04);padding:12px 14px 10px;transition:border-color .2s ease,box-shadow .2s ease,background-color .2s ease}.loop-composer:hover{border-color:#c4d8ce;box-shadow:0 6px 24px -2px rgba(23,74,58,.09),0 3px 8px -1px rgba(15,23,42,.05)}.loop-composer:focus-within{border-color:#1f5947;box-shadow:0 8px 30px -2px rgba(23,74,58,.12),0 0 0 3px rgba(31,89,71,.12)}.loop-composer textarea{display:block;box-sizing:border-box;resize:none;width:100%;border:0;outline:none;background:transparent;color:#263548;font:inherit;font-size:14.5px;min-height:52px;max-height:200px;padding:6px 8px 8px;line-height:1.6}.loop-composer textarea::placeholder{color:#99a6b6}[data-theme='dark'] .loop-composer{background:#111827;border-color:rgba(255,255,255,.12);box-shadow:0 4px 24px -2px rgba(0,0,0,.5),0 2px 6px -1px rgba(0,0,0,.3)}[data-theme='dark'] .loop-composer textarea{color:#f3f4f6}[data-theme='dark'] .loop-control{color:var(--text-secondary,#9ca3af)}[data-theme='dark'] .loop-control:hover:not(:disabled){background:rgba(255,255,255,.06);color:var(--text-primary,#f9fafb)}[data-theme='dark'] .loop-composer:focus-within{border-color:#16977a;box-shadow:0 8px 30px -2px rgba(0,0,0,.6),0 0 0 3px rgba(22,151,122,.2)}.composer-bottom{display:flex;min-width:0;min-height:34px;align-items:center;gap:3px;flex-wrap:wrap;row-gap:4px}.loop-control{display:inline-flex;min-width:0;flex:0 0 auto;align-items:center;border:1px solid transparent;border-radius:8px;background:transparent;color:#667487;padding:6px 7px;font-size:12px;line-height:18px;cursor:pointer;white-space:nowrap}.loop-control:hover:not(:disabled){background:#f3f7f5;color:#304a3e}.loop-control:disabled{cursor:default;opacity:.55}.attach-trigger{width:28px;height:30px;justify-content:center;padding:0}.model-trigger{max-width:min(250px,42vw);gap:5px}.model-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.model-chevron{flex:0 0 auto;color:#8895a4}.model-popover{width:min(330px,calc(100vw - 30px));padding:5px}.model-popover header{padding:7px 8px 9px}.model-popover header strong{font-size:13px;color:#2e3b4c}.model-popover header p{margin:3px 0 0;color:#7a8798;font-size:11px;line-height:1.45}.model-option{display:flex;width:100%;align-items:center;gap:7px;border:1px solid transparent;border-radius:9px;background:transparent;color:#3d4b5c;padding:8px;text-align:left;cursor:pointer}.model-option:hover,.model-option.selected{background:#f2f7f4;border-color:#dae9e0}.model-option>span{display:grid;min-width:0;gap:1px}.model-option strong,.model-option small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.model-option strong{font-size:12px}.model-option small{color:#7c8998;font-size:11px}.model-option>.n-icon{margin-left:auto;color:#287551}.loop-send{display:inline-flex;flex:0 0 auto;width:32px;height:32px;margin-left:auto;align-items:center;justify-content:center;border:0;border-radius:50%;background:#edf1f2;color:#94a3b8;padding:0;cursor:pointer;transition:background-color .18s ease,color .18s ease,transform .15s ease,box-shadow .18s ease,opacity .18s ease}.loop-send:not(:disabled){background:#1f5947;color:#fff;box-shadow:0 1px 3px rgba(23,74,58,.25)}.loop-send:not(:disabled):hover{background:#184738;color:#fff;transform:scale(1.05);box-shadow:0 2px 6px rgba(23,74,58,.35)}.loop-send:not(:disabled):active{background:#143d30;transform:scale(.96)}.loop-send:disabled{cursor:not-allowed;opacity:.65}.loop-send.is-cancelling{opacity:.8;cursor:wait}.loop-send-icon{display:block;flex-shrink:0}[data-theme='dark'] .loop-send{background:rgba(255,255,255,.08);color:rgba(255,255,255,.3)}[data-theme='dark'] .loop-send:not(:disabled){background:#16977a;color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4)}[data-theme='dark'] .loop-send:not(:disabled):hover{background:#148369;color:#fff}.draft-files{display:flex;flex-wrap:wrap;gap:8px;padding:2px 2px 5px}.draft-note{margin:6px 5px 1px;color:#718277;font-size:11px}.draft-note button{border:0;background:transparent;color:#356f59;padding:0;text-decoration:underline;cursor:pointer}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap}@media(max-width:560px){.loop-composer{border-radius:14px;padding:7px}.loop-composer textarea{font-size:13px}.model-trigger{max-width:44vw}.model-popover{width:min(310px,calc(100vw - 22px))}}@media(prefers-reduced-motion:reduce){.loop-composer,.loop-send{transition:none}}
-.loop-composer textarea:focus,.loop-composer textarea:focus-visible{border:0!important;outline:0!important;box-shadow:none!important}
-.tier-trigger{gap:5px}.tier-trigger.is-warning{color:#d97706}.tier-trigger-icon{display:inline-flex;align-items:center;justify-content:center;color:#667487;flex-shrink:0}.tier-trigger-icon.is-warning{color:#d97706}[data-theme='dark'] .tier-trigger.is-warning,[data-theme='dark'] .tier-trigger-icon.is-warning{color:#fbbf24}.tier-popover{width:min(320px,calc(100vw - 30px));padding:5px}.tier-list{display:flex;flex-direction:column;gap:2px}.tier-option{display:flex;width:100%;align-items:center;gap:10px;border:1px solid transparent;border-radius:9px;background:transparent;padding:8px 10px;text-align:left;cursor:pointer;transition:background-color .15s ease,border-color .15s ease}.tier-option:hover{background:#f2f7f4;border-color:#dae9e0}.tier-option.is-selected{background:#eef6f2;border-color:#cde4d6}.tier-option-icon{display:flex;align-items:center;justify-content:center;flex:0 0 24px;width:24px;height:24px;color:#475569}.tier-option-icon.is-warning{color:#d97706}.tier-option-content{display:flex;flex-direction:column;min-width:0;flex:1 1 auto;gap:1px}.tier-option-title{font-size:13px;font-weight:600;color:#1e293b;line-height:1.35}.tier-option-title.is-warning{color:#d97706}.tier-option-desc{font-size:11.5px;color:#64748b;line-height:1.4}.tier-option-desc.is-warning{color:#b45309}.tier-option-check{display:inline-flex;align-items:center;justify-content:center;margin-left:auto;flex:0 0 auto;color:#1f5947}[data-theme='dark'] .tier-option:hover{background:rgba(22,151,122,.12);border-color:rgba(22,151,122,.25)}[data-theme='dark'] .tier-option.is-selected{background:rgba(22,151,122,.18);border-color:rgba(22,151,122,.35)}[data-theme='dark'] .tier-option-icon{color:#94a3b8}[data-theme='dark'] .tier-option-icon.is-warning{color:#fbbf24}[data-theme='dark'] .tier-option-title{color:#f1f5f9}[data-theme='dark'] .tier-option-title.is-warning{color:#fbbf24}[data-theme='dark'] .tier-option-desc{color:#94a3b8}[data-theme='dark'] .tier-option-desc.is-warning{color:#f59e0b}[data-theme='dark'] .tier-option-check{color:#34d399}
-
-/* Agent 运行中边框旋绕循环动画 (基于 CSS Motion Path 沿圆角边缘匀速循环) */
 .loop-composer {
-  --composer-radius: 20px;
-}
-@media (max-width: 560px) {
-  .loop-composer {
-    --composer-radius: 14px;
-  }
-}
-
-.loop-composer.is-busy {
-  border-color: rgba(96, 165, 250, 0.45);
-  box-shadow: 0 4px 24px -2px rgba(59, 130, 246, 0.16), 0 0 16px rgba(59, 130, 246, 0.12);
-}
-[data-theme='dark'] .loop-composer.is-busy {
-  border-color: rgba(96, 165, 250, 0.35);
-  box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.6), 0 0 20px rgba(59, 130, 246, 0.18);
-}
-
-.draft-files,
-.loop-composer textarea,
-.composer-bottom,
-.draft-note {
   position: relative;
-  z-index: 3;
+  padding: 10px 10px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
 
-/* 边框通道：硬件加速合成层，掏空中间内容，仅露出边缘 1.5px 边框 */
+.loop-composer:hover {
+  border-color: color-mix(in srgb, var(--accent-ai) 30%, var(--border-subtle));
+}
+
+.loop-composer:focus-within {
+  border-color: var(--accent-ai);
+  box-shadow: var(--focus-ring);
+}
+
+.loop-composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  max-height: min(200px, 50dvh);
+  padding: 5px 6px;
+  border: 0;
+  resize: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.loop-composer textarea::placeholder { color: var(--text-tertiary); }
+.loop-composer textarea:focus-visible { box-shadow: none; }
+
+.composer-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 34px;
+  padding-top: 2px;
+}
+
+.loop-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 32px;
+  align-items: center;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.loop-control:hover:not(:disabled), .loop-control[aria-expanded='true'] {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.loop-control:disabled { cursor: default; opacity: .55; }
+
+.attach-trigger {
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+  background: var(--bg-elevated);
+}
+
+.model-trigger { max-width: min(230px, 45%); gap: 4px; }
+.model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-chevron { flex-shrink: 0; color: var(--text-tertiary); }
+
+.model-popover, .tier-popover {
+  width: min(318px, calc(100vw - 36px));
+  max-height: min(420px, 55dvh);
+  overflow: auto;
+  padding: 4px;
+}
+
+.model-popover header { padding: 6px 8px 8px; }
+.model-popover header strong { color: var(--text-primary); font-size: 13px; }
+.model-popover header p { margin: 3px 0 0; color: var(--text-secondary); font-size: 11.5px; line-height: 1.5; }
+.tier-list { display: grid; gap: 2px; }
+
+.model-option, .tier-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: start;
+  cursor: pointer;
+}
+
+.model-option:hover, .tier-option:hover { background: var(--bg-elevated); }
+
+.model-option.selected, .tier-option.is-selected {
+  border-color: color-mix(in srgb, var(--accent-ai) 22%, var(--border-subtle));
+  background: var(--t-agent);
+}
+
+.model-option > span, .tier-option-content { display: grid; flex: 1; min-width: 0; gap: 2px; }
+.model-option strong, .model-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-option strong, .tier-option-title { font-size: 13px; line-height: 1.35; }
+.model-option small, .tier-option-desc { color: var(--text-secondary); font-size: 11.5px; line-height: 1.4; }
+.model-option > .n-icon, .tier-option-check { flex-shrink: 0; color: var(--c-agent); }
+
+.tier-trigger-icon, .tier-option-icon, .tier-option-check { display: inline-flex; flex-shrink: 0; align-items: center; }
+.tier-option-icon { width: 22px; color: var(--text-secondary); }
+.tier-trigger.is-warning, .tier-option-icon.is-warning, .tier-option-title.is-warning { color: var(--accent-warning); }
+
+.loop-send {
+  display: inline-flex;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  margin-inline-start: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--accent-solid);
+  color: #fff;
+  cursor: pointer;
+}
+
+.loop-send:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent-solid) 90%, var(--text-primary));
+}
+
+.loop-send:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+}
+
+.loop-send.is-cancelling { cursor: wait; }
+.loop-send-icon { display: block; flex-shrink: 0; }
+
+.draft-files { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 2px 5px; }
+.draft-note { margin: 6px 5px 1px; color: var(--text-secondary); font-size: 11px; }
+
+.draft-note button {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--c-agent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* 生成中以细线标记输入区，同时保留可见的停止按钮。 */
+.loop-composer.is-busy { border-color: color-mix(in srgb, var(--accent-ai) 42%, var(--border-subtle)); }
+
 .composer-border-beam {
   position: absolute;
-  inset: -1.5px;
-  border-radius: inherit;
-  padding: 1.5px;
-  pointer-events: none;
+  inset: -1px 14px auto;
+  height: 2px;
   overflow: hidden;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  z-index: 2;
-  contain: strict;
-  transform: translateZ(0);
+  background: var(--t-agent);
+  pointer-events: none;
 }
 
-/* 沿圆角矩形切线匀速循环的双光束头 (独立 GPU 合成，消除主线程卡顿) */
-.composer-beam-head {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 140px;
-  height: 140px;
-  border-radius: 50%;
-  offset-path: rect(0 auto auto 0 round var(--composer-radius, 20px));
-  offset-anchor: 50% 50%;
-  will-change: transform, offset-distance;
-  transform: translateZ(0);
-  animation: composer-beam-travel 4s linear infinite;
-  background: radial-gradient(
-    circle at center,
-    #38bdf8 0%,
-    rgba(59, 130, 246, 0.9) 35%,
-    rgba(37, 99, 235, 0.4) 65%,
-    transparent 85%
-  );
+.composer-border-beam::before {
+  content: '';
+  display: block;
+  width: 35%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--accent-ai), transparent);
+  animation: composer-progress 2.7s ease-in-out infinite;
 }
 
-.composer-beam-head.is-delayed {
-  animation-delay: -2s;
-  background: radial-gradient(
-    circle at center,
-    #60a5fa 0%,
-    rgba(99, 102, 241, 0.85) 35%,
-    rgba(37, 99, 235, 0.4) 65%,
-    transparent 85%
-  );
+@keyframes composer-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(287%); }
 }
 
-[data-theme='dark'] .composer-beam-head {
-  background: radial-gradient(
-    circle at center,
-    #60a5fa 0%,
-    rgba(96, 165, 250, 0.9) 35%,
-    rgba(59, 130, 246, 0.4) 65%,
-    transparent 85%
-  );
-}
-
-[data-theme='dark'] .composer-beam-head.is-delayed {
-  background: radial-gradient(
-    circle at center,
-    #38bdf8 0%,
-    rgba(129, 140, 248, 0.9) 35%,
-    rgba(59, 130, 246, 0.4) 65%,
-    transparent 85%
-  );
-}
-
-@keyframes composer-beam-travel {
-  from {
-    offset-distance: 0%;
-  }
-  to {
-    offset-distance: 100%;
-  }
-}
-
-@supports not (offset-path: rect(0 auto auto 0 round 20px)) {
-  .composer-beam-head {
-    display: none !important;
-  }
-  .composer-border-beam::before {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 300%;
-    height: 600%;
-    transform: translate(-50%, -50%) rotate(0deg);
-    background: conic-gradient(
-      from 0deg at 50% 50%,
-      transparent 0deg,
-      transparent 270deg,
-      rgba(56, 189, 248, 0.25) 300deg,
-      #38bdf8 335deg,
-      #3b82f6 352deg,
-      #818cf8 360deg
-    );
-    animation: composer-beam-spin 3.2s linear infinite;
-    will-change: transform;
-  }
-  @keyframes composer-beam-spin {
-    from {
-      transform: translate(-50%, -50%) rotate(0deg);
-    }
-    to {
-      transform: translate(-50%, -50%) rotate(360deg);
-    }
-  }
+@media (max-width: 560px) {
+  .loop-composer { padding: 7px; }
+  .loop-composer textarea { font-size: 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-beam-head,
-  .composer-border-beam::before {
-    animation: none !important;
-  }
+  .loop-composer { transition: none; }
+  .composer-border-beam::before { animation: none; }
+}
+
+@media (forced-colors: active) {
+  .loop-composer textarea:focus-visible { outline: 2px solid CanvasText; }
 }
 </style>

@@ -1,35 +1,30 @@
 <template>
-  <div class="rc-page">
-    <header class="rc-head">
-      <div>
-        <div class="eyebrow">能力中心</div>
-        <h1>{{ cfg.title }}</h1>
-        <p>{{ cfg.sub }}</p>
-      </div>
-      <div class="rc-head-actions">
+  <div class="workbench-page">
+    <header class="workbench-intro">
+      <p>{{ cfg.sub }}</p>
+      <div class="rc-head-actions workbench-actions">
         <n-button :disabled="loading" @click="reload">刷新</n-button>
         <n-button type="primary" @click="openEditor()">新建{{ cfg.noun }}</n-button>
       </div>
     </header>
 
-    <section class="rc-toolbar" aria-label="筛选">
+    <section class="workbench-filters" aria-label="资源筛选">
       <n-input
         v-model:value="query"
+        class="workbench-filter workbench-filter-wide"
         clearable
         placeholder="搜索名称或描述"
-        aria-label="搜索资源"
+        :input-props="{ 'aria-label': '搜索资源' }"
         :maxlength="80"
         @keyup.enter="reload"
       />
-      <n-select v-model:value="scope" :options="scopeOptions" aria-label="范围" style="width: 140px" />
-      <n-select v-model:value="sort" :options="sortOptions" aria-label="排序" style="width: 150px" />
+      <n-select v-model:value="scope" class="workbench-filter" :options="scopeOptions" :input-props="{ 'aria-label': '资源范围' }" />
+      <n-select v-model:value="sort" class="workbench-filter" :options="sortOptions" :input-props="{ 'aria-label': '排序方式' }" />
       <n-button :disabled="loading" @click="reload">搜索</n-button>
+      <span class="workbench-count">共 {{ total }} 个{{ cfg.noun }}</span>
     </section>
 
-    <p class="rc-caption">
-      共 {{ total }} 个{{ cfg.noun }}
-      <span>团队共享的资源全员可用；私有资源只有你和管理员可见。不会保存任何密钥。</span>
-    </p>
+    <p class="rc-caption">团队资源全员可用，私有资源仅创建人与管理员可见。</p>
 
     <n-spin :show="loading">
       <div v-if="error" class="rc-error">
@@ -47,12 +42,13 @@
           v-for="item in items"
           :key="item.id"
           class="rc-card"
-          :style="{ '--t': cfg.t, '--c': cfg.c }"
+          :style="{ '--c': cfg.c }"
         >
           <div class="rc-card-top">
-            <span class="rc-kind">{{ cfg.noun }}</span>
+            <h2 class="rc-card-title">
+              <button class="rc-name" :title="item.name" @click="openDetail(item)">{{ item.name }}</button>
+            </h2>
             <span class="rc-vis" :class="item.visibility">{{ item.visibility === 'team' ? '团队' : '私有' }}</span>
-            <button class="rc-name" :title="item.name" @click="openDetail(item)">{{ item.name }}</button>
           </div>
           <p class="rc-summary">{{ item.summary || '（暂无描述）' }}</p>
           <div class="rc-meta">
@@ -171,7 +167,7 @@
       <n-drawer-content :title="detail.item?.name || ''" closable>
         <template v-if="detail.item">
           <div class="rc-detail-meta">
-            <span class="rc-kind">{{ cfg.noun }}</span>
+            <span class="rc-kind" :style="{ '--t': cfg.t, '--c': cfg.c }">{{ cfg.noun }}</span>
             <span class="rc-vis" :class="detail.item.visibility">
               {{ detail.item.visibility === 'team' ? '团队' : '私有' }}
             </span>
@@ -248,8 +244,8 @@ import { resources, type ResourceItem, type ResourceKind, type ResourceVisibilit
 const route = useRoute()
 const message = useMessage()
 
+/** 能力中心各资源类型的文案与强调色。 */
 interface KindConfig {
-  title: string
   sub: string
   noun: string
   t: string
@@ -257,11 +253,11 @@ interface KindConfig {
 }
 
 const CONFIG: Record<ResourceKind, KindConfig> = {
-  agent: { title: 'Agent 中心', sub: '集中管理智能体 · 灵活配置 · 即调即用', noun: 'Agent', t: 'var(--t-agent)', c: 'var(--c-agent)' },
-  skill: { title: 'Skills 中心', sub: '把可复用的操作经验沉淀成技能，团队随取随用', noun: 'Skill', t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
-  script: { title: 'Script 中心', sub: '集中管理脚本 · 支持多语言 · 快速复用', noun: 'Script', t: 'var(--t-reports)', c: 'var(--c-reports)' },
-  rule: { title: 'Rules 中心', sub: '把判定口径与红线固化成规则，减少来回确认', noun: 'Rule', t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
-  rag: { title: 'RAG 中心', sub: '把知识库与检索口径存成可复用资源，随手试检索', noun: 'RAG', t: 'var(--t-kb)', c: 'var(--c-kb)' },
+  agent: { sub: '管理可复用的智能体及其提示词、工具与模型配置。', noun: 'Agent', t: 'var(--t-agent)', c: 'var(--c-agent)' },
+  skill: { sub: '保存可复用的操作步骤，供团队在智能体任务中使用。', noun: 'Skill', t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
+  script: { sub: '保存和复用 Python、Bash 或 JavaScript 脚本。', noun: 'Script', t: 'var(--t-reports)', c: 'var(--c-reports)' },
+  rule: { sub: '保存测试判定标准与操作约束，供团队复用。', noun: 'Rule', t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
+  rag: { sub: '绑定知识库，保存并试用检索配置。', noun: 'RAG', t: 'var(--t-kb)', c: 'var(--c-kb)' },
 }
 
 const TOOLS = [
@@ -558,46 +554,34 @@ onMounted(reload)
 </script>
 
 <style scoped>
-.rc-page { display: flex; flex-direction: column; gap: 14px; }
-.rc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-.eyebrow { font-size: 12px; letter-spacing: .12em; color: var(--text-tertiary); text-transform: uppercase; }
-.rc-head h1 { margin: 4px 0 4px; font-size: 22px; }
-.rc-head p { margin: 0; color: var(--text-secondary); font-size: 13.5px; }
-.rc-head-actions { display: flex; gap: 8px; }
+.rc-caption { font-size: 12px; color: var(--text-secondary); }
 
-.rc-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.rc-toolbar :deep(.n-input) { max-width: 320px; }
-
-.rc-caption { margin: 0; font-size: 12.5px; color: var(--text-secondary); display: flex; gap: 10px; flex-wrap: wrap; }
-.rc-caption span { color: var(--text-tertiary); }
-
-.rc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.rc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); gap: var(--space-3); }
 .rc-card {
-  display: flex; flex-direction: column; gap: 8px;
-  border: 1px solid var(--border-subtle); border-radius: 14px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: var(--space-2);
+  min-width: 0;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: var(--space-4);
   background: var(--bg-card);
-  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+  transition: border-color .15s ease;
 }
-.rc-card:hover { border-color: var(--c); box-shadow: 0 6px 20px rgba(15, 23, 42, .06); transform: translateY(-1px); }
+.rc-card:focus-within, .rc-card:hover { border-color: var(--c); }
 .rc-card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.rc-kind {
-  flex: 0 0 auto; font-size: 11px; font-weight: 700; letter-spacing: .04em;
-  padding: 2px 7px; border-radius: 6px; background: var(--t); color: var(--c);
-}
+.rc-card-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 650; }
 .rc-vis { flex: 0 0 auto; font-size: 11px; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--border-subtle); color: var(--text-secondary); }
 .rc-vis.private { border-style: dashed; }
 .rc-name {
-  flex: 1 1 auto; min-width: 0; border: 0; background: none; padding: 0; text-align: left;
-  font-size: 14.5px; font-weight: 650; color: var(--text-primary); cursor: pointer;
+  display: block; width: 100%; border: 0; background: none; padding: 0; text-align: left;
+  color: var(--text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .rc-name:hover { color: var(--c); }
 .rc-summary {
   margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-secondary);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 40px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 40px; overflow-wrap: anywhere;
 }
 .rc-meta { display: flex; gap: 6px; font-size: 11.5px; color: var(--text-tertiary); flex-wrap: wrap; }
-.rc-actions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+.rc-meta span { min-width: 0; overflow-wrap: anywhere; }
+.rc-actions { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-top: auto; padding-top: var(--space-2); border-top: 1px solid var(--border-subtle); }
 
 .rc-empty, .rc-error { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 0; }
 .rc-error :deep(.n-alert) { max-width: 520px; }
@@ -610,6 +594,7 @@ onMounted(reload)
 .rc-modal-foot { display: flex; justify-content: flex-end; gap: 10px; }
 
 .rc-detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rc-kind { padding: 2px 7px; border-radius: var(--radius-md); background: var(--t); color: var(--c); font-size: 11px; font-weight: 700; }
 .rc-muted { color: var(--text-secondary); font-size: 12.5px; }
 .rc-detail-summary { color: var(--text-secondary); font-size: 13.5px; margin: 10px 0 6px; }
 .rc-h3 { font-size: 13px; margin: 16px 0 6px; color: var(--text-primary); }

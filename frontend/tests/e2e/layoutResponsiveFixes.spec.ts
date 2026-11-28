@@ -106,6 +106,45 @@ test.describe('窄屏与主题布局契约', () => {
     expect(sizes.shellOver).toBeLessThanOrEqual(16)    // 仅允许缩放手柄（绝对定位）外溢
   })
 
+  test('1201px 展开运行信息后对话区仍在容器内，关闭后焦点回到入口', async ({ page }) => {
+    await mockApis(page)
+    await page.addInitScript(() => localStorage.setItem('agent-loop:chat-shell-width:v3', '980'))
+    await page.setViewportSize({ width: 1201, height: 700 })
+    await page.goto('/agent')
+    const runtime = page.getByRole('button', { name: '运行信息', exact: true })
+    await runtime.click()
+    await expect(page.getByRole('complementary', { name: '运行信息' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '关闭运行信息' })).toBeFocused()
+    const edges = await page.locator('.loop-chat-shell').evaluate((shell) => {
+      const content = shell.parentElement!.getBoundingClientRect()
+      const chat = shell.getBoundingClientRect()
+      return { left: chat.left - content.left, right: content.right - chat.right }
+    })
+    expect(edges.left).toBeGreaterThanOrEqual(0)
+    expect(edges.right).toBeGreaterThanOrEqual(0)
+    await page.keyboard.press('Escape')
+    await expect(runtime).toBeFocused()
+    await expect(runtime).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  test('短屏草稿可滚动选用快捷任务，移动会话抽屉可用 Escape 关闭', async ({ page }) => {
+    await mockApis(page)
+    await page.setViewportSize({ width: 360, height: 420 })
+    await page.goto('/agent')
+    await expect(page.getByRole('heading', { name: '准备测试什么？' })).toBeInViewport()
+    await page.getByRole('button', { name: /查找参考资料/ }).click()
+    const composer = page.getByRole('textbox', { name: '消息' })
+    await expect(composer).toHaveValue('查询资料并给出可核对的来源')
+    await expect(composer).toBeFocused()
+
+    const sessions = page.getByRole('button', { name: '会话列表', exact: true })
+    await sessions.click()
+    await expect(page.getByRole('complementary', { name: '会话列表' }).getByRole('button', { name: '关闭会话列表' })).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(sessions).toBeFocused()
+    await expect(sessions).toHaveAttribute('aria-expanded', 'false')
+  })
+
   test('390px 输入区思考强度文案保持横向可读', async ({ page }) => {
     await mockApis(page)
     await page.setViewportSize({ width: 390, height: 844 })

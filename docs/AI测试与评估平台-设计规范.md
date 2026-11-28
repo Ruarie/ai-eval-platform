@@ -2,7 +2,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | V1.15 |
+| 文档版本 | V1.16 |
+| 审查日期 | 2026-11-27 |
 | 对应 PRD | V1.21（唯一产品权威） |
 | 对应开发计划 | V1.5 |
 | 撰写日期 | 2026-08-17 |
@@ -30,8 +31,8 @@
 
 ### 0.1 视觉参考允许带走的
 
-- 设计令牌、明暗 `data-theme`、body 薄荷绿波谷渐变、侧栏毛玻璃与深色右侧大圆角  
-- 260px ↔ 72px 侧栏、主区 18px 圆角悬浮  
+- 设计令牌、明暗 `data-theme`、薄荷绿和深空蓝导航底色
+- 220px ↔ 62px 侧栏、主区贴边布局
 - `/agent` 对话列最大 760px、气泡尖角、思考卡、工具卡 pending→done、进度条吸附输入区上方  
 - 字号阶梯、等宽数字、聚焦环、黑底白字发送/确认钮  
 - 工具卡「输入 / 输出 / 结果」折叠形态（用来展示本产品的 `tool_call` / `tool_result`）
@@ -323,9 +324,9 @@ host 白名单；默认 QPS≤500、时长≤30min；单价 /1k tokens；`max_ru
 浅色：`--bg-main #FFFFFF`，`--bg-elevated #F4F8F8`，`--text-primary #111827`，`--accent-ai #6366F1`，成功/警告/错误/信息 `#10B981 / #F59E0B / #EF4444 / #3B82F6`。  
 深色：`--bg-main #020617`，`--accent-ai #818CF8`。完整表见参考 `DESIGN-SPEC.md` / `VUE-PROTOTYPE-DESIGN.md` §2，实现时整段迁移，不要手改色值。
 
-body 薄荷绿波谷渐变 + 径向光晕 + 9s 饱和度呼吸；侧栏与 body 同一段渐变。深色侧栏右侧 `border-radius: 0 24px 24px 0`。`prefers-reduced-motion` 下关闭装饰动画。
+背景使用主题令牌。导航、顶栏和工作区以边线区分，弹窗与可交互浮层使用阴影。`prefers-reduced-motion` 下关闭装饰动画。
 
-全局隐藏滚动条；工具卡代码块保留 6px 条。数字加 `.mono` / `.num`。
+滚动区域保留细滚动条。长表格在自身区域内横向滚动。数字加 `.mono` / `.num`。
 
 ### 8.2 本产品模块色（替换参考文档的 smoke/api/ui）
 
@@ -345,15 +346,16 @@ body 薄荷绿波谷渐变 + 径向光晕 + 9s 饱和度呼吸；侧栏与 body 
 
 kind 色：`benchmark`→datasets，`rag`→kb，`testcase`→cases，`stress`→stress。
 
-### 8.3 骨架尺寸（参考原型，可整段抄 CSS）
+### 8.3 骨架尺寸
 
 ```
-.app: 260px 1fr；折叠 72px；过渡 .28s cubic-bezier(.4,0,.2,1)
-.main: margin 10px 10px 10px 14px；圆角 18px
-.topbar: 高 64px；页标题 20px/600
-nav-item: 高 44px，圆角 16px
+.app: 220px minmax(0, 1fr)；折叠 62px；过渡 .28s cubic-bezier(.4,0,.2,1)
+.main: 贴边布局
+.topbar: 高 56px；页标题 17px/650
+nav-item: 高 35px，圆角 10px
 /agent 内容区 padding 0
-对话列 max-width 760px
+701–1060px：导航收为带名称的图标栏
+≤700px：导航抽屉由顶栏按钮打开，支持 Escape 关闭并还原焦点
 ```
 
 聚焦环：`border-color: var(--accent-ai); box-shadow: 0 0 0 3px rgba(99,102,241,.15)`。  
@@ -361,7 +363,7 @@ nav-item: 高 44px，圆角 16px
 
 Agent 导航状态点（可选）：任务 `running` 蓝呼吸 / `succeeded` 绿 / `failed` 红 / `cancelled` 或断线 橙。语义对齐本产品任务状态，不要用原型的「生成中」冒充评测 running。
 
-字体：Inter + Noto Sans SC + Noto Serif SC + JetBrains Mono。欢迎句可用衬线大标题，文案必须是本产品名，禁止「TestPilot」。
+字体使用系统中西文字体栈。智能体的新会话标题说明当前可做的测试任务，示例可填入输入框。
 
 ### 8.4 Naive UI 主题
 
@@ -375,7 +377,7 @@ Agent 导航状态点（可选）：任务 `running` 蓝呼吸 / `succeeded` 绿
 | `bodyColor` / `cardColor` | `--bg-main` / `--bg-elevated` |
 | `borderColor` | `--border-subtle` |
 | `borderRadius` | 10px（卡片 16px 单独覆盖） |
-| `fontFamily` / `fontFamilyMono` | Inter / JetBrains Mono |
+| `fontFamily` / `fontFamilyMono` | 系统中西文字体 / 系统等宽字体 |
 
 `n-data-table` 表头 11px 大写、行悬停 `--row-hover`。不要引入 Tailwind / UnoCSS / Element Plus。
 
@@ -388,10 +390,9 @@ Agent 导航状态点（可选）：任务 `running` 蓝呼吸 / `succeeded` 绿
 | 用途 | 文案 |
 | --- | --- |
 | 产品全称 | AI 测试与评估平台 |
-| 短名（侧栏） | AI Eval |
-| 副标 | TEST & EVAL |
-| Logo | 字母 **A**（不要 T） |
-| 登录副文案 | 对话完成：用例（可选）→ Benchmark 和 / 或 RAG →（可选）压测 → 报告 |
+| 短名（侧栏） | AI 测试平台 |
+| Logo | 用例检查清单图标 |
+| 登录页引导 | 提交需求、生成用例、审核入库 |
 | 人设 | 资深评测工程师（固定，无设置项） |
 
 浏览器标题：`{页名} · AI 测试与评估平台`。
@@ -790,3 +791,15 @@ Agent 页允许的 Dialog **只有**：取消当前长任务、退出登录。�
 ## V1.15 修改代码文件与作用清单（2026-09-14）
 
 `frontend/src/components/workspace/WorkspaceImageViewer.vue`：真实像素比例、容器适配、旋转适配、指针拖动及边界校正、键盘缩放、加载失败提示和响应式工具栏。`components/agent/ImagePreviewModal.vue`：共用图片弹窗，保留焦点管理与 Esc 关闭；`MediaPreview.vue` / `AttachmentPreview.vue`：图片入口接入共用弹窗，PDF/文本预览保持不变。`utils/imageViewport.ts` / `tests/imageViewport.test.mjs`：缩放和拖动几何边界回归；`tests/image-preview-fixture.html` / `tests/e2e/imagePreview.spec.ts`：无外部依赖的真实组件浏览器测试。未改变 REST/WS 契约。
+
+## V1.16 修改代码文件与作用清单（2026-11-27）
+
+| 文件 | 作用 |
+| --- | --- |
+| `frontend/src/layouts/MainLayout.vue`、`router/index.ts` | 更新导航、页标题和操作栏。手机导航支持键盘打开、关闭和恢复焦点。能力及管理页面可由顶栏提供主标题。 |
+| `frontend/src/styles/tokens.css`、`styles/base.css` | 为浅色与深色界面统一导航、滚动条和弹窗令牌。键盘聚焦表格行时显示操作。 |
+| `frontend/index.html`、`public/favicon.svg`、`src/App.vue` | 首屏使用本机字体，浏览器标签页复用检查清单标识，分页和日期等控件使用简体中文。 |
+| `frontend/src/views/Login.vue` | 使用简洁的登录表单和三步工作流介绍。提交时显示实际请求状态，字段错误与对应输入关联。 |
+| `frontend/src/views/Agent.vue`、`components/agent/loop/AgentWorkspace.vue`、`AgentComposer.vue` | 整合会话操作、对话与轨迹切换，提供可填入输入框的任务示例。对话区按可用宽度布局，支持短屏滚动与运行信息侧栏。 |
+| `frontend/src/views/Cases.vue`、`styles/views/cases.css` | 窄屏用例集列表可折叠。筛选、编辑、保存和入库按钮按操作分组，表格在自身区域内滚动。 |
+| `frontend/src/views/AdminAudit.vue`、`AdminResources.vue`、`ResourceCenter.vue`、`ResourcePlaza.vue`、`styles/components/workbench.css` | 复用筛选栏和表格样式，表格支持键盘横滚，资源卡片适配窄屏并支持键盘访问。 |

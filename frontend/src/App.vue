@@ -1,5 +1,5 @@
 <template>
-  <n-config-provider :theme="naiveTheme" :theme-overrides="themeOverrides">
+  <n-config-provider :theme="naiveTheme" :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
     <n-message-provider>
       <n-dialog-provider>
         <router-view />
@@ -10,7 +10,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { darkTheme } from 'naive-ui'
+import { darkTheme, dateZhCN, zhCN } from 'naive-ui'
 import { darkThemeOverrides, themeOverrides as lightThemeOverrides } from './naive-theme'
 import { useThemeStore } from './stores/theme'
 

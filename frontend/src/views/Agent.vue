@@ -1,11 +1,27 @@
 <template>
-  <div class="agent-layout" :class="{ 'no-list': isListCollapsed }">
-    <!-- 左侧会话列表轨 (264px) -->
-    <aside class="session-list" data-od-id="session-list">
+  <div class="agent-layout" :class="{ 'no-list': isListCollapsed }" @keydown.esc="closeSessionDrawer">
+    <aside id="agent-session-list" class="session-list" data-od-id="session-list" aria-label="会话列表" :inert="isListCollapsed">
       <div class="session-list-head">
+        <div class="session-list-heading">
+          <h2>会话</h2>
+          <button
+            ref="drawerCloseButton"
+            class="session-drawer-close-btn mobile-only"
+            type="button"
+            aria-label="关闭会话列表"
+            @click="closeSessionDrawer"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
         <div class="session-list-top-row">
-          <button class="btn btn-secondary session-create-btn" @click="handleCreateSession">
-            + 新建会话
+          <button class="btn btn-primary session-create-btn" type="button" @click="handleCreateSession">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            新建会话
           </button>
           <!-- 对话状态筛选下拉菜单 -->
           <n-dropdown
@@ -18,6 +34,7 @@
               type="button"
               :class="{ active: sessionStatusFilter !== 'all' }"
               :title="`会话状态筛选：当前为 ${currentSessionStatusFilterLabel}`"
+              :aria-label="`会话状态筛选：${currentSessionStatusFilterLabel}`"
             >
               <i v-if="sessionStatusFilter !== 'all'" class="nav-dot" :class="sessionStatusFilter"></i>
               <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -29,13 +46,6 @@
               </svg>
             </button>
           </n-dropdown>
-          <button
-            class="session-drawer-close-btn mobile-only"
-            title="关闭会话列表"
-            @click="isListCollapsed = true"
-          >
-            ✕
-          </button>
         </div>
         <div v-if="deletableSessionCount" class="session-batch-toolbar">
           <label class="session-select-all">
@@ -44,7 +54,7 @@
               :checked="allDeletableSessionsSelected"
               @change="handleSelectAllChange"
             />
-            <span>{{ selectedSessionIds.length ? `已选 ${selectedSessionIds.length} 个` : '选择会话' }}</span>
+            <span>{{ selectedSessionIds.length ? `已选 ${selectedSessionIds.length} 个` : '全选会话' }}</span>
           </label>
           <button
             v-if="selectedSessionIds.length"
@@ -63,99 +73,93 @@
           :key="s.id"
           class="session-item"
           :class="{ active: currentSessionId === s.id }"
-          role="button"
-          tabindex="0"
-          :aria-current="currentSessionId === s.id ? 'true' : undefined"
-          :aria-label="`打开会话：${displaySessionTitle(s)}`"
-          @click="selectSession(s.id)"
-          @keydown.enter.prevent="selectSession(s.id)"
-          @keydown.space.prevent="selectSession(s.id)"
         >
-          <div class="session-title">
-            <input
-              v-if="s.can_delete"
-              class="session-select"
-              type="checkbox"
-              :checked="selectedSessionIds.includes(s.id)"
-              :aria-label="`选择会话：${displaySessionTitle(s)}`"
-              @click.stop
-              @change="toggleSessionSelected(s.id)"
-            />
+          <input
+            v-if="s.can_delete"
+            class="session-select"
+            type="checkbox"
+            :checked="selectedSessionIds.includes(s.id)"
+            :aria-label="`选择会话：${displaySessionTitle(s)}`"
+            @change="toggleSessionSelected(s.id)"
+          />
+          <button
+            class="session-open"
+            type="button"
+            :aria-current="currentSessionId === s.id ? 'true' : undefined"
+            :aria-label="`打开会话：${displaySessionTitle(s)}`"
+            @click="selectSession(s.id)"
+          >
             <span class="session-title-text">{{ displaySessionTitle(s) }}</span>
-            <span v-if="s.visibility === 'team'" class="session-team-badge">团队</span>
-            <span
-              v-if="s.workspace_id"
-              class="session-ws-badge"
-              :title="s.workspace_name ? '绑定工作区：' + s.workspace_name : '绑定工作区'"
-              >{{ s.workspace_name || '工作区' }}</span
+            <span class="session-details">
+              <time class="session-time" :datetime="s.created_at">{{ formatSessionDate(s.created_at) }}</time>
+              <span v-if="s.visibility === 'team'" class="session-team-badge">团队</span>
+              <span v-if="s.workspace_id" class="session-ws-badge" :title="s.workspace_name || '已绑定工作区'">
+                {{ s.workspace_name || '工作区' }}
+              </span>
+            </span>
+          </button>
+          <div class="session-meta-right">
+            <span class="nav-dot" :class="sessionDotClass(s)" :title="sessionDotTooltip(s)" role="img" :aria-label="sessionDotTooltip(s)"></span>
+            <button
+              v-if="s.can_delete"
+              class="session-del"
+              type="button"
+              title="软删除会话"
+              :aria-label="`删除会话：${displaySessionTitle(s)}`"
+              @click="handleDeleteSession(s.id)"
             >
-            <div class="session-meta-right">
-              <!-- D5 会话状态点多态：常驻显示 ready(就绪) / running(进行中) / succeeded(成功) / failed(失败) / offline(断线) -->
-              <i class="nav-dot" :class="sessionDotClass(s)" :title="sessionDotTooltip(s)"></i>
-              <button
-                v-if="s.can_delete"
-                class="session-del"
-                title="软删除会话"
-                @click.stop="handleDeleteSession(s.id)"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                  <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div class="row-between" style="margin-top: 2px">
-            <span class="session-time">{{ formatSessionDate(s.created_at) }}</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+              </svg>
+            </button>
           </div>
         </div>
         <div v-if="filteredSessions.length === 0" class="session-empty-filter">
-          <span>暂无匹配状态的会话</span>
+          <p role="status">{{ emptySessionMessage }}</p>
+          <button v-if="sessionsLoadFailed" class="btn btn-sm btn-secondary" type="button" @click="loadSessions">重新加载</button>
         </div>
       </div>
     </aside>
 
     <!-- 中间对话主区 -->
-    <section class="chat-main">
-      <!-- 头部 -->
-      <div class="chat-head" data-od-id="chat-head">
-        <button
-          class="composer-btn"
-          title="折叠/展开会话列表"
-          style="width: 30px; height: 30px; flex-basis: 30px; border-radius: 8px"
-          @click="toggleSessionList"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M4 6h16M4 12h10M4 18h16" />
-          </svg>
-        </button>
-        <span class="chat-head-title">{{ displaySessionTitle(currentSession) }}</span>
-        <span v-if="currentSession?.visibility === 'team'" class="chat-team-badge">团队共享</span>
-        <span
-          v-if="currentSession?.workspace_id && currentSession?.workspace_name"
-          class="chat-ws-chip"
-          :title="'会话绑定工作区：' + currentSession.workspace_name + '（模型的文件读写与 bash 均在此进行，创建后不可更改）'"
-          >工作区 · {{ currentSession.workspace_name }}</span
-        >
-        <span class="grow"></span>
-        <button
-          v-if="currentSessionId"
-          class="btn btn-sm btn-ghost"
-          title="查看已持久化的历史回合轨迹"
-          @click="traceOpen = true"
-        >
-          历史轨迹
-        </button>
-        <button
-          v-if="currentSession?.can_manage"
-          class="btn btn-sm btn-ghost"
-          :title="currentSession.visibility === 'team' ? '收回团队共享' : '向团队共享此会话'"
-          @click="toggleSessionSharing"
-        >
-          {{ currentSession.visibility === 'team' ? '仅自己' : '共享团队' }}
-        </button>
-      </div>
-
-      <AgentWorkspace :session-id="currentSessionId" :session="currentSession" :store="loopStore" :create-session="createLoopSession" />
+    <section class="chat-main" :inert="isMobileDrawerActive">
+      <AgentWorkspace :session-id="currentSessionId" :session="currentSession" :store="loopStore" :create-session="createLoopSession">
+        <template #session-heading>
+          <div class="chat-head" data-od-id="chat-head">
+            <button
+              ref="sessionListToggle"
+              class="session-panel-toggle"
+              type="button"
+              title="折叠/展开会话列表"
+              aria-label="会话列表"
+              aria-controls="agent-session-list"
+              :aria-expanded="!isListCollapsed"
+              @click="toggleSessionList"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="M9 5v14" />
+              </svg>
+            </button>
+            <span class="chat-head-title" :title="displaySessionTitle(currentSession)">{{ displaySessionTitle(currentSession) }}</span>
+            <span v-if="currentSession?.visibility === 'team'" class="chat-team-badge">团队共享</span>
+          </div>
+        </template>
+        <template v-if="currentSessionId" #session-actions>
+          <button class="btn btn-sm btn-ghost chat-action" type="button" title="查看历史回合轨迹" @click="traceOpen = true">
+            历史轨迹
+          </button>
+          <button
+            v-if="currentSession?.can_manage"
+            class="btn btn-sm btn-ghost chat-action"
+            type="button"
+            :title="currentSession.visibility === 'team' ? '收回团队共享' : '向团队共享此会话'"
+            @click="toggleSessionSharing"
+          >
+            {{ currentSession.visibility === 'team' ? '仅自己' : '共享团队' }}
+          </button>
+        </template>
+      </AgentWorkspace>
     </section>
 
     <TraceHistoryDrawer
@@ -165,16 +169,19 @@
     />
 
     <!-- 移动端侧边栏抽屉遮罩层 (点击遮罩收起所有侧边栏) -->
-    <div
+    <button
       v-if="isMobileDrawerActive"
       class="agent-mobile-backdrop"
-      @click="closeMobileDrawers"
-    ></div>
+      type="button"
+      aria-label="关闭会话列表"
+      tabindex="-1"
+      @click="closeSessionDrawer"
+    ></button>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, h } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch, h } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMessage, useDialog, NDropdown, type DropdownOption } from 'naive-ui'
 import { api } from '../api/http'
@@ -190,25 +197,44 @@ const dialog = useDialog()
 const route = useRoute()
 const authStore = useAuthStore()
 
-const isListCollapsed = ref(typeof window !== 'undefined' && window.innerWidth <= 768)
+const sessionDrawerMedia = window.matchMedia('(max-width: 768px)')
+const narrowViewport = ref(sessionDrawerMedia.matches)
+const desktopListCollapsed = ref(false)
+const mobileListOpen = ref(false)
+const sessionListToggle = ref<HTMLButtonElement>()
+const drawerCloseButton = ref<HTMLButtonElement>()
+const isMobileDrawerActive = computed(() => narrowViewport.value && mobileListOpen.value)
+const isListCollapsed = computed(() => narrowViewport.value ? !mobileListOpen.value : desktopListCollapsed.value)
 
-/** 移动端抽屉遮罩层显隐状态：在窄屏下有任一侧边栏抽屉展开时激活 */
-const isMobileDrawerActive = computed(() => {
-  if (typeof window === 'undefined') return false
-  const isMobile = window.innerWidth <= 768
-  return isMobile && !isListCollapsed.value
-})
+function updateSessionDrawerViewport(event: MediaQueryListEvent) {
+  narrowViewport.value = event.matches
+  mobileListOpen.value = false
+}
 
-function closeMobileDrawers() {
-  isListCollapsed.value = true
+function closeSessionDrawer() {
+  if (!isMobileDrawerActive.value) return
+  mobileListOpen.value = false
+  void nextTick(() => sessionListToggle.value?.focus())
 }
 
 function toggleSessionList() {
-  isListCollapsed.value = !isListCollapsed.value
+  if (narrowViewport.value) {
+    mobileListOpen.value = true
+    void nextTick(() => drawerCloseButton.value?.focus())
+    return
+  }
+  desktopListCollapsed.value = !desktopListCollapsed.value
 }
 
 
 const sessions = ref<AgentSession[]>([])
+const loadingSessions = ref(true)
+const sessionsLoadFailed = ref(false)
+const emptySessionMessage = computed(() => {
+  if (loadingSessions.value) return '正在加载会话…'
+  if (sessionsLoadFailed.value) return '会话列表加载失败'
+  return sessions.value.length ? '暂无符合筛选条件的会话' : '新建的会话会显示在这里'
+})
 /** 会话状态筛选当前选项：all | running | ready | succeeded | failed */
 const sessionStatusFilter = ref<string>('all')
 
@@ -311,13 +337,18 @@ function resetToDraftSession() {
 }
 
 async function loadSessions() {
+  loadingSessions.value = true
+  sessionsLoadFailed.value = false
   try {
     const list = await api.sessions.list()
     // 历史 legacy 会话保留在服务端审计数据中，但不再进入唯一的 AgentLoop 工作台。
     sessions.value = (list || []).filter((session) => session.engine_version === 'agent_loop_v2')
   } catch {
     // 加载失败不能表现成「没有任何会话」：保留原有列表并提示，避免用户误以为数据丢失。
+    sessionsLoadFailed.value = true
     message.error('会话列表加载失败，请稍后重试')
+  } finally {
+    loadingSessions.value = false
   }
 }
 
@@ -328,13 +359,14 @@ async function selectSession(sid: string) {
   // 列表已过滤历史会话；双重守卫确保任何残留点击也不会落到旧 WS transport。
   if (!selected || selected.engine_version !== 'agent_loop_v2') return
   // 移动端会话列表是覆盖式抽屉，选中会话后自动收起让出对话区。
-  if (typeof window !== 'undefined' && window.innerWidth <= 768) isListCollapsed.value = true
+  closeSessionDrawer()
   currentSessionId.value = sid
   loopStore.open(sid)
 }
 
 /** 打开一个新的本地草稿；服务端会话在用户真正发送消息时才创建。 */
 function handleCreateSession() {
+  closeSessionDrawer()
   sessionStatusFilter.value = 'all'
   resetToDraftSession()
   // 清除未持久化 AgentLoop 草稿及其对象 URL；已建会话的连接和草稿保持不动。
@@ -476,6 +508,7 @@ function handleSelectAllChange(event: Event) {
 }
 
 onMounted(async () => {
+  sessionDrawerMedia.addEventListener('change', updateSessionDrawerViewport)
   await loadSessions()
   // 全局搜索直达：有效会话优先打开，避免被草稿态覆盖。
   const targetSessionId = String(route.query.session_id || '')
@@ -501,6 +534,7 @@ watch(() => route.query.session_id, async (sid) => {
 })
 
 onBeforeUnmount(() => {
+  sessionDrawerMedia.removeEventListener('change', updateSessionDrawerViewport)
   loopStore.close()
   window.clearInterval(idleTimer)
 })
@@ -520,7 +554,90 @@ function handleInterpretReport(reportId: string) {
   min-height: 0;
 }
 
-/* 团队共享会话的轻量状态标识，避免把私有/共享混在同一种列表视觉中。 */
+.session-list {
+  background: color-mix(in srgb, var(--bg-elevated) 68%, var(--bg-main));
+}
+
+.session-list-head {
+  padding: 14px 12px 10px;
+}
+
+.session-list-heading {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.session-list-heading h2 {
+  margin: 0;
+  padding-inline: 3px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.session-create-btn {
+  gap: 6px;
+  padding-inline: 8px;
+}
+
+.session-create-btn svg { flex-shrink: 0; }
+
+.session-list-top-row .session-filter-btn { background: var(--bg-main); }
+.session-list-top-row .session-filter-btn.active { background: var(--t-agent); }
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px;
+  border-radius: var(--radius-lg);
+  cursor: default;
+}
+
+.session-item:hover, .session-item:focus-within { background: var(--bg-main); }
+.session-item.active { background: var(--t-agent); }
+
+.session-open {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  min-height: 52px;
+  align-content: center;
+  gap: 3px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  padding: 5px 2px;
+  text-align: start;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.session-item.active .session-open {
+  color: var(--c-agent);
+  font-weight: 650;
+}
+
+.session-details {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.session-time {
+  flex: none;
+  margin: 0;
+  font-family: var(--font-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.session-item.active .session-time { opacity: 1; }
+
 .session-team-badge,
 .chat-team-badge {
   display: inline-flex;
@@ -539,36 +656,18 @@ function handleInterpretReport(reportId: string) {
   font-size: 11px;
 }
 
-/* F3/G5：会话绑定工作区标识（列表 badge / 顶栏 chip / 草稿选择面板）。 */
 .session-ws-badge {
-  display: inline-flex;
-  align-items: center;
-  max-width: 120px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   border-radius: 999px;
-  color: var(--c-success, #188038);
-  background: var(--t-success, rgba(24, 128, 56, 0.12));
+  color: var(--text-secondary);
+  background: var(--bg-main);
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
   padding: 3px 6px;
-}
-
-.chat-ws-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border-radius: 999px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
-  padding: 4px 8px;
-  white-space: nowrap;
 }
 
 .session-meta-right .nav-dot {
@@ -583,20 +682,57 @@ function handleInterpretReport(reportId: string) {
   border-radius: 50%;
 }
 
-/* 移动端：顶栏 58px 且无外边距，对话区高度改用 dvh；头部操作收紧与安全区适配 */
+.session-meta-right { gap: 2px; }
+
+.session-item .session-del {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+}
+
+.session-empty-filter p { margin: 0 0 8px; }
+
+.chat-head {
+  min-width: 0;
+  min-height: 34px;
+  height: auto;
+  flex: 1;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+}
+
+.chat-head-title { min-width: 0; }
+
+.session-panel-toggle {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 0;
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.session-panel-toggle:hover, .session-panel-toggle[aria-expanded='true']:active {
+  background: var(--t-agent);
+  color: var(--c-agent);
+}
+
+.chat-action { white-space: nowrap; }
+.agent-mobile-backdrop { border: 0; }
+
+@media (hover: hover) and (pointer: fine) {
+  .session-del { opacity: 0; }
+  .session-item:hover .session-del, .session-item:focus-within .session-del { opacity: 1; }
+}
+
 @media (max-width: 768px) {
-  .agent-layout {
-    height: calc(100dvh - 58px);
-  }
-  .chat-head-title {
-    max-width: calc(100vw - 200px);
-  }
-  .session-item {
-    min-height: 42px;
-    padding: 8px 10px;
-  }
-  .session-title {
-    font-size: 13.5px;
-  }
+  .session-panel-toggle { flex-basis: 38px; width: 38px; height: 38px; }
+  .chat-action { padding-inline: 6px; font-size: 12px; }
 }
 </style>

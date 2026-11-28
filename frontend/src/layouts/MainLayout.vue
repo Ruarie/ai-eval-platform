@@ -1,17 +1,21 @@
 <template>
   <div class="app" :class="{ folded: theme.collapsed }">
     <!-- 侧边栏 -->
-    <button v-if="mobileNavOpen" class="mobile-nav-backdrop" aria-label="关闭导航菜单" @click="closeMobileNavigation"></button>
-    <aside class="sidebar" :class="{ 'mobile-open': mobileNavOpen }">
-      <div class="brand" @click="theme.toggleCollapsed()" title="点击折叠/展开侧栏">
-        <div class="brand-mark">A</div>
-        <div class="brand-text">
-          <div class="brand-name">AI Eval</div>
-          <div class="brand-sub">TEST & EVAL</div>
-        </div>
+    <div v-if="mobileNavOpen" class="mobile-nav-backdrop" aria-hidden="true" @click="closeMobileNavigation"></div>
+    <aside id="platform-nav" class="sidebar" :class="{ 'mobile-open': mobileNavOpen }" :inert="isMobileViewport && !mobileNavOpen">
+      <div class="sidebar-head">
+        <router-link class="brand" to="/agent" aria-label="AI 测试平台首页" @click="closeMobileNavigation">
+          <img class="brand-mark" src="/favicon.svg" width="34" height="34" alt="" />
+          <span class="brand-name">AI 测试平台</span>
+        </router-link>
+        <button ref="mobileCloseRef" class="topbar-icon-btn mobile-nav-close" type="button" aria-label="关闭导航菜单" @click="closeMobileNavigation">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="m6 6 12 12M6 18 18 6" />
+          </svg>
+        </button>
       </div>
 
-      <nav class="nav">
+      <nav class="nav" aria-label="主导航">
         <!-- 分组导航：所有业务路由必须有入口，历史页面显式标注，避免出现只能手输 URL 的孤立页。 -->
         <template v-for="group in visibleNavGroups" :key="group.title">
           <div class="nav-group">{{ group.title }}</div>
@@ -21,10 +25,11 @@
             :to="item.path"
             class="nav-item"
             :class="{ active: isRouteActive(item.path) }"
-            :style="isRouteActive(item.path) ? { '--t': item.t, '--c': item.c } : {}"
+            :aria-label="item.label"
+            :title="item.label"
             @click="closeMobileNavigation"
           >
-            <span class="nav-ico">
+            <span class="nav-ico" aria-hidden="true">
               <component :is="item.icon" />
             </span>
             <span class="nav-label">{{ item.label }}</span>
@@ -34,19 +39,19 @@
 
       <!-- 侧边栏底部：折叠按钮（对齐原型 sidebar-fold）+ 用户信息 -->
       <div class="sidebar-foot">
-        <button class="sidebar-fold" title="折叠 / 展开导航栏（260px ⇄ 72px）" @click="theme.toggleCollapsed()">
+        <button class="sidebar-fold" type="button" :title="foldLabel" :aria-label="foldLabel" :aria-expanded="!theme.collapsed" @click="theme.toggleCollapsed()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="m14 6-6 6 6 6" />
           </svg>
-          <span class="fold-label">收起导航</span>
+          <span class="fold-label">{{ foldLabel }}</span>
         </button>
         <div class="user-card">
-          <div class="avatar">{{ userInitial }}</div>
+          <div class="avatar" aria-hidden="true">{{ userInitial }}</div>
           <div class="user-meta">
-            <div class="user-name">{{ auth.user?.username || 'admin' }}</div>
+            <div class="user-name">{{ userName }}</div>
             <div class="user-role">{{ roleLabel }}</div>
           </div>
-          <button class="logout-btn" @click="handleLogout" title="退出登录">
+          <button class="logout-btn" type="button" @click="handleLogout" title="退出登录" aria-label="退出登录">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
               <polyline points="16 17 21 12 16 7"></polyline>
@@ -57,44 +62,33 @@
       </div>
     </aside>
 
-    <!-- 主视口卡片 -->
-    <main class="main">
+    <main class="main" :inert="mobileNavOpen">
       <!-- 顶栏 -->
       <header class="topbar">
-        <button class="mobile-nav-toggle" title="打开导航菜单" @click="toggleMobileNavigation">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <button ref="mobileToggleRef" class="topbar-icon-btn mobile-nav-toggle" type="button" title="打开导航菜单" aria-label="打开导航菜单" aria-controls="platform-nav" :aria-expanded="mobileNavOpen" @click="openMobileNavigation">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
             <line x1="4" y1="6" x2="20" y2="6" />
             <line x1="4" y1="12" x2="20" y2="12" />
             <line x1="4" y1="18" x2="20" y2="18" />
           </svg>
         </button>
-        <div class="topbar-title">
-          <span>{{ currentTitle }}</span>
-        </div>
+        <component :is="route.meta.titleInTopbar ? 'h1' : 'div'" class="topbar-title">{{ currentTitle }}</component>
 
         <!-- 右侧操作栏 -->
         <div class="topbar-actions">
-          <!-- 站内通知：轮询未读计数，下拉看最近 8 条 -->
-          <NotificationBell />
-
           <!-- 全局搜索：Cmd/Ctrl+K 命令面板 -->
-          <button class="topbar-search-btn" title="全局搜索 (Ctrl/Cmd+K)" aria-label="全局搜索" @click="searchRef?.open()">
+          <button class="topbar-search-btn" type="button" :title="`全局搜索（${searchShortcut}）`" aria-label="全局搜索" @click="searchRef?.open()">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <circle cx="11" cy="11" r="7"></circle>
               <path d="m20 20-3.5-3.5"></path>
             </svg>
             <span class="topbar-search-text">搜索</span>
-            <kbd class="topbar-search-kbd">⌘K</kbd>
+            <kbd class="topbar-search-kbd" aria-hidden="true">{{ searchShortcut }}</kbd>
           </button>
 
-          <!-- 数据源标记 -->
-          <span
-            class="data-source-badge"
-            :class="api.isMock() ? 'mock' : 'live'"
-            :title="api.isMock() ? 'Mock 模式：使用本地数据' : '实时模式：真实连接后端 API'"
-          >
-            {{ api.isMock() ? '◆ 示例 Mock' : '● 实时 API' }}
-          </span>
+          <NotificationBell />
+
+          <span v-if="api.isMock()" class="data-source-badge" title="示例模式使用本地数据">示例数据</span>
 
           <!-- 主题切换 -->
           <button class="topbar-icon-btn" @click="theme.toggle()" :title="theme.mode === 'light' ? '切换深色模式' : '切换浅色模式'">
@@ -157,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, h } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage, useDialog } from 'naive-ui'
 import { useAuthStore } from '../stores/auth'
@@ -177,6 +171,11 @@ const searchRef = ref<InstanceType<typeof GlobalSearch> | null>(null)
 const showChangePwd = ref(false)
 const pwdLoading = ref(false)
 const mobileNavOpen = ref(false)
+const mobileToggleRef = ref<HTMLButtonElement | null>(null)
+const mobileCloseRef = ref<HTMLButtonElement | null>(null)
+const mobileViewport = window.matchMedia('(max-width: 700px)')
+const isMobileViewport = ref(mobileViewport.matches)
+const searchShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'
 const pwdForm = ref({
   oldPassword: '',
   newPassword: '',
@@ -363,55 +362,55 @@ const navGroups = [
   {
     title: '工作台',
     items: [
-      { path: '/agent', label: '智能体', icon: IconAgent, t: 'var(--t-agent)', c: 'var(--c-agent)' },
-      { path: '/cases', label: '用例', icon: IconCases, t: 'var(--t-cases)', c: 'var(--c-cases)' },
-      { path: '/case-quality', label: '用例质量', icon: IconQuality, t: 'var(--t-cases)', c: 'var(--c-cases)' },
-      { path: '/usage', label: '用量中心', icon: IconUsage, t: 'var(--t-tasks)', c: 'var(--c-tasks)' },
-      { path: '/tasks', label: '任务中心', icon: IconTasks, t: 'var(--t-tasks)', c: 'var(--c-tasks)' },
-      { path: '/dispatch', label: '调度中心', icon: IconDispatch, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)' },
+      { path: '/agent', label: '智能体', icon: IconAgent },
+      { path: '/cases', label: '用例', icon: IconCases },
+      { path: '/case-quality', label: '用例质量', icon: IconQuality },
+      { path: '/usage', label: '用量中心', icon: IconUsage },
+      { path: '/tasks', label: '任务中心', icon: IconTasks },
+      { path: '/dispatch', label: '调度中心', icon: IconDispatch },
     ],
   },
   {
     title: '能力',
     items: [
-      { path: '/plaza', label: '资源广场', icon: IconPlaza, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)' },
-      { path: '/agents', label: 'Agent 中心', icon: IconCapability, t: 'var(--t-agent)', c: 'var(--c-agent)' },
-      { path: '/skills', label: 'Skills', icon: IconSkill, t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
-      { path: '/scripts', label: 'Scripts', icon: IconScript, t: 'var(--t-reports)', c: 'var(--c-reports)' },
-      { path: '/rules', label: 'Rules', icon: IconRule, t: 'var(--t-profiles)', c: 'var(--c-profiles)' },
-      { path: '/rag', label: 'RAG 中心', icon: IconRag, t: 'var(--t-kb)', c: 'var(--c-kb)' },
-      { path: '/mcp', label: 'MCP 中心', icon: IconMcp, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
+      { path: '/plaza', label: '资源广场', icon: IconPlaza },
+      { path: '/agents', label: 'Agent 中心', icon: IconCapability },
+      { path: '/skills', label: 'Skills', icon: IconSkill },
+      { path: '/scripts', label: 'Scripts', icon: IconScript },
+      { path: '/rules', label: 'Rules', icon: IconRule },
+      { path: '/rag', label: 'RAG 中心', icon: IconRag },
+      { path: '/mcp', label: 'MCP 中心', icon: IconMcp },
     ],
   },
   {
     title: '资产与历史',
     items: [
-      { path: '/case-assets', label: '用例资产', icon: IconAsset, t: 'var(--t-cases)', c: 'var(--c-cases)' },
+      { path: '/case-assets', label: '用例资产', icon: IconAsset },
       // 历史数据集与模型对比仍可进入，但只做只读查询/维护，不再作为新建评测入口。
-      { path: '/datasets', label: '历史数据集', icon: IconDatasets, t: 'var(--t-datasets)', c: 'var(--c-datasets)' },
+      { path: '/datasets', label: '历史数据集', icon: IconDatasets },
       // PRD 5.8 路由表包含 /kb；RAG 评测停用后仍保留检索与图谱能力。
-      { path: '/kb', label: '知识库', icon: IconKnowledge, t: 'var(--t-kb)', c: 'var(--c-kb)' },
-      { path: '/reports', label: '历史报告', icon: IconReports, t: 'var(--t-reports)', c: 'var(--c-reports)' },
-      { path: '/model-compare', label: '模型对比', icon: IconCompare, t: 'var(--t-reports)', c: 'var(--c-reports)' },
+      { path: '/kb', label: '知识库', icon: IconKnowledge },
+      { path: '/reports', label: '历史报告', icon: IconReports },
+      { path: '/model-compare', label: '模型对比', icon: IconCompare },
     ],
   },
   {
     title: '协作',
     items: [
       // F1（G1）：我的工作区（用户自管数据域；管理端清理视图已于 V1.79 下线）
-      { path: '/workspaces', label: '我的工作区', icon: IconWorkspaces, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
-      { path: '/memories', label: '我的记忆', icon: IconMemories, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
-      { path: '/my-models', label: '我的模型', icon: IconProfiles, t: 'var(--t-workspaces)', c: 'var(--c-workspaces)' },
+      { path: '/workspaces', label: '我的工作区', icon: IconWorkspaces },
+      { path: '/memories', label: '我的记忆', icon: IconMemories },
+      { path: '/my-models', label: '我的模型', icon: IconProfiles },
     ],
   },
   {
     title: '管理',
     items: [
-      { path: '/admin', label: '平台概览', icon: IconOverview, t: 'var(--t-reports)', c: 'var(--c-reports)', adminOnly: true },
-      { path: '/admin/audit', label: '审计日志', icon: IconAudit, t: 'var(--t-dispatch)', c: 'var(--c-dispatch)', adminOnly: true },
-      { path: '/admin/resources', label: '资源治理', icon: IconGovern, t: 'var(--t-datasets)', c: 'var(--c-datasets)', adminOnly: true },
-      { path: '/admin/profiles', label: '模型管理', icon: IconProfiles, t: 'var(--t-profiles)', c: 'var(--c-profiles)', adminOnly: true },
-      { path: '/admin/users', label: '账号', icon: IconUsers, t: 'var(--t-users)', c: 'var(--c-users)', adminOnly: true },
+      { path: '/admin', label: '平台概览', icon: IconOverview, adminOnly: true },
+      { path: '/admin/audit', label: '审计日志', icon: IconAudit, adminOnly: true },
+      { path: '/admin/resources', label: '资源治理', icon: IconGovern, adminOnly: true },
+      { path: '/admin/profiles', label: '模型管理', icon: IconProfiles, adminOnly: true },
+      { path: '/admin/users', label: '账号', icon: IconUsers, adminOnly: true },
     ],
   },
 ]
@@ -440,10 +439,9 @@ function isRouteActive(itemPath: string): boolean {
 const currentTitle = computed(() => (route.meta.title as string) || 'AI 测试与评估平台')
 const isFlushView = computed(() => route.path.startsWith('/agent'))
 
-const userInitial = computed(() => {
-  const name = auth.user?.username || 'A'
-  return name.charAt(0).toUpperCase()
-})
+const userName = computed(() => auth.user?.display_name || auth.user?.username || '当前成员')
+const userInitial = computed(() => Array.from(userName.value)[0].toUpperCase())
+const foldLabel = computed(() => theme.collapsed ? '展开导航' : '收起导航')
 
 /** 侧栏身份展示：按后端角色映射，避免管理员也显示成「平台成员」。 */
 const roleLabel = computed(() => {
@@ -456,15 +454,41 @@ const roleLabel = computed(() => {
   return labels[auth.user?.role || 'member'] || '平台成员'
 })
 
-// 移动端侧栏改为覆盖式导航，避免占用工作区横向空间。
-function toggleMobileNavigation() {
-  mobileNavOpen.value = !mobileNavOpen.value
+async function openMobileNavigation() {
+  mobileNavOpen.value = true
+  await nextTick()
+  // 等抽屉和主区的 inert 更新后，再交接键盘焦点。
+  requestAnimationFrame(() => {
+    if (mobileNavOpen.value) mobileCloseRef.value?.focus({ preventScroll: true })
+  })
 }
 
-function closeMobileNavigation() {
-  // 路由切换或点击遮罩后关闭覆盖式移动导航。
+async function closeMobileNavigation() {
+  if (!mobileNavOpen.value) return
   mobileNavOpen.value = false
+  await nextTick()
+  requestAnimationFrame(() => {
+    if (isMobileViewport.value && !mobileNavOpen.value) mobileToggleRef.value?.focus({ preventScroll: true })
+  })
 }
+
+function dismissMobileNavigation(event: KeyboardEvent) {
+  if (event.key === 'Escape' && mobileNavOpen.value && !event.defaultPrevented) void closeMobileNavigation()
+}
+
+function handleViewportChange(event: MediaQueryListEvent) {
+  isMobileViewport.value = event.matches
+  if (!event.matches) void closeMobileNavigation()
+}
+
+onMounted(() => {
+  mobileViewport.addEventListener('change', handleViewportChange)
+  window.addEventListener('keydown', dismissMobileNavigation)
+})
+onBeforeUnmount(() => {
+  mobileViewport.removeEventListener('change', handleViewportChange)
+  window.removeEventListener('keydown', dismissMobileNavigation)
+})
 
 function handleLogout() {
   dialog.warning({
@@ -511,491 +535,381 @@ async function submitChangePassword() {
 <style scoped>
 .app {
   display: grid;
-  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
+  height: 100dvh;
   transition: grid-template-columns var(--ease-shell);
 }
 .app.folded {
-  grid-template-columns: var(--sidebar-w-fold) 1fr;
-}
-.mobile-nav-backdrop,
-.mobile-nav-toggle {
-  display: none;
+  grid-template-columns: var(--sidebar-w-fold) minmax(0, 1fr);
 }
 
 .sidebar {
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 18px 14px;
+  padding: var(--space-3);
   background: var(--sidebar-bg);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border-right: 1px solid rgba(255, 255, 255, 0.4);
-  overflow: hidden;
-  white-space: nowrap;
+  border-right: 1px solid var(--border-subtle);
 }
-
+.sidebar-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 44px;
+  margin-bottom: var(--space-2);
+  padding-inline: var(--space-1);
+}
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 4px 8px 18px;
-  cursor: pointer;
+  gap: 10px;
+  min-width: 0;
+  border-radius: var(--radius-lg);
 }
 .brand-mark {
-  width: 36px;
-  height: 36px;
-  flex: 0 0 36px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: var(--text-primary);
-  color: var(--bg-main);
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 19px;
+  flex: 0 0 34px;
 }
 .brand-name {
-  font-weight: 700;
-  font-size: 15px;
-  letter-spacing: -0.01em;
-}
-.brand-sub {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  color: var(--text-tertiary);
-}
-.app.folded .brand-text {
-  display: none;
+  color: var(--text-primary);
+  font: 700 15px/1.25 var(--font-display);
+  white-space: nowrap;
 }
 
 .nav {
-  flex: 1;
-  overflow-y: auto;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px;
 }
 .nav-group {
-  margin: 14px 10px 6px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  flex: 0 0 auto;
+  margin: 12px 8px 4px;
   color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
 }
-.app.folded .nav-group {
-  text-align: center;
-  margin-inline: 0;
-  font-size: 0;
-}
-.app.folded .nav-group::after {
-  content: '·';
-  font-size: 14px;
-}
-
 .nav-item {
-  position: relative;
   display: flex;
+  flex: 0 0 35px;
   align-items: center;
-  gap: 12px;
-  height: 44px;
-  padding: 0 12px;
-  border-radius: 12px;
+  gap: 10px;
+  padding-inline: 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .nav-item:hover {
   background: var(--row-hover);
   color: var(--text-primary);
 }
-.nav-item:active {
-  transform: scale(0.985);
-}
-.nav-item .nav-ico {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-  display: grid;
-  place-items: center;
-  transition: transform 0.18s ease, color 0.18s ease;
-}
-.nav-item .nav-ico svg {
-  width: 18px;
-  height: 18px;
-}
-.app.folded .nav-item {
-  justify-content: center;
-  padding: 0;
-}
-.app.folded .nav-item .nav-label {
-  display: none;
-}
 .nav-item.active {
-  background: var(--t, var(--t-tasks));
-  color: var(--c, var(--c-tasks));
-  font-weight: 600;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  border-color: color-mix(in srgb, var(--c-agent) 16%, var(--border-subtle));
+  background: var(--t-agent);
+  color: var(--c-agent);
+  font-weight: 650;
 }
-.nav-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 4px;
-  height: 20px;
-  background: var(--c, var(--c-tasks));
-  border-radius: 0 4px 4px 0;
+.nav-ico,
+.nav-ico svg {
+  width: 17px;
+  height: 17px;
 }
-.nav-item.active .nav-ico {
-  color: var(--c, var(--c-tasks));
-  transform: scale(1.06);
+.nav-ico {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
 }
 
 .sidebar-foot {
-  padding-top: 12px;
-  border-top: 1px solid var(--border-subtle);
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
 }
-/* 折叠按钮（对齐原型 .sidebar-fold：hover 高亮，折叠态仅留旋转箭头） */
-.sidebar-fold {
+.sidebar-fold,
+.logout-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  background: var(--bg-elevated);
+  gap: var(--space-2);
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  transition: all 0.15s ease;
 }
-.sidebar-fold:hover {
-  border-color: var(--text-tertiary);
+.sidebar-fold {
+  padding: 4px 9px;
+  font-size: 12px;
+}
+.sidebar-fold:hover,
+.logout-btn:hover {
+  background: var(--row-hover);
   color: var(--text-primary);
 }
 .sidebar-fold svg {
   width: 15px;
   height: 15px;
-  flex: 0 0 15px;
+  flex-shrink: 0;
   transition: transform var(--ease-shell);
-}
-.app.folded .sidebar-fold {
-  justify-content: center;
-  padding: 7px 0;
-}
-.app.folded .sidebar-fold .fold-label {
-  display: none;
-}
-.app.folded .sidebar-fold svg {
-  transform: rotate(180deg);
 }
 .user-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 12px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-}
-.app.folded .user-card {
-  justify-content: center;
-  padding: 8px 0;
-  background: transparent;
-  border-color: transparent;
+  gap: var(--space-2);
+  min-height: 42px;
+  padding: 4px;
 }
 .avatar {
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  border-radius: 50%;
   display: grid;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 29px;
   place-items: center;
-  background: var(--accent-solid);
-  color: #fff;
+  border-radius: var(--radius-lg);
+  background: var(--t-agent);
+  color: var(--c-agent);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .user-meta {
-  min-width: 0;
   flex: 1;
-}
-.app.folded .user-meta {
-  display: none;
+  min-width: 0;
 }
 .user-name {
-  font-size: 13px;
-  font-weight: 600;
   overflow: hidden;
+  font-size: 12px;
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .user-role {
-  font-size: 11px;
   color: var(--text-tertiary);
+  font-size: 11px;
 }
 .logout-btn {
-  background: none;
-  border: 0;
-  color: var(--text-tertiary);
-  display: grid;
-  place-items: center;
-  padding: 4px;
-  border-radius: 6px;
-  transition: color 0.15s ease;
+  justify-content: center;
+  width: 34px;
+  flex-shrink: 0;
+  padding: 0;
 }
 .logout-btn:hover {
   color: var(--accent-error);
 }
-.app.folded .logout-btn {
-  display: none;
-}
 
-/* ─── 主内容区 ─── */
 .main {
-  margin: 10px 10px 10px 14px;
-  border-radius: 18px;
-  background: var(--bg-main);
-  box-shadow: 0 12px 40px rgba(17, 24, 39, 0.08), 0 1px 3px rgba(17, 24, 39, 0.05);
   display: flex;
-  flex-direction: column;
-  overflow: hidden;
   min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--bg-main);
 }
 .topbar {
   position: relative;
-  height: var(--topbar-h);
-  flex: 0 0 var(--topbar-h);
+  z-index: 5;
   display: flex;
+  flex: 0 0 var(--topbar-h);
   align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-inline: var(--space-5);
   border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-main);
 }
 .topbar-title {
-  font-size: 18px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font: 650 17px/1.3 var(--font-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .topbar-actions {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-2);
 }
-
 .topbar-search-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 9px;
-  border-radius: 8px;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 8px;
   border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   color: var(--text-secondary);
   font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s ease;
+  white-space: nowrap;
 }
-
 .topbar-search-btn:hover {
-  border-color: var(--accent-ai);
-  color: var(--accent-ai);
+  border-color: var(--c-agent);
+  color: var(--c-agent);
 }
-
 .topbar-search-kbd {
   padding: 1px 4px;
   border: 1px solid var(--border-subtle);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--bg-main);
-  color: var(--text-tertiary, var(--text-secondary));
-  font: 600 9px/1.5 var(--font-mono);
+  color: var(--text-tertiary);
+  font: 600 10px/1.5 var(--font-mono);
 }
-
 .data-source-badge {
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border-subtle);
-  font: 600 11px/1 var(--font-mono);
-  letter-spacing: 0.01em;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-warning) 10%, var(--bg-main));
+  color: var(--accent-warning);
+  font-size: 11px;
+  font-weight: 600;
   white-space: nowrap;
 }
-.data-source-badge.live {
-  color: var(--c-agent);
-  background: color-mix(in srgb, var(--accent-success) 10%, transparent);
-}
-.data-source-badge.mock {
-  color: var(--accent-warning);
-  background: rgba(245, 158, 11, 0.1);
-}
-
 .content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px;
   min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-5);
 }
 .content.flush {
-  padding: 0;
   display: flex;
   flex-direction: column;
+  padding: 0;
+}
+.mobile-nav-backdrop,
+.mobile-nav-toggle,
+.mobile-nav-close {
+  display: none;
 }
 
-/* 对齐原型 shell.css：视口 ≤1200px 时导航栏自动折叠为 72px 图标栏（无论手动折叠态），>1200px 恢复 */
-@media (max-width: 1200px) and (min-width: 701px) {
-  .app,
-  .app.folded {
-    grid-template-columns: var(--sidebar-w-fold) 1fr;
+/* 自动折叠区间只显示图标，退出登录仍可使用。 */
+@media (min-width: 701px) {
+  .app.folded .sidebar-head,
+  .app.folded .sidebar-fold,
+  .app.folded .nav-item {
+    justify-content: center;
+    padding-inline: 0;
   }
-  .app .brand-text,
-  .app .nav-item .nav-label,
-  .app .user-meta,
-  .app .logout-btn,
-  .app .sidebar-fold .fold-label {
+  .app.folded .brand-name,
+  .app.folded .nav-label,
+  .app.folded .user-meta,
+  .app.folded .fold-label {
     display: none;
   }
-  .app .nav-group {
-    text-align: center;
-    margin-inline: 0;
+  .app.folded .sidebar-fold svg {
+    transform: rotate(180deg);
+  }
+  .app.folded .nav-group {
+    height: 1px;
+    margin: 8px;
+    overflow: hidden;
+    background: var(--border-subtle);
     font-size: 0;
   }
-  .app .nav-group::after {
-    content: '·';
-    font-size: 14px;
-  }
-  .app .nav-item {
+  .app.folded .user-card {
     justify-content: center;
     padding: 0;
   }
-  .app .sidebar-fold {
-    justify-content: center;
-    padding: 7px 0;
+  .app.folded .avatar {
+    display: none;
   }
-  .app .sidebar-fold svg {
-    transform: rotate(180deg);
+}
+@media (min-width: 701px) and (max-width: 1060px) {
+  .app,
+  .app.folded {
+    grid-template-columns: var(--sidebar-w-fold) minmax(0, 1fr);
   }
-  .app .user-card {
+  .sidebar-head,
+  .nav-item,
+  .user-card {
     justify-content: center;
-    padding: 8px 0;
-    background: transparent;
-    border-color: transparent;
+    padding-inline: 0;
+  }
+  .brand-name,
+  .nav-label,
+  .user-meta,
+  .sidebar-fold,
+  .avatar {
+    display: none;
+  }
+  .nav-group {
+    height: 1px;
+    margin: 8px;
+    overflow: hidden;
+    background: var(--border-subtle);
+    font-size: 0;
+  }
+  .content {
+    padding: var(--space-4);
   }
 }
 
 @media (max-width: 700px) {
   .app,
   .app.folded {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 22;
+    width: min(280px, calc(100vw - 40px));
+    transform: translateX(-100%);
+    transition: transform var(--ease-shell);
+    padding-bottom: max(var(--space-3), env(safe-area-inset-bottom));
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+  .sidebar-fold {
+    display: none;
+  }
+  .mobile-nav-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 21;
     display: block;
-    height: 100dvh;
+    background: var(--overlay);
+  }
+  .mobile-nav-toggle,
+  .mobile-nav-close {
+    display: grid;
+    flex-shrink: 0;
+  }
+  .topbar {
+    gap: 6px;
+    padding-inline: var(--space-2);
+  }
+  .topbar-title {
+    font-size: 15px;
+  }
+  .topbar-actions {
+    gap: 3px;
   }
   .topbar-search-btn {
-    width: 32px;
-    padding: 0;
+    width: 34px;
     justify-content: center;
+    padding: 0;
   }
   .topbar-search-text,
   .topbar-search-kbd {
     display: none;
   }
-  .mobile-nav-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 20;
-    border: 0;
-    background: rgba(17, 24, 39, 0.38);
-  }
-  .sidebar {
-    position: fixed;
-    inset: 0 auto 0 0;
-    z-index: 21;
-    width: min(280px, calc(100vw - 52px));
-    padding: 14px 12px;
-    transform: translateX(-105%);
-    transition: transform 0.2s ease;
-    box-shadow: 12px 0 30px rgba(17, 24, 39, 0.2);
-  }
-  .sidebar.mobile-open {
-    transform: translateX(0);
-  }
-  .app .brand-text,
-  .app .nav-item .nav-label,
-  .app .user-meta,
-  .app.folded .brand-text,
-  .app.folded .nav-item .nav-label,
-  .app.folded .user-meta {
-    display: block !important;
-  }
-  .app .nav-group,
-  .app.folded .nav-group {
-    margin: 14px 10px 6px;
-    text-align: left;
-    font-size: 10px;
-  }
-  .app .nav-group::after,
-  .app.folded .nav-group::after {
-    content: none;
-  }
-  .app .nav-item,
-  .app.folded .nav-item {
-    justify-content: flex-start !important;
-    padding: 0 12px !important;
-  }
-  .app .user-card,
-  .app.folded .user-card {
-    justify-content: flex-start;
-    padding: 8px 10px;
-    background: var(--bg-elevated);
-    border-color: var(--border-subtle);
-  }
-  .app .logout-btn,
-  .app.folded .logout-btn {
-    display: grid;
-  }
-  .main {
-    height: 100dvh;
-    margin: 0;
-    border-radius: 0;
-  }
-  .topbar {
-    height: 58px;
-    flex-basis: 58px;
-    padding: 0 10px;
-  }
-  .mobile-nav-toggle {
-    display: grid;
-    width: 34px;
-    height: 34px;
-    place-items: center;
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    background: var(--bg-main);
-    color: var(--text-secondary);
-  }
-  .topbar-title,
-  .data-source-badge {
-    display: none;
-  }
-  .topbar-actions {
-    gap: 6px;
-  }
   .content {
-    padding: 12px;
+    padding: var(--space-3);
+    padding-bottom: max(var(--space-3), env(safe-area-inset-bottom));
   }
 }
 </style>
