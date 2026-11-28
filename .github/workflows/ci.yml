@@ -208,7 +208,9 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest
+        # ruff 不在 requirements.txt 里。漏装时本步骤会以 127 失败，
+        # worker 测试不会执行，main 上的 Deploy 也会被跳过。
+        run: pip install -r requirements.txt pytest ruff==0.8.6
 
       - name: Lint (ruff)
         # worker 之前没有 lint 配置：与 api/shared 使用同一套规则（见本目录 pyproject.toml）。

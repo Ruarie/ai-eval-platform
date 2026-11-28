@@ -69,7 +69,7 @@ def generate_candidates(
         raise PreviewError("UPSTREAM", "模型未返回符合所选策略的有效用例")
     return {
         "items": [mark_pending_complete(case) for case in cases],
-        "checks": selfcheck(cases, weights=weights),
+        "checks": selfcheck(cases, weights=weights, source_text=source_text),
         "dropped": dropped,
     }
 
@@ -108,6 +108,7 @@ def _one_side(
     max_count: int,
     weights: dict[str, int],
     call_profile: Any,
+    source_text: str = "",
 ) -> dict[str, Any]:
     """跑一侧模型。失败留在该侧，不让另一侧被整单错误盖掉。"""
     started = time.perf_counter()
@@ -137,7 +138,7 @@ def _one_side(
             "ok": True,
             "model": getattr(profile, "model", "") or "",
             "items": [mark_pending_complete(case) for case in cases],
-            "checks": selfcheck(cases, weights=weights),
+            "checks": selfcheck(cases, weights=weights, source_text=source_text),
             "dropped": dropped,
             "usage": {
                 "prompt_tokens": int(usage.get("prompt_tokens") or 0),
@@ -164,7 +165,9 @@ def run_compare(
     pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="case-compare")
     try:
         futures = [
-            pool.submit(_one_side, profile, system, user_prompt, max_count, weights, call_profile)
+            pool.submit(
+                _one_side, profile, system, user_prompt, max_count, weights, call_profile, source_text,
+            )
             for profile in profiles
         ]
         runs: list[dict[str, Any]] = []
