@@ -14,6 +14,11 @@ def test_health():
     body = resp.json()
     assert body["status"] == "ok"
     assert body["version"]
+    # :8000 直连不经过 Nginx，API 自己也要带上同一组最小安全头。
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["x-frame-options"] == "SAMEORIGIN"
+    assert resp.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+    assert "frame-ancestors" in resp.headers["content-security-policy"]
 
 
 class _BrokenSession:
