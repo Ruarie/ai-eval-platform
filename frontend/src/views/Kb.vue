@@ -37,7 +37,7 @@
     <!-- 3 栏网格工作区 -->
     <div v-if="currentKb && currentKb.kind === 'lightrag'" class="kb-grid-3col">
       <!-- 1. 左栏：文档与切块流 -->
-      <div class="kb-col panel" style="overflow-y: auto; max-height: calc(100vh - 160px)">
+      <div class="kb-col panel">
         <div class="row-between mb8">
           <span class="rail-label" style="margin: 0">知识文档（{{ docs.length }}）</span>
           <button class="link-btn" style="font-size: 11px" @click="showUploadDocModal = true">+ 添加</button>
@@ -117,7 +117,7 @@
       </div>
 
       <!-- 2. 中栏：检索 Playground -->
-      <div class="kb-col panel" style="overflow-y: auto; max-height: calc(100vh - 160px)">
+      <div class="kb-col panel">
         <div class="row-between mb8">
           <span class="rail-label" style="margin: 0">检索 Playground · {{ queryMode }}</span>
           <div class="chip-group">
@@ -267,7 +267,7 @@
       </div>
 
       <!-- 3. 右栏：本次检索指标 + 黄金 QA -->
-      <div class="kb-col panel" style="overflow-y: auto; max-height: calc(100vh - 160px)">
+      <div class="kb-col panel">
         <div class="rail-label">本次检索指标 · K=5</div>
         <!-- 四个指标卡数字统一使用 accent-ai 主色，对齐原型 metric-cell 视觉。 -->
         <div class="kpi-grid mb16" style="grid-template-columns: 1fr 1fr; gap: 10px">
@@ -905,6 +905,11 @@ watch(() => route.query.kb_id, (value) => {
   grid-template-columns: 320px 1fr 340px;
   gap: 16px;
 }
+.kb-col {
+  overflow-y: auto;
+  /* 顶栏和内容区上下内边距已经占掉一截视口，再按整屏减固定值会把栏顶出可视区。 */
+  max-height: calc(100dvh - var(--topbar-h) - (2 * var(--space-5)) - 88px);
+}
 .mode-context-panel {
   max-width: 680px;
   margin: 48px auto;
@@ -923,6 +928,10 @@ watch(() => route.query.kb_id, (value) => {
 @media (max-width: 1200px) {
   .kb-grid-3col {
     grid-template-columns: 1fr;
+  }
+  /* 窄屏改成上下堆叠后，列不再限制高度，由页面自己滚动。 */
+  .kb-col {
+    max-height: none;
   }
 }
 @media (max-width: 700px) {

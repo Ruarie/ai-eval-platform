@@ -191,5 +191,6 @@ def run_compare(
         right_name=runs[1]["profile_name"] or "模型 B",
         left_ok=bool(runs[0]["ok"]),
         right_ok=bool(runs[1]["ok"]),
+        source_text=source_text,
     )
     return {"runs": runs, "comparison": comparison}

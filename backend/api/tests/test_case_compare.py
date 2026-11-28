@@ -32,6 +32,25 @@ def test_score_empty_cases_is_zero():
     assert scored["issues"] == ["未得到有效用例"]
 
 
+def test_missing_p0_cannot_keep_grade_a():
+    """结构分再高，需求里的 P0 编号没有对应用例时也不能显示 A。"""
+    source = "| FR-101 | 提交报销 | P0 |\n| FR-204 | 待审批可撤回 | P0 |"
+    weights = {"positive": 50, "negative": 50}
+    covered = score_cases([
+        _case(name="提交成功", feature_point="FR-101 提交报销"),
+        _case(name="撤回单据", feature_point="FR-204 待审批可撤回", strategy="反向"),
+    ], weights, source_text=source)
+    missing = score_cases([
+        _case(name="提交成功", feature_point="FR-101 提交报销"),
+        _case(name="附件缺失", feature_point="FR-101 必须上传附件", strategy="反向"),
+    ], weights, source_text=source)
+    assert covered["grade"] == "A"
+    assert missing["grade"] == "B"
+    assert missing["score"] <= 84.9
+    assert missing["dimensions"]["review"] == 0
+    assert any("FR-204" in issue for issue in missing["issues"])
+
+
 def test_richer_case_outranks_name_only_case():
     left = score_cases([_case()], {"positive": 100})
     right = score_cases([{"name": "只有名称", "strategy": "正向"}], {"positive": 100})
